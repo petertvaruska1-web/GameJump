@@ -366,7 +366,7 @@ scripts/                headless test and design tools
 ## Tests & tools
 
 ```bash
-npm test               # map validation + route bot + enemy AI scenarios + obstacle authority checks
+npm test               # map validation + route bot + enemy AI scenarios + obstacle authority checks + multiplayer
 npm run check:map      # validates gaps against measured jump limits, renders dist/map.svg
 npm run test:routes    # a bot drives the real controller along every route start -> finish
 npm run test:ai        # detect / chase / kill / lose-target scenarios for each enemy type
@@ -378,7 +378,10 @@ npm run test:moves     # movement: climb reach/limit/cooldown, hooking from a st
 #                        (it also prints slide length and tunnel clearance; SWEEP=1 adds more swing geometries)
 # clumsy-player check: the bot takes off 1.2 m before every edge
 SLOPPY=1.2 npx tsx scripts/bot-routes.ts
-npm run test:server    # (server running) two headless clients: join, errors, start, death, finish
+npm run test:server    # two headless clients against a server it starts itself: room codes, the
+#                        ready gate, a synchronised countdown, snapshots, a server-judged fall, a
+#                        rejected teleport, the end of a match and restarting from the results.
+#                        WS=ws://host/ws points it at a server that is already running instead.
 npm run typecheck
 ```
 
