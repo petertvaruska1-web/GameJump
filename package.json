@@ -1,0 +1,41 @@
+{
+  "name": "skyfall-escape",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Skyfall Escape - a 1-3 player co-op 3D parkour escape game (Three.js + WebSockets)",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch --clear-screen=false server/index.ts",
+    "dev:client": "vite",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/server/index.js --packages=external",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc --noEmit",
+    "sim:jumps": "tsx scripts/sim-jumps.ts",
+    "check:map": "tsx scripts/check-map.ts",
+    "test:routes": "tsx scripts/bot-routes.ts",
+    "test:ai": "tsx scripts/sim-ai.ts",
+    "test:server": "tsx scripts/smoke-server.ts",
+    "test:hazards": "tsx scripts/sim-hazards.ts",
+    "test": "npm run check:map && npm run test:routes && npm run test:ai && npm run test:hazards && npm run test:moves",
+    "test:balance": "tsx scripts/sim-enemy-balance.ts",
+    "test:moves": "tsx scripts/sim-moves.ts",
+    "sim:moves": "tsx scripts/sim-moves.ts"
+  },
+  "dependencies": {
+    "three": "^0.186.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/three": "^0.186.0",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^10.0.5",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}

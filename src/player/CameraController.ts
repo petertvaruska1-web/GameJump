@@ -1,0 +1,198 @@
+// Third-person follow camera: mouse orbit, spring-smoothed follow, look-ahead,
+// collision pull-in, jump-stable framing, sprint/fall FOV kick and landing dips.
+//
+// Everything that moves the camera is continuous: positions follow critically
+// damped springs (with velocity state), and every state-dependent offset is
+// itself smoothed, so nothing can pop when the player jumps or lands.
+
+import * as THREE from 'three';
+import { clamp, damp, lerp, wrapAngle } from '../../shared/math';
+import type { CollisionWorld, RayHit } from '../../shared/physics/world';
+
+export interface CamTarget {
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  grounded: boolean;
+  sprinting: boolean;
+  /** Riding a zip line (the camera swings in behind like on the ground). */
+  riding?: boolean;
+  /** Sliding: the camera drops with the runner. */
+  low?: boolean;
+  /** Mid dash: a brief widening of the view. */
+  dashing?: boolean;
+}
+
+const BASE_DIST = 5.0;
+const PIVOT_H = 1.55;
+/** How much of a jump's height the camera follows (the rest is absorbed so it does not bob). */
+const JUMP_FOLLOW = 0.4;
+
+/** Critically damped spring toward a target (Unity-style SmoothDamp). */
+class Spring {
+  v = 0;
+  step(cur: number, target: number, smoothTime: number, dt: number): number {
+    const st = Math.max(1e-4, smoothTime);
+    const omega = 2 / st;
+    const x = omega * dt;
+    const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    const change = cur - target;
+    const temp = (this.v + omega * change) * dt;
+    this.v = (this.v - omega * temp) * exp;
+    let out = target + (change + temp) * exp;
+    // prevent overshoot
+    if ((target - cur > 0) === (out > target)) { out = target; this.v = 0; }
+    return out;
+  }
+}
+
+export class CameraController {
+  yaw = 0;
+  pitch = -0.2;
+  private pivot = new THREE.Vector3();
+  private sx = new Spring();
+  private sy = new Spring();
+  private sz = new Spring();
+  private lookAhead = new THREE.Vector3();
+  /** Height of the ground the player last stood on (jump framing anchor). */
+  private anchorY = 0;
+  private dist = BASE_DIST;
+  private wantDist = BASE_DIST;
+  private tilt = 0;
+  private autoW = 0;
+  private fovKick = 0;
+  private shake = 0;
+  private dip = 0;
+  private dipVel = 0;
+  private readonly hit: RayHit = { dist: 0, c: null };
+  private tmp = new THREE.Vector3();
+  private initialized = false;
+  sensitivity = 1;
+  invertY = false;
+  baseFov = 74;
+  shakeEnabled = true;
+  /** Seconds since the mouse last moved the camera (drives auto-follow). */
+  private idle = 0;
+  /** Pivot height above the feet (lower while sliding). */
+  private pivotH = PIVOT_H;
+  /** 0..1 while sliding: level the view so it stays under low ceilings. */
+  private lowK = 0;
+
+  constructor(readonly camera: THREE.PerspectiveCamera) {}
+
+  reset(pos: THREE.Vector3, yaw: number) {
+    this.yaw = yaw;
+    this.pitch = -0.18;
+    this.pivot.copy(pos).y += PIVOT_H;
+    this.sx.v = this.sy.v = this.sz.v = 0;
+    this.lookAhead.set(0, 0, 0);
+    this.anchorY = pos.y;
+    this.dist = this.wantDist = BASE_DIST;
+    this.tilt = 0;
+    this.autoW = 0;
+    this.dip = this.dipVel = 0;
+    this.initialized = true;
+  }
+
+  look(dx: number, dy: number) {
+    if (dx !== 0 || dy !== 0) this.idle = 0;
+    const k = 0.0022 * this.sensitivity;
+    this.yaw -= dx * k;
+    this.pitch -= dy * k * (this.invertY ? -1 : 1);
+    this.pitch = clamp(this.pitch, -1.25, 0.95);
+  }
+
+  addShake(a: number) { if (this.shakeEnabled) this.shake = Math.min(1, this.shake + a); }
+
+  landing(impact: number) {
+    // only real drops dip the camera, and gently
+    if (impact > 8) this.dipVel -= Math.min(2.4, (impact - 8) * 0.14);
+    if (impact > 16) this.addShake(Math.min(0.4, (impact - 16) * 0.035));
+  }
+
+  /** Camera-relative basis for movement input. */
+  forward(out: THREE.Vector3) { return out.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)); }
+  right(out: THREE.Vector3) { return out.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw)); }
+
+  update(dt: number, t: CamTarget, world: CollisionWorld, time: number) {
+    if (!this.initialized) this.reset(t.pos, this.yaw);
+    if (dt <= 0) return;
+    const hs = Math.hypot(t.vel.x, t.vel.z);
+
+    // gentle auto-follow: swing in behind a runner when the mouse is left alone
+    this.idle += dt;
+    // only swing in behind a runner that is actually heading away from the camera:
+    // strafing must not drag the view round with it
+    const headingOff = hs > 0.5 ? Math.abs(wrapAngle(Math.atan2(t.vel.x, t.vel.z) - this.yaw)) : 0;
+    const autoOn = this.idle > 0.9 && hs > 3 && headingOff < 1.2 && (t.grounded || !!t.riding);
+    this.autoW += ((autoOn ? 1 : 0) - this.autoW) * damp(3, dt);
+    if (this.autoW > 0.01 && hs > 0.5) {
+      let d = Math.atan2(t.vel.x, t.vel.z) - this.yaw;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      if (Math.abs(d) < 1.75) this.yaw += d * damp(0.9, dt) * this.autoW;
+    }
+
+    // Vertical framing: while airborne the camera only follows part of the
+    // jump height, and follows fully once the player drops below take-off.
+    if (t.grounded || t.pos.y < this.anchorY) this.anchorY = t.pos.y;
+    const rise = Math.max(0, t.pos.y - this.anchorY);
+    // beyond a normal jump's height (launch pads) the camera follows all of the rise
+    this.pivotH += ((t.low ? 0.7 : PIVOT_H) - this.pivotH) * damp(t.low ? 12 : 5, dt);
+    const targetY = this.anchorY + rise * JUMP_FOLLOW + Math.max(0, rise - 1.8) * (1 - JUMP_FOLLOW) + this.pivotH;
+    // long falls and launches tighten the spring continuously so the player never leaves the frame
+    const fallK = clamp((-t.vel.y - 10) / 15, 0, 1);
+    const upK = clamp((t.vel.y - 9) / 8, 0, 1);
+    const stY = lerp(lerp(0.13, 0.05, fallK), 0.045, upK);
+
+    // horizontal: short spring + smoothed look-ahead (velocity jumps never reach the camera directly)
+    this.lookAhead.x += (t.vel.x * 0.1 - this.lookAhead.x) * damp(3, dt);
+    this.lookAhead.z += (t.vel.z * 0.1 - this.lookAhead.z) * damp(3, dt);
+    this.pivot.x = this.sx.step(this.pivot.x, t.pos.x + this.lookAhead.x, 0.07, dt);
+    this.pivot.z = this.sz.step(this.pivot.z, t.pos.z + this.lookAhead.z, 0.07, dt);
+    this.pivot.y = this.sy.step(this.pivot.y, targetY, stY, dt);
+
+    // landing dip spring
+    this.dipVel += (-this.dip * 70 - this.dipVel * 13) * dt;
+    this.dip += this.dipVel * dt;
+
+    // falling: tilt down a little to show the landing spot (smoothed both ways)
+    const tiltTarget = t.grounded ? 0 : clamp((-t.vel.y - 4) / 35, 0, 0.3);
+    this.tilt += (tiltTarget - this.tilt) * damp(t.grounded ? 2.5 : 3, dt);
+    this.lowK += ((t.low ? 1 : 0) - this.lowK) * damp(t.low ? 10 : 4, dt);
+    const pitch = lerp(clamp(this.pitch - this.tilt, -1.3, 0.95), Math.max(this.pitch, -0.04), this.lowK);
+
+    // desired distance (smoothed) and collision (pull in fast, ease out slowly)
+    const want = BASE_DIST + (t.sprinting ? 0.5 : 0) + clamp((-t.vel.y - 6) / 25, 0, 1.0) + clamp(pitch * -1.2, 0, 1.2);
+    this.wantDist += (want - this.wantDist) * damp(2.2, dt);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const dirX = -Math.sin(this.yaw) * cp, dirY = -sp, dirZ = -Math.cos(this.yaw) * cp;
+    world.raycast(this.pivot.x, this.pivot.y, this.pivot.z, dirX, dirY, dirZ, this.wantDist + 0.3, 'camera', this.hit);
+    const allowed = this.hit.c ? Math.max(0.6, this.hit.dist - 0.35) : this.wantDist;
+    // no hard snaps: obstructions pull in within a few frames, open space eases back out
+    if (allowed < this.dist) this.dist += (allowed - this.dist) * damp(28, dt);
+    else this.dist += (allowed - this.dist) * damp(3, dt);
+
+    const cam = this.camera;
+    cam.position.set(this.pivot.x + dirX * this.dist, this.pivot.y + dirY * this.dist + this.dip * 0.3, this.pivot.z + dirZ * this.dist);
+    this.tmp.set(this.pivot.x, this.pivot.y + this.dip * 0.2 + 0.15, this.pivot.z);
+    cam.lookAt(this.tmp);
+    if (this.shake > 0) {
+      const s = this.shake * this.shake * 0.06;
+      cam.rotation.x += (Math.sin(time * 71) + Math.sin(time * 37)) * s;
+      cam.rotation.y += (Math.sin(time * 53) + Math.sin(time * 29)) * s;
+      this.shake = Math.max(0, this.shake - dt * 2.4);
+    }
+    // FOV kick
+    const kick = (t.sprinting && hs > 7 ? 6 : 0) + (t.low ? 5 : 0) + (t.dashing ? 7 : 0) + clamp((-t.vel.y - 14) * 0.5, 0, 12);
+    this.fovKick += (kick - this.fovKick) * damp(3, dt);
+    const fov = this.baseFov + this.fovKick;
+    if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }
+  }
+
+  /** Detached camera used for death-by-falling: stays put and watches. */
+  watch(dt: number, from: THREE.Vector3, target: THREE.Vector3) {
+    const cam = this.camera;
+    cam.position.lerp(from, damp(2, dt));
+    cam.lookAt(target);
+  }
+}

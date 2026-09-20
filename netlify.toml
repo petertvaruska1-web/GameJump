@@ -1,0 +1,31 @@
+# Netlify build settings, read straight from the repository.
+#
+# Why the preview was a white page: with no settings, Netlify publishes the
+# repository root, which serves the development index.html -- the one that
+# points at /src/main.ts. Browsers cannot run TypeScript, so nothing renders.
+# The build below produces the real static bundle in dist/client (plain JS and
+# CSS, hashed filenames) and publishes that folder instead.
+
+[build]
+  command = "npm run build:client"
+  publish = "dist/client"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# One page: any path serves the app rather than Netlify's 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Hashed bundles can be cached forever; the entry page must never be.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    cache-control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    cache-control = "no-cache"
