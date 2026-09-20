@@ -60,10 +60,11 @@ export class UI {
       <div class="hud-players"></div>
       <div class="hud-objective"></div>
       <div class="hud-timer"></div>
+      <div class="hud-area"><span class="area-name"></span><i class="area-bar"><b></b></i></div>
       <div class="hud-center"></div>
       <div class="hud-bottom"></div>
       <div class="hud-powers"></div>
-      <div class="hud-reticle hidden"><span>E</span></div>
+      <div class="hud-reticle hidden"><span>RMB</span></div>
       <div class="toast-stack"></div>
       <div class="capture-hint hidden">Click to capture the mouse</div>
       <div id="debug" class="hidden"></div>
@@ -298,6 +299,25 @@ export class UI {
     this.objectiveTimer = window.setTimeout(() => { o.style.opacity = '0'; }, seconds * 1000);
   }
 
+  /**
+   * Where the runner is and how far along the course, under the timer. The name
+   * flares on entering a new area and then settles to a glanceable label, so it
+   * marks the moment without becoming another thing flashing mid-run.
+   */
+  area(name: string | null, progress: number) {
+    const box = this.hud.querySelector<HTMLElement>('.hud-area')!;
+    const label = box.querySelector<HTMLElement>('.area-name')!;
+    box.querySelector<HTMLElement>('.area-bar > b')!.style.width = `${(Math.max(0, Math.min(1, progress)) * 100).toFixed(1)}%`;
+    if (name === null) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    if (label.textContent === name) return;
+    label.textContent = name;
+    // restart the flare animation even when the class is already there
+    label.classList.remove('flare');
+    void label.offsetWidth;
+    label.classList.add('flare');
+  }
+
   big(text: string, cls = '', sub = '', seconds = 0) {
     const c = this.hud.querySelector('.hud-center')!;
     c.innerHTML = `<div class="big-msg ${cls}">${esc(text)}</div>${sub ? `<div class="sub-msg">${esc(sub)}</div>` : ''}`;
@@ -322,12 +342,17 @@ export class UI {
     }).join('');
   }
 
-  /** Grapple reticle at screen position (x, y) in pixels, or hidden. */
-  reticle(x: number | null, y = 0, hooked = false) {
+  /**
+   * Grapple reticle at screen position (x, y) in pixels, or hidden. `edge` means
+   * the anchor itself is off-screen and the marker has been pulled to the border,
+   * so it still points at a hook you can fire without looking straight at it.
+   */
+  reticle(x: number | null, y = 0, hooked = false, edge = false) {
     const r = this.hud.querySelector<HTMLElement>('.hud-reticle')!;
     if (x === null) { r.classList.add('hidden'); return; }
     r.classList.remove('hidden');
     r.classList.toggle('hooked', hooked);
+    r.classList.toggle('edge', edge);
     r.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px) translate(-50%, -50%)`;
   }
 

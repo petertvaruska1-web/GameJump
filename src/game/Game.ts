@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GRAPPLE, NET, POWER } from '../../shared/constants';
 import { getLevel } from '../../shared/level/map/index';
 import type { LevelData, PowerKind } from '../../shared/level/types';
+import { zoneAt } from '../../shared/hazards';
 import { clamp, damp } from '../../shared/math';
 import { Anim, type MoveInput } from '../../shared/physics/character';
 import { CollisionWorld, type RayHit } from '../../shared/physics/world';
@@ -34,6 +35,20 @@ const POWER_TIP: Record<PowerKind, string> = {
   cloak: `Enemies cannot see you for ${POWER.CLOAK_TIME} s`,
   jet: `Jump once more in mid-air for ${POWER.JET_TIME} s`,
 };
+
+/**
+ * Is a timed power (cloak, jet boots) running at this match time? `until` is 0
+ * until a crate is actually taken, and the match clock counts *up through zero*
+ * during the countdown, so a bare `mt < until` reports both as active on the
+ * start line of every run.
+ */
+function timedPower(until: number, mt: number) { return until > 0 && mt < until; }
+
+/** How long a new area name has to hold before the HUD calls it out (anti-flicker on zone seams). */
+const HUD_AREA_SETTLE = 0.35;
+
+/** Keeps an off-screen grapple marker fully inside the view when it is pinned to the border. */
+const RETICLE_MARGIN = 34;
 
 const tmpV = new THREE.Vector3();
 const tmpF = new THREE.Vector3();
@@ -85,6 +100,10 @@ export class Game {
   private lastHud = '';
   private matchTime = 0;
   private gustCooldown = new Map<number, number>();
+  /** Named area shown on the HUD, and the candidate waiting to settle into it. */
+  private shownArea: string | null = null;
+  private pendingArea: string | null = null;
+  private pendingAreaFor = 0;
   private readonly deadSpot = new THREE.Vector3();
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, private settings: Settings) {
@@ -492,8 +511,16 @@ export class Game {
       const g = this.level.grapples[this.grappleTarget];
       tmpV.set(g.p[0], g.p[1], g.p[2]).project(this.r.camera);
       const el = this.r.renderer.domElement;
-      if (tmpV.z < 1) this.ui.reticle((tmpV.x + 1) / 2 * el.clientWidth, (1 - tmpV.y) / 2 * el.clientHeight, hooked);
-      else this.ui.reticle(null);
+      const w = el.clientWidth, h = el.clientHeight;
+      // Anchors hang high overhead and can be hooked without looking up, so a
+      // target that projects outside the view (or behind the camera, where the
+      // projection mirrors) is pinned to the border instead of vanishing.
+      const behind = tmpV.z >= 1;
+      let sx = (tmpV.x + 1) / 2 * w, sy = (1 - tmpV.y) / 2 * h;
+      if (behind) { sx = w - sx; sy = h - sy; }
+      const m = RETICLE_MARGIN;
+      const cx = clamp(sx, m, w - m), cy = clamp(sy, m, h - m);
+      this.ui.reticle(cx, cy, hooked, behind || cx !== sx || cy !== sy);
     } else this.ui.reticle(null);
     const can = !this.paused && !this.debug.freeCam;
     if (local && can && this.input.mouseRightPressed && !local.dead && !local.finished) {
@@ -533,18 +560,18 @@ export class Game {
     // powers: motor, runner visuals and HUD
     const me = this.powerOf(this.meId);
     if (local) {
-      local.motor.jetBoots = mt < me.jetUntil;
-      local.model.setPowers(me.shield && !local.dead, mt < me.cloakUntil ? 0.65 : 0, mt < me.jetUntil);
+      local.motor.jetBoots = timedPower(me.jetUntil, mt);
+      local.model.setPowers(me.shield && !local.dead, timedPower(me.cloakUntil, mt) ? 0.65 : 0, timedPower(me.jetUntil, mt));
     }
     for (const rp of this.remotes.values()) {
       const ps = this.powerOf(rp.id);
-      rp.model.setPowers(ps.shield && rp.status === Status.Alive, mt < ps.cloakUntil ? 0.85 : 0, mt < ps.jetUntil);
+      rp.model.setPowers(ps.shield && rp.status === Status.Alive, timedPower(ps.cloakUntil, mt) ? 0.85 : 0, timedPower(ps.jetUntil, mt));
     }
     const hud: { name: string; color: string; remaining?: number; total?: number }[] = [];
     if (local && !local.dead) {
       if (me.shield) hud.push({ name: POWER_NAME.shield, color: POWER_CSS.shield });
-      if (mt < me.cloakUntil) hud.push({ name: POWER_NAME.cloak, color: POWER_CSS.cloak, remaining: me.cloakUntil - mt, total: POWER.CLOAK_TIME });
-      if (mt < me.jetUntil) hud.push({ name: POWER_NAME.jet, color: POWER_CSS.jet, remaining: me.jetUntil - mt, total: POWER.JET_TIME });
+      if (timedPower(me.cloakUntil, mt)) hud.push({ name: POWER_NAME.cloak, color: POWER_CSS.cloak, remaining: me.cloakUntil - mt, total: POWER.CLOAK_TIME });
+      if (timedPower(me.jetUntil, mt)) hud.push({ name: POWER_NAME.jet, color: POWER_CSS.jet, remaining: me.jetUntil - mt, total: POWER.JET_TIME });
     }
     this.ui.powers(hud);
   }
@@ -553,6 +580,9 @@ export class Game {
 
   private clearMatch() {
     this.localDeathShown = false;
+    this.shownArea = this.pendingArea = null;
+    this.pendingAreaFor = 0;
+    this.ui.area(null, 0);
     if (this.local) { this.r.scene.remove(this.local.model.root); this.local.model.dispose(); this.local = null; }
     for (const rp of this.remotes.values()) { this.r.scene.remove(rp.model.root); rp.model.dispose(); }
     this.remotes.clear();
@@ -956,6 +986,7 @@ export class Game {
 
     this.updateCamera(dt, mt);
     this.sendState(dt);
+    this.updateArea(dt);
     this.updateHud(mt);
   }
 
@@ -1034,6 +1065,24 @@ export class Game {
       v: [r(b.vel.x + b.ext.x), r(b.vel.y), r(b.vel.z + b.ext.z)],
       y: r(local.motor.yaw), a: local.anim, g: local.groundId, tm: r(this.matchTime),
     });
+  }
+
+  /**
+   * The named area under the runner, with a little hysteresis: zone rectangles
+   * butt up against each other, so running along a seam would otherwise strobe
+   * two names at each other. A name has to hold for HUD_AREA_SETTLE before it
+   * counts as having arrived somewhere.
+   */
+  private updateArea(dt: number) {
+    const local = this.local;
+    if (!local || this.phase !== 'playing' || local.finished) return;
+    const here = zoneAt(this.level, local.pos.x, local.pos.z);
+    if (here !== this.pendingArea) { this.pendingArea = here; this.pendingAreaFor = 0; }
+    else this.pendingAreaFor += dt;
+    // out over open air between two areas: keep showing the last one you were in
+    if (here !== null && here !== this.shownArea && this.pendingAreaFor >= HUD_AREA_SETTLE) this.shownArea = here;
+    const span = this.level.finish.max[2] - this.level.spawns[0][2];
+    this.ui.area(this.shownArea, span > 0 ? (local.pos.z - this.level.spawns[0][2]) / span : 0);
   }
 
   private updateHud(mt: number) {

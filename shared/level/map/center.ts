@@ -205,7 +205,7 @@ export function buildCenter(b: LevelBuilder) {
   b.deco([0, vy + 10.3, archZ], [12, 0.7, 0.8], 'concreteDark');
   b.deco([0, vy + 9.75, archZ], [0.12, 0.9, 0.12], 'steel');
   b.grapple([0, vy + 9, archZ]);
-  b.hint('grapple', 0, vy, v0 + 22, 8, 'Grapple: jump off the edge, aim at the green anchor and press E (or right mouse). Hold forward, then let go (E or Space) as you swing up.');
+  b.hint('grapple', 0, vy, v0 + 22, 8, 'Grapple: jump off the edge, aim at the green anchor and press the right mouse button. Hold forward, then let go (right mouse or Space) as you swing up.');
   const v3y = vy + 1.5;
   b.plat(0, v3y, v0 + 52, 10, 20, { mat: 'concrete', hazard: 'ns', th: 2.4 });
   b.container(-2.5, v3y, v0 + 48, 0.05);

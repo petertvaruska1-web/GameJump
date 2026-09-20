@@ -125,7 +125,7 @@ export function buildRight(b: LevelBuilder) {
   b.grapple([R1.x, swY + 9, swZ + 6], { mount: [R1.x + 4.5, -110, swZ + 6] });
   b.grapple([R1.x, swY + 10.5, swZ + 14.5], { mount: [R1.x - 4.5, -110, swZ + 14.5] });
   b.laserBar(R1.x - 1.7, swZ + 23.5, R1.x + 1.7, swZ + 23.5, swY + 2 + 1.3, [0, 0, 6.5], 4.2);
-  b.hint('grapple', R1.x, swY, swZ - 3, 6, 'Grapple: jump off the edge, aim at the green anchor and press E (or right mouse). Hold forward, then let go (E or Space) as you swing up.');
+  b.hint('grapple', R1.x, swY, swZ - 3, 6, 'Grapple: jump off the edge, aim at the green anchor and press the right mouse button. Hold forward, then let go (right mouse or Space) as you swing up.');
   b.hint('slidebar', R1.x, swY + 2, swZ + 20.5, 3, 'Chest-high beam: slide under it (C while running).');
   // chimneys
   const stacks: [number, number][] = [[R1.x - 5.5, z0 + 24], [R1.x + 6.5, z0 + 58.5], [R1.x - 6, z0 + 97]];

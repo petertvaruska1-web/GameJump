@@ -251,6 +251,13 @@ Break line of sight and they search your last known position, then walk back to 
 | **Sentinel** (ranged, 13 of them) | Stationary turret with a visible searchlight. Sees 39 m through a 90 deg cone (51 m once it is already tracking you). Charges for 0.8 s (a glowing orb), then fires a slow, visible projectile with wide aim scatter and a weak lead — about 10% per shot at 30 m if you stand still, 2–4% if you keep moving. A hit kills. |
 | **Drone** (flyer, 15 of them) | Hovers on a patrol, sees 40 m almost all round, then flies straight at you (vertically too) at 7.3 m/s and climbs over obstacles, diving at 10.2 m/s over the last 4.5 m. A sprint pulls away from one. It gives up 2 s after losing sight of you and never follows more than 32 m from its post, so breaking line of sight and putting some distance in loses it. Contact kills. |
 
+Under the run timer the HUD names the area you are in — Foundry, Smokestacks,
+Reactor Ring — flaring as you cross into it and then settling to a quiet label,
+with a hairline bar showing how far along the course you are. The 36 areas come
+straight from the level data, so they are also what teammates call places over
+voice, and `npm run check:map` fails a map edit that leaves part of the course
+unnamed.
+
 A red screen vignette and a pulsing heartbeat tell you when something is hunting you.
 A `!` or `?` above an enemy shows its state.
 

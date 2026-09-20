@@ -1,6 +1,7 @@
 // Validates the map and renders a top-down SVG overview (dist/map.svg).
 // Usage: npm run check:map
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { zoneAt } from '../shared/hazards';
 import { buildLevel, levelWarnings } from '../shared/level/map/index';
 import { CollisionWorld } from '../shared/physics/world';
 
@@ -23,6 +24,16 @@ for (const w of [...level.waypoints, ...level.spawns.map((p, i) => ({ name: 'spa
   const d = world.groundBelow(w.p[0], w.p[1] + 0.5, w.p[2], 3);
   if (!isFinite(d)) console.log(`WARN waypoint ${w.name} has no ground`);
 }
+
+// Area names are shown on the HUD now, so every place a runner can stand has to
+// be inside one. Waypoints mark the middle of each section and must always hit.
+for (const w of level.waypoints) {
+  if (zoneAt(level, w.p[0], w.p[2]) === null) console.log(`WARN waypoint ${w.name} stands in no named zone`);
+}
+const zoned = level.boxes.filter((b) => zoneAt(level, b.p[0], b.p[2]) !== null).length;
+const zonedPct = (zoned / level.boxes.length) * 100;
+console.log(`zones=${level.zones.length} covering ${zonedPct.toFixed(1)}% of level boxes`);
+if (zonedPct < 90) console.log(`WARN only ${zonedPct.toFixed(1)}% of the level sits in a named zone`);
 
 // SVG overview
 const [minX, minZ] = level.bounds.min, [maxX, maxZ] = level.bounds.max;

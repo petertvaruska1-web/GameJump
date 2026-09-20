@@ -265,7 +265,7 @@ export const FLIP = {
 };
 
 /**
- * Sideways dash (Q / R): a short sidestep that takes you out of a charge. No
+ * Sideways dash (Q / E): a short sidestep that takes you out of a charge. No
  * cooldown -- like a jump, it is ready whenever you are. On the ground it ends
  * at running speed and in the air it is thrown across your flight path and then
  * hands the jump back, so a dash can never stretch a jump.
@@ -280,7 +280,7 @@ export const DASH = {
   AIR_RESIDUAL: 0.2,
 };
 
-/** Grapple (E / right mouse): hook a marked anchor and swing on a rope. */
+/** Grapple (right mouse): hook a marked anchor and swing on a rope. */
 export const GRAPPLE = {
   /** Anchors farther than this (from the hands) cannot be hooked. */
   RANGE: 17,

@@ -83,6 +83,9 @@ export function buildCableYards(b: LevelBuilder, start: Cursor): Cursor {
 
 export function buildCoolingWorks(b: LevelBuilder, start: Cursor, x: number): Cursor {
   b.section('Cooling Works');
+  // chain() advances the cursor it is given, so the entry has to be read now:
+  // by the end of this function `start` has walked all the way to the ring.
+  const z0 = start.z;
   let c = b.chain(start, [{ t: 'plat', gap: 2.5, len: 20, w: 4, rails: 'e', mat: 'metal', hazard: '' }]);
   for (let zz = c.z - 16; zz < c.z - 2; zz += 9) {
     b.block(x - 1.2, c.y, zz, 1.2, 0.8, 2.6, 'concrete');
@@ -163,7 +166,7 @@ export function buildCoolingWorks(b: LevelBuilder, start: Cursor, x: number): Cu
   // the mast east of the outer terraces stands empty since the works were abandoned
   b.tower(x + 12, cornerZ0 - 32, RING.y + 8, 2, { light: true });
   b.plat(x + 12, RING.y + 9, cornerZ0 - 32, 3.6, 3.6, { mat: 'metal', hazard: 'nsew', supports: false });
-  b.zone('Cooling Works', x - 12, start.z, x + 12, RING.z + 3);
+  b.zone('Cooling Works', x - 12, z0, x + 12, RING.z + 3);
   b.waypoint('Cooling Works', x, y1 + 0.1, hz - 18);
   return c;
 }

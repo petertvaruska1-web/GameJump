@@ -8,6 +8,7 @@
 
 import * as THREE from 'three';
 import { ENEMY, type EnemyKind } from '../../shared/constants';
+import { zoneAt } from '../../shared/hazards';
 import type { LevelData } from '../../shared/level/types';
 
 export class Debug {
@@ -45,15 +46,7 @@ export class Debug {
   }
 
   zoneAt(x: number, z: number): string {
-    let best = '—';
-    let bestArea = Infinity;
-    for (const zn of this.level.zones) {
-      if (x >= zn.min[0] && x <= zn.max[0] && z >= zn.min[1] && z <= zn.max[1]) {
-        const area = (zn.max[0] - zn.min[0]) * (zn.max[1] - zn.min[1]);
-        if (area < bestArea) { bestArea = area; best = zn.name; }
-      }
-    }
-    return best;
+    return zoneAt(this.level, x, z) ?? '—';
   }
 
   updateCone(id: number, kind: EnemyKind, pos: THREE.Vector3, yaw: number, hunting: boolean) {

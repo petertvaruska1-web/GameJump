@@ -4,6 +4,22 @@ import { LASER, ZIP } from './constants';
 import type { LaserDef, LevelData, WindDef, ZiplineDef } from './level/types';
 import { moverWave } from './physics/world';
 
+/**
+ * Name of the smallest named area containing a point, or null out in the open.
+ * Zones nest (a building sits inside the band around it), so the tightest match
+ * is the one the player would call the place they are standing in.
+ */
+export function zoneAt(level: LevelData, x: number, z: number): string | null {
+  let best: string | null = null;
+  let bestArea = Infinity;
+  for (const zn of level.zones) {
+    if (x < zn.min[0] || x > zn.max[0] || z < zn.min[1] || z > zn.max[1]) continue;
+    const area = (zn.max[0] - zn.min[0]) * (zn.max[1] - zn.min[1]);
+    if (area < bestArea) { bestArea = area; best = zn.name; }
+  }
+  return best;
+}
+
 /** Gust strength factor 0..1 for a wind zone at time t (smooth ramp in/out). */
 export function gustFactor(w: WindDef, t: number): number {
   let u = (t / w.period + w.phase) % 1;
