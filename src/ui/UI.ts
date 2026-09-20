@@ -40,10 +40,10 @@ const CONTROLS = `
     <span><kbd>Space</kbd></span><span>Jump — every jump is full height, just tap it</span>
     <span><kbd>Space</kbd> in the air</span><span>Front flip — a tuck that carries the jump further</span>
     <span><kbd>W</kbd> at a ledge</span><span>Climb — hold forward and you pull yourself up</span>
-    <span><kbd>Q</kbd> / <kbd>R</kbd></span><span>Dash left / right — steps you out of a charge, on the ground or in the air</span>
+    <span><kbd>Q</kbd> / <kbd>E</kbd></span><span>Dash left / right — steps you out of a charge, on the ground or in the air</span>
     <span><kbd>Shift</kbd></span><span>Sprint — needed for long gaps</span>
     <span><kbd>C</kbd></span><span>Slide — while running: under low gaps and chest-high lasers</span>
-    <span><kbd>E</kbd> / <kbd>Right mouse</kbd></span><span>Grapple a green anchor in view · press again or Space to let go</span>
+    <span><kbd>Right mouse</kbd></span><span>Grapple a green anchor in view · press again or Space to let go</span>
     <span><kbd>Esc</kbd></span><span>Pause menu / release the mouse</span>
   </div>`;
 
@@ -148,7 +148,7 @@ export class UI {
         <li>Grab ledges: jump at a wall up to chest height and you pull yourself up. Low obstacles are vaulted automatically.</li>
         <li><b>Climb</b>: no key for it — hold forward. Come up short on a jump and you catch the lip and pull yourself up; walk into something between waist and head height and lean on it for a moment and you climb that too. Anything taller stays unclimbable, the pull-up leaves you helpless while it plays, and there is a pause before the next one, so you cannot ladder your way out of trouble.</li>
         <li><b>Front flip</b>: press <kbd>Space</kbd> again while you are in the air — right after the jump or seconds into a long fall, it does not matter. You tuck and turn, and the flip adds about 0.9 m to the jump without going any higher. One per jump. Mid-flip you are a low target: a Sentinel that fires while you are tucked aims under your chest and the shot passes over you as you land.</li>
-        <li><b>Dash</b> (<kbd>Q</kbd> left, <kbd>R</kbd> right): a 2.6 m sidestep out of whatever is coming at you, ready again the moment it ends. A Stalker charging head-on cannot turn with it — dash when it is two to four metres out. It works in the air too (once per jump), thrown across your flight path so it never carries a jump further, and on the ground it ends at running speed. It will happily carry you off a ledge, so look before you go.</li>
+        <li><b>Dash</b> (<kbd>Q</kbd> left, <kbd>E</kbd> right): a 2.6 m sidestep out of whatever is coming at you, ready again the moment it ends. A Stalker charging head-on cannot turn with it — dash when it is two to four metres out. It works in the air too (once per jump), thrown across your flight path so it never carries a jump further, and on the ground it ends at running speed. It will happily carry you off a ledge, so look before you go.</li>
         <li>Rust-coloured slabs crumble shortly after you step on them. Keep moving.</li>
         <li>Watch for wind gusts on narrow beams, rotating arms, and moving platforms.</li>
       </ul>
@@ -162,14 +162,14 @@ export class UI {
       <h3>Slide and grapple</h3>
       <ul>
         <li><b>Slide</b> (<kbd>C</kbd> while running): you drop low and keep your speed. Slide under jammed shutters and chest-high lasers, down stairs faster, and under shots aimed at your chest. Stalkers are too tall to follow you through low gaps. Jumping out of a slide goes a little further than a normal jump.</li>
-        <li><b>Grapple</b> (<kbd>E</kbd> or right mouse): hook a glowing green anchor when the reticle marks it. The hook yanks you off your feet and toward the anchor, so you can fire it standing still — no need to jump first. The rope reels itself tight, and holding a direction pushes you along the arc, so steer with <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd> and let go (press again or <kbd>Space</kbd>) as you swing up. Some anchors are required; others are rescue points beside hard jumps.</li>
+        <li><b>Grapple</b> (right mouse): hook a glowing green anchor when the reticle marks it. The hook yanks you off your feet and toward the anchor, so you can fire it standing still — no need to jump first. The rope reels itself tight, and holding a direction pushes you along the arc, so steer with <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd> and let go (press again or <kbd>Space</kbd>) as you swing up. Some anchors are required; others are rescue points beside hard jumps.</li>
       </ul>
       <h3>Power crates</h3>
       <ul>
         <li>Rare glowing crates: walk through one to take it. The first runner to reach a crate gets it.</li>
         <li><b style="color:#5ef0ff">Shield</b> soaks one hit (a stalker, drone, shot or laser) and staggers the attacker. It does not save you from falling.</li>
-        <li><b style="color:#c38bff">Cloak</b>: for 10 seconds enemies cannot see you, and any that were chasing you lose you.</li>
-        <li><b style="color:#ffa640">Jet boots</b>: for 15 seconds you can jump once more in mid-air.</li>
+        <li><b style="color:#c38bff">Cloak</b>: for 15 seconds enemies cannot see you, and any that were chasing you lose you.</li>
+        <li><b style="color:#ffa640">Jet boots</b>: for 22 seconds you can jump once more in mid-air.</li>
       </ul>
       <h3>Enemies</h3>
       <ul>

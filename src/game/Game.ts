@@ -496,7 +496,7 @@ export class Game {
       else this.ui.reticle(null);
     } else this.ui.reticle(null);
     const can = !this.paused && !this.debug.freeCam;
-    if (local && can && (this.input.wasPressed('KeyE') || this.input.mouseRightPressed) && !local.dead && !local.finished) {
+    if (local && can && this.input.mouseRightPressed && !local.dead && !local.finished) {
       if (hooked) local.requestRelease();
       else if (this.grappleTarget >= 0) { local.requestGrapple(this.grappleTarget); this.audio.grappleFire(); }
     }
@@ -797,10 +797,10 @@ export class Game {
     this.spectate = alive[(i + 1) % alive.length].id;
   }
 
-  /** Q / R: a dash across the way the camera is facing. */
+  /** Q / E: a dash across the way the camera is facing. */
   private readDash(can: boolean): { dashX: number; dashZ: number } {
     const left = can && this.input.wasPressed('KeyQ');
-    const right = can && this.input.wasPressed('KeyR');
+    const right = can && this.input.wasPressed('KeyE');
     if (left === right) return { dashX: 0, dashZ: 0 };
     this.cam.right(tmpR);
     const s = right ? 1 : -1;

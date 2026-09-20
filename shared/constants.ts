@@ -108,16 +108,17 @@ export const ENEMY: Record<EnemyKind, EnemyTuning> = {
     speed: PLAYER.SPRINT_SPEED * 0.98, patrolSpeed: 2.5, catchRadius: 1.31, visionHz: 12, eyeHeight: 1.7,
   },
   ranged: {
-    viewDist: 49.3, fovDeg: 90, senseDist: 3.4,
+    viewDist: 39.4, fovDeg: 90, senseDist: 2.7,
     alertTime: 0.35, loseTime: 1.4, searchTime: 2.5, leash: 0,
     speed: 0, patrolSpeed: 0, catchRadius: 0, visionHz: 10, eyeHeight: 2.3,
   },
   flyer: {
-    // a drone gives up much sooner than it used to: it sees 40 m, forgets you 2 s
-    // after losing sight, and never follows more than 40 m from its patrol
+    // a drone gives up quickly: it sees 40 m, forgets you 2 s after losing sight,
+    // and never follows more than 32 m from its patrol. At 7.31 m/s a sprint
+    // pulls away from one comfortably
     viewDist: 40, fovDeg: 165, senseDist: 6.25,
-    alertTime: 0.4, loseTime: 2, searchTime: 3, leash: 40,
-    speed: 8.6, patrolSpeed: 3.5, catchRadius: 1.69, visionHz: 10, eyeHeight: 0,
+    alertTime: 0.4, loseTime: 2, searchTime: 3, leash: 32,
+    speed: 7.31, patrolSpeed: 2.98, catchRadius: 1.69, visionHz: 10, eyeHeight: 0,
   },
 };
 
@@ -315,10 +316,10 @@ export const POWER = {
   /** Walk through a crate within this distance to take it. */
   PICKUP_RADIUS: 1.3,
   /** After a shield soaks a hit: that long without further hits, and the attacker is stunned. */
-  SHIELD_GRACE: 1.5,
-  STUN: 2.5,
-  CLOAK_TIME: 10,
-  JET_TIME: 15,
+  SHIELD_GRACE: 2.2,
+  STUN: 3.5,
+  CLOAK_TIME: 15,
+  JET_TIME: 22,
   /** Jet boots: one extra jump in the air at this share of a normal jump. */
   AIR_JUMP: 0.95,
 };

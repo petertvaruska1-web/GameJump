@@ -92,9 +92,9 @@ What a static host can and cannot do:
 | `Shift` | Sprint (needed for the long gaps) |
 | `Space` in the air | Front flip: a tuck that carries the jump ~0.9 m further |
 | `W` at a ledge | Climb: hold forward and you pull yourself up |
-| `Q` / `R` | Dash left / right: a 2.6 m sidestep out of a charge, on the ground or in the air |
+| `Q` / `E` | Dash left / right: a 2.6 m sidestep out of a charge, on the ground or in the air |
 | `C` | Slide (while running): low under gaps, chest-high beams and shots. Press again to stand |
-| `E` / right mouse | Grapple the anchor marked by the green reticle; press again (or `Space`) to let go |
+| Right mouse | Grapple the anchor marked by the green reticle; press again (or `Space`) to let go |
 | `Esc` | Pause menu / release the mouse |
 | `Space` / `E` while dead or finished | Cycle the spectated teammate |
 
@@ -113,7 +113,7 @@ ledge. On top of that come two movement skills:
 | Skill | How it works | Where it's useful |
 |---|---|---|
 | **Slide** (`C`) | From a run you drop to 0.9 m tall and keep your speed (a little boost, then friction; you pick up speed downhill). Under a low ceiling you keep crawling forward until there's room to stand. Jumping out of a slide keeps up to 9.8 m/s (a sprint is 8.9). | Required: the hangar's jammed shutter and tunnel (left), the flue walkway's beam (right). Elsewhere: chest-high laser beams, faster descents on stairs and ramps, a stalker-proof escape through low gaps (they're too tall to follow), and dodging a Sentinel shot. It only dodges a shot if you're not already sliding when it fires. |
-| **Grapple** (`E` / right mouse) | Hook a glowing green anchor within 17 m that is ahead of you and in sight. The hook pulls you toward the anchor and off the ground, so it works from a standstill; the rope then reels in to 85% of its length, and holding a direction pushes you along the arc rather than against the rope. Let go as you swing up. Touching the ground unhooks you. | Required: the viaduct gap (centre) and a double swing between the smokestacks (right). Six optional anchors elsewhere: rescue hooks beside hard jumps (rooftops, skybridge hops, Leap of Faith, broken stairway) and detours to hidden crates (twin rails, launch yard). |
+| **Grapple** (right mouse) | Hook a glowing green anchor within 17 m that is ahead of you and in sight. The hook pulls you toward the anchor and off the ground, so it works from a standstill; the rope then reels in to 85% of its length, and holding a direction pushes you along the arc rather than against the rope. Let go as you swing up. Touching the ground unhooks you. | Required: the viaduct gap (centre) and a double swing between the smokestacks (right). Six optional anchors elsewhere: rescue hooks beside hard jumps (rooftops, skybridge hops, Leap of Faith, broken stairway) and detours to hidden crates (twin rails, launch yard). |
 
 Two more are built on those keys. A **front flip** comes from pressing `Space`
 again while you are off the ground — a quick second tap after the jump, or
@@ -125,7 +125,7 @@ flip is on the way down with the ground under 1.5 m away, where it still buffers
 into a jump for the moment you land. While you are tucked a Sentinel aims below
 your chest, so a shot that leaves during the flip passes over you as you land.
 
-The **dash** (`Q` left, `R` right) is a 2.6 m sidestep, taken from wherever the
+The **dash** (`Q` left, `E` right) is a 2.6 m sidestep, taken from wherever the
 camera is facing, with no cooldown — like a jump, it is ready the moment the last
 one finishes. It is the answer to something charging you: a Stalker running
 head-on cannot turn with it, and in the headless check it fails to land a hit
@@ -174,9 +174,9 @@ it first. Each route has two, and the Upper Works has two.
 
 | Power | Effect |
 |---|---|
-| **Shield** (3 crates) | Soaks one hit from a stalker, drone, Sentinel shot or laser. You then get 1.5 s of grace, and the attacker is stunned for 2.5 s before it gives up the chase. It doesn't save you from falling. |
-| **Cloak** (3 crates) | For 10 s enemies can't see you, and any that were chasing you lose you. You turn ghostly. |
-| **Jet boots** (2 crates) | For 15 s you can jump once more in mid-air. |
+| **Shield** (3 crates) | Soaks one hit from a stalker, drone, Sentinel shot or laser. You then get 2.2 s of grace, and the attacker is stunned for 3.5 s before it gives up the chase. It doesn't save you from falling. |
+| **Cloak** (3 crates) | For 15 s enemies can't see you, and any that were chasing you lose you. You turn ghostly. |
+| **Jet boots** (2 crates) | For 22 s you can jump once more in mid-air. |
 
 ## The level
 
@@ -229,10 +229,10 @@ exposed **broken stairway** to the Spire.
 The course is about 920 m deep with 46 enemies (18 stalkers, 13 sentinels, 15 drones).
 Stalkers hit harder than they used to: they see further, commit sooner and chase
 faster — though a stalker's top speed is capped 2% under your sprint, so it can
-never outrun you, only wear you down. Drones are fast and see almost all round,
-but they give up quickly and keep close to their patrol. Sentinels are the
+never outrun you, only wear you down. Drones see almost all round but are slower than a
+sprint, give up quickly and keep close to their patrol. Sentinels are the
 opposite of dangerous at range: their aim is about half as accurate as it
-originally was, and they stop shooting nine metres sooner. The route bot's flawless runs take
+originally was, and their sight is down from 58 m to 39 m. The route bot's flawless runs take
 about 131–135 s, including the waits at laser gates. Real runs with scouting, hiding
 and waiting for gaps in patrols take several minutes. There are no checkpoints.
 
@@ -248,8 +248,8 @@ Break line of sight and they search your last known position, then walk back to 
 | Enemy | Behaviour |
 |---|---|
 | **Stalker** (melee, 18 of them) | Spots you at 34 m through a 135 deg cone and commits in 0.44 s. Chases at 8.72 m/s — exactly 2% under your 8.9 m/s sprint, with no burst above it, so a sprint always pulls away but only by about 0.2 m/s, and a jog is hopeless. Stops at edges, but leaps gaps up to 6.25 m while chasing. Contact inside 1.31 m kills. Break line of sight, slide through a gap it cannot follow, or keep sprinting. |
-| **Sentinel** (ranged, 13 of them) | Stationary turret with a visible searchlight. Sees 49 m through a 90 deg cone (64 m once it is already tracking you). Charges for 0.8 s (a glowing orb), then fires a slow, visible projectile with wide aim scatter and a weak lead — about 10% per shot at 30 m if you stand still, 2–4% if you keep moving. A hit kills. |
-| **Drone** (flyer, 15 of them) | Hovers on a patrol, sees 40 m almost all round, then flies straight at you (vertically too) at 8.6 m/s and climbs over obstacles, diving at 12 m/s over the last 4.5 m. It gives up 2 s after losing sight of you and never follows more than 40 m from its post, so breaking line of sight and putting some distance in loses it. Contact kills. |
+| **Sentinel** (ranged, 13 of them) | Stationary turret with a visible searchlight. Sees 39 m through a 90 deg cone (51 m once it is already tracking you). Charges for 0.8 s (a glowing orb), then fires a slow, visible projectile with wide aim scatter and a weak lead — about 10% per shot at 30 m if you stand still, 2–4% if you keep moving. A hit kills. |
+| **Drone** (flyer, 15 of them) | Hovers on a patrol, sees 40 m almost all round, then flies straight at you (vertically too) at 7.3 m/s and climbs over obstacles, diving at 10.2 m/s over the last 4.5 m. A sprint pulls away from one. It gives up 2 s after losing sight of you and never follows more than 32 m from its post, so breaking line of sight and putting some distance in loses it. Contact kills. |
 
 A red screen vignette and a pulsing heartbeat tell you when something is hunting you.
 A `!` or `?` above an enemy shows its state.
