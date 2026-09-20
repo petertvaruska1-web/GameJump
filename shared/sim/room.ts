@@ -190,8 +190,13 @@ export class Room implements EnemyHost {
         return;
       case 'start':
         if (p.id !== this.hostId) { p.conn?.send({ t: 'err', code: 'NOT_HOST', msg: 'Only the host can start.' }); return; }
-        if (this.phase !== 'lobby') return;
+        // Straight from the results screen as well as from the lobby: a run ends
+        // on one mistake, so going back round through the lobby for every retry
+        // is pure friction. Everyone still in the room already said they were
+        // ready for this course, so that agreement carries over.
+        if (this.phase !== 'lobby' && this.phase !== 'ended') return;
         if (this.players.some((q) => q.id !== this.hostId && q.connected && !q.ready)) return;
+        if (this.phase === 'ended') this.dropDisconnected();
         this.startMatch();
         return;
       case 'lobby':
@@ -291,14 +296,16 @@ export class Room implements EnemyHost {
     p.conn?.send({ t: 'start', goAt: round3(this.goAt), now: round3(this.now), spawns, resume, crumbles, taken: [...this.taken], powers });
   }
 
+  /** Forgets players who are gone for good and hands the room on if the host is one of them. */
+  private dropDisconnected() {
+    for (let i = this.players.length - 1; i >= 0; i--) if (!this.players[i].connected) this.players.splice(i, 1);
+    if (!this.players.some((q) => q.id === this.hostId)) this.hostId = this.players[0]?.id ?? 0;
+  }
+
   private toLobby() {
     this.phase = 'lobby';
-    for (let i = this.players.length - 1; i >= 0; i--) {
-      const p = this.players[i];
-      if (!p.connected) this.players.splice(i, 1);
-      else { p.ready = false; p.status = Status.Alive; }
-    }
-    if (!this.players.some((q) => q.id === this.hostId)) this.hostId = this.players[0]?.id ?? 0;
+    for (const p of this.players) { p.ready = false; p.status = Status.Alive; }
+    this.dropDisconnected();
     this.projectiles = [];
     this.enemies = [];
     this.broadcastRoom();

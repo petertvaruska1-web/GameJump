@@ -234,7 +234,9 @@ sprint, give up quickly and keep close to their patrol. Sentinels are the
 opposite of dangerous at range: their aim is about half as accurate as it
 originally was, and their sight is down from 58 m to 39 m. The route bot's flawless runs take
 about 131–135 s, including the waits at laser gates. Real runs with scouting, hiding
-and waiting for gaps in patrols take several minutes. There are no checkpoints.
+and waiting for gaps in patrols take several minutes. There are no checkpoints, so most runs end in a fall — the results screen's
+**Run it again** puts the host straight into a fresh countdown rather than back
+round through the lobby, which is still there for changing who is in the room.
 
 ## Enemies
 

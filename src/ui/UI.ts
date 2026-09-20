@@ -308,7 +308,7 @@ export class UI {
     const box = this.hud.querySelector<HTMLElement>('.hud-area')!;
     const label = box.querySelector<HTMLElement>('.area-name')!;
     box.querySelector<HTMLElement>('.area-bar > b')!.style.width = `${(Math.max(0, Math.min(1, progress)) * 100).toFixed(1)}%`;
-    if (name === null) { box.classList.add('hidden'); return; }
+    if (name === null) { box.classList.add('hidden'); label.textContent = ''; return; }
     box.classList.remove('hidden');
     if (label.textContent === name) return;
     label.textContent = name;
@@ -421,13 +421,17 @@ export class UI {
       <h2>${title}</h2>
       <table class="results">${rows}</table>
       <p class="hint">Run length ${fmtTime(duration)}. ${isHost ? '' : 'Waiting for the host to start another run…'}</p>
-      <div class="row between"><button class="btn small danger" data-a="leave">Leave</button>${isHost ? '<button class="btn primary center" data-a="again">Back to lobby</button>' : ''}</div>
+      <div class="row between"><button class="btn small danger" data-a="leave">Leave</button>${isHost
+        ? '<span class="row"><button class="btn small" data-a="lobby">Back to lobby</button><button class="btn primary" data-a="again">Run it again</button></span>'
+        : ''}</div>
     </div></div>`);
     this.root.appendChild(o);
     this.overlay = o;
     o.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button')) this.h.click(); });
     o.querySelector('[data-a=leave]')!.addEventListener('click', () => this.h.leave());
-    o.querySelector('[data-a=again]')?.addEventListener('click', () => this.h.toLobby());
+    o.querySelector('[data-a=lobby]')?.addEventListener('click', () => this.h.toLobby());
+    o.querySelector('[data-a=again]')?.addEventListener('click', () => this.h.start());
+    o.querySelector<HTMLButtonElement>('[data-a=again]')?.focus();
   }
 
   modal(title: string, message: string, buttons: { label: string; primary?: boolean; fn: () => void }[]) {

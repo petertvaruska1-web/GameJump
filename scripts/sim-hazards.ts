@@ -256,4 +256,73 @@ function crate(kind: string) { return level.pickups.find((c) => c.kind === kind)
   check('a stalker kill throws the body clear and it settles', moved > 1 && pushedAway, `moved ${moved.toFixed(1)} m, y ${p.pos.y.toFixed(1)}`);
 }
 
+// ---------------------------------------------------------------- match flow
+
+/** A room mid-run with a host and one guest (both have to join before the start). */
+function setupPair() {
+  now = 0;
+  const room = new Room('TEST', level, () => now, true);
+  const quiet = { send() {}, close() {} };
+  const host = room.join(quiet, 'host') as RoomPlayer;
+  const guest = room.join(quiet, 'guest') as RoomPlayer;
+  room.handle(guest, { t: 'ready', r: true });
+  room.handle(host, { t: 'start' });
+  now += 3.6;
+  room.tick(1 / 30);
+  return { room, host, guest };
+}
+
+{
+  // One mistake ends a run, so the host can start another straight from the
+  // results screen without the room going back round through the lobby.
+  const { room, p } = setup();
+  room.kill(p, 'fall', null);
+  room.tick(1 / 30);
+  const ended = room.phase === 'ended';
+  room.handle(p, { t: 'start' });
+  check('the host can start another run from the results screen',
+    ended && room.phase === 'countdown' && p.status === Status.Alive,
+    `ended=${ended} phase=${room.phase} status=${p.status}`);
+}
+{
+  // ...and that restart is a clean slate, not a continuation of the dead run.
+  const { room, p } = setup();
+  p.shield = true;
+  p.cloakUntil = room.matchTime + 99;
+  room.kill(p, 'fall', null);
+  room.tick(1 / 30);
+  room.handle(p, { t: 'start' });
+  check('a restart from the results screen clears powers and respawns you',
+    !p.shield && p.cloakUntil === 0 && p.pos.z === level.spawns[0][2],
+    `shield=${p.shield} cloakUntil=${p.cloakUntil} z=${p.pos.z}`);
+}
+{
+  // A guest pressing it must not drag the room into a new run.
+  const { room, host, guest } = setupPair();
+  room.kill(host, 'fall', null);
+  room.kill(guest, 'fall', null);
+  room.tick(1 / 30);
+  room.handle(guest, { t: 'start' });
+  check('a guest cannot restart from the results screen', room.phase === 'ended', `phase=${room.phase}`);
+}
+{
+  // Mid-run the button does not exist, and a stray message must not reset the match.
+  const { room, p } = setup();
+  const t0 = room.goAt;
+  room.handle(p, { t: 'start' });
+  check('a start sent mid-run is ignored', room.phase === 'playing' && room.goAt === t0, `phase=${room.phase}`);
+}
+{
+  // Players who dropped out during the run are forgotten by the next one.
+  const { room, host, guest } = setupPair();
+  room.disconnect(guest);
+  room.kill(host, 'fall', null);
+  room.kill(guest, 'fall', null);
+  room.tick(1 / 30);
+  room.handle(host, { t: 'start' });
+  check('a restart forgets players who dropped out',
+    room.phase === 'countdown' && !room.players.includes(guest),
+    `phase=${room.phase} players=${room.players.length}`);
+}
+
 process.exit(fails ? 1 : 0);
