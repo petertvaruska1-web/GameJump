@@ -372,6 +372,8 @@ npm run test:routes    # a bot drives the real controller along every route star
 npm run test:ai        # detect / chase / kill / lose-target scenarios for each enemy type
 npm run sim:jumps      # measures jump distances for level-design rules
 npm run test:balance   # stalker pursuit vs sprint/jog + sentinel hit chances
+npm run balance        # route balance report: time, early / wandering / late / hesitant runs and
+#                        enemy replays per main route, at ten arrival times (a few minutes)
 npm run test:hazards   # server: lasers, zip/grapple not falls, launch arcs, crates, shield, cloak, slide hitbox, bodies
 npm run test:moves     # movement: climb reach/limit/cooldown, hooking from a standstill, swing release windows,
 #                        what a flip adds to a jump, and a dash beating a head-on stalker charge
@@ -388,12 +390,15 @@ npm run typecheck
 The route bot runs all three main routes (each continuing through the Upper Works to
 the Spire), both Upper Works branches on their own, both shortcuts and every cross-link
 with the actual movement code, plus the two grapple detours. It waits for laser gates,
-jumps low beams, slides under high beams and through low gaps, rides launch pads, and
-only grabs a zip line when its ride will clear the laser curtain. For grapple swings it
+jumps low beams and sweeper arms, boards movers only when they are resting or coming its
+way, slides under high beams and through low gaps, rides launch pads, and only grabs a
+zip line when its ride will clear the laser curtain. Crumbling slabs fall under it as
+they do on the server. For grapple swings it
 simulates copies of the controller forward to pick a release moment that lands well
 inside the far platform. That includes the anchor-to-anchor double swing, and it pumps
-the swing when no release works yet. A level
-edit that makes a jump impossible or a laser unavoidable shows up as a failure.
+the swing when no release works yet (giving up after 12 s, which is reported as a SWING
+failure). A level edit that makes a jump impossible or a laser unavoidable shows up as a
+failure.
 
 ## Debug mode
 
