@@ -238,6 +238,43 @@ and waiting for gaps in patrols take several minutes. There are no checkpoints, 
 **Run it again** puts the host straight into a fresh countdown rather than back
 round through the lobby, which is still there for changing who is in the room.
 
+### What each route asks of you, measured
+
+`npm run balance` drives the route bot from the start to the North Junction (where all
+three routes leave the Reactor Ring) at ten different arrival times and at deliberately
+human skill levels, and replays each run through the real server with enemies on. The
+three routes come out as three different tests rather than three versions of one:
+
+| | Left | Centre | Right |
+|---|---|---|---|
+| Clean run to the North Junction | 86.6 s | 84.3 s | 82.7 s (80.7 s by the Leap of Faith) |
+| A jump taken this early kills you | never (tested to 1.5 m early) | about 1.2 m (the Cable Yards mover) | 1.0 m (the skybridge mover) |
+| Stopping a second to line up a jump | always safe | kills on every crumbling floor | kills on its crumbling slabs |
+| Would-be deaths for a runner who ignores enemies | 3.8, mostly stalkers | 3.3, drones and sentinels | 2.9 |
+
+The **left** asks for patience and stealth: nothing underfoot punishes you for waiting,
+but its interiors are stalker country. The **centre** asks for momentum across open,
+watched ground: crumbling floors punish hesitation, and it spends the most time under
+enemy eyes. The **right** asks for precise jumping and pays for it with the shortest
+time. Static gaps are forgiving everywhere because a short jump catches the ledge, so
+each route's precision test is a moving platform, where there is no ledge to catch.
+
+Tuning that came out of these measurements (each a small change to one obstacle):
+
+- The right route killed a *perfect* runner at two of ten arrival times, which is luck
+  rather than skill. The laser bar on the flue walkway now takes 5 s a sweep instead of
+  4.2 s, so landing off the double swing always leaves time to slide under it, and the
+  antenna mover rests 24% of its cycle at each end instead of 18%, so its boarding
+  window can always be made. The skybridge mover, the route's real precision test, is
+  unchanged.
+- The centre's movers forgave a jump taken as early as the left route's easy ones do. The
+  gap onto the Cable Yards mover is 10 cm wider (the yard before it 10 cm shorter, so the
+  mover and everything after it are where they were).
+- Left alone on purpose: the centre's gantry sweeper (at any faster setting tried, even a
+  perfect run is thrown off at some arrival times) and the left route (widening the gap
+  onto its one mover jumps straight from forgiving to right-route-hard, with no step
+  between).
+
 ## Enemies
 
 Every enemy has a fixed post and a finite state machine:

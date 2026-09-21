@@ -16,8 +16,11 @@ export function buildCableYards(b: LevelBuilder, start: Cursor): Cursor {
     { t: 'plat', gap: 3, len: 8, w: 5, mat: 'metal', hazard: 'ns' },
     { t: 'plat', gap: 3.5, dy: 1, len: 6, w: 5, mat: 'metal', hazard: 's' },
     { t: 'stairs', len: 6, w: 4, dy: 2 },
-    { t: 'plat', len: 10, w: 10, mat: 'concrete', hazard: 'n' },
-    { t: 'mover', gap: 2.2, len: 5.3, w: 5, move: [0, 0, 10], period: 7 },
+    // 10 cm off the yard and onto the gap to the mover, which stays where it was: the one
+    // mover late in the centre route now punishes a clearly early jump (it forgave one as
+    // early as the left route's easy movers do) without asking what the right route asks
+    { t: 'plat', len: 9.9, w: 10, mat: 'concrete', hazard: 'n' },
+    { t: 'mover', gap: 2.3, len: 5.3, w: 5, move: [0, 0, 10], period: 7 },
     { t: 'skip', len: 10 },
     { t: 'plat', gap: 2.5, len: 8, w: 8, mat: 'concrete', hazard: 's' },
     { t: 'beam', len: 16, w: 0.9 },

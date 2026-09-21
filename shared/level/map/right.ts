@@ -124,7 +124,10 @@ export function buildRight(b: LevelBuilder) {
   ]);
   b.grapple([R1.x, swY + 9, swZ + 6], { mount: [R1.x + 4.5, -110, swZ + 6] });
   b.grapple([R1.x, swY + 10.5, swZ + 14.5], { mount: [R1.x - 4.5, -110, swZ + 14.5] });
-  b.laserBar(R1.x - 1.7, swZ + 23.5, R1.x + 1.7, swZ + 23.5, swY + 2 + 1.3, [0, 0, 6.5], 4.2);
+  // 5 s a sweep (was 4.2): you arrive off the double swing and cannot choose the moment you land,
+  // so at the old pace some landings put the beam on you before any slide could start. Every
+  // landing now leaves time to slide; timing the slide is still the test.
+  b.laserBar(R1.x - 1.7, swZ + 23.5, R1.x + 1.7, swZ + 23.5, swY + 2 + 1.3, [0, 0, 6.5], 5.0);
   b.hint('grapple', R1.x, swY, swZ - 3, 6, 'Grapple: jump off the edge, aim at the green anchor and press the right mouse button. Hold forward, then let go (right mouse or Space) as you swing up.');
   b.hint('slidebar', R1.x, swY + 2, swZ + 20.5, 3, 'Chest-high beam: slide under it (C while running).');
   // chimneys
@@ -151,7 +154,9 @@ export function buildRight(b: LevelBuilder) {
   c = b.chain(c, [
     { t: 'stairs', len: 8, w: 3, dy: 4 },
     { t: 'plat', len: 6, w: 5, mat: 'metal' },
-    { t: 'mover', gap: 2.2, len: 4.3, w: 4, move: [0, 0, 10], period: 6 },
+    // rests 24% of its cycle at each end (default 18%): at some arrivals the old boarding
+    // window could not be made even with a perfect run-up
+    { t: 'mover', gap: 2.2, len: 4.3, w: 4, move: [0, 0, 10], period: 6, pause: 0.24 },
     { t: 'skip', len: 10 },
     { t: 'plat', gap: 2.5, len: 10, w: 10, mat: 'metal', hazard: '' },
   ]);
