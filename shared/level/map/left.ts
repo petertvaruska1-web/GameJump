@@ -63,8 +63,8 @@ export function buildLeft(b: LevelBuilder) {
   b.prop('lamp', [lx + 10, ly, lz + 12]);
   b.prop('redLight', [lx + 8.5, ly + 4.1, lz + 1.5]);
   b.pickup('shield', lx - 7, ly + 2.5, lz + 8.5); // on top of a side container: a short climb off the path
-  b.enemy('melee', lx, ly, lz, 0, {
-    patrol: [[lx - 9, ly, lz - 10], [lx + 9, ly, lz - 11], [lx + 9.5, ly, lz + 3], [lx - 1, ly, lz + 2.5], [lx - 9.5, ly, lz + 3]],
+  b.enemy('melee', lx - 9, ly, lz - 10, 0, {
+    patrol: [[lx - 9, ly, lz - 10], [lx + 3.5, ly, lz - 10], [lx + 3.5, ly, lz - 4], [lx - 2.8, ly, lz - 4], [lx - 2.8, ly, lz + 2.8], [lx - 9.5, ly, lz + 3]],
   });
   b.enemy('flyer', lx, ly + 9, lz, 0, { patrol: [[lx - 8, ly + 8, lz - 9.5], [lx + 8, ly + 9, lz - 7.5], [lx + 8, ly + 10, lz + 8.5], [lx - 6, ly + 9, lz + 8.5]], leash: 35 });
   b.zone('Scaffold Yard', lx - L1.w / 2, c.z, lx + L1.w / 2, c.z + L1.d);
@@ -128,8 +128,8 @@ export function buildLeft(b: LevelBuilder) {
   b.prop('lamp', [F.x + 1, F.y, fz + 7]);
   b.prop('redLight', [F.x + 5, F.y + 6.2, fz - 11]);
   b.prop('chimney', [F.x + 5, F.y + F.h, fz - 11], { s: [1.3, 12, 1.3] });
-  b.enemy('melee', F.x + 1, F.y, fz, -PI / 2, {
-    patrol: [[F.x + 1, F.y, fz - 16], [F.x + 9.5, F.y, fz - 4], [F.x + 1.5, F.y, fz + 16], [F.x - 4.5, F.y, fz + 2]],
+  b.enemy('melee', F.x + 0.5, F.y, fz - 7.5, -PI / 2, {
+    patrol: [[F.x + 0.5, F.y, fz - 7.5], [F.x + 0.5, F.y, fz + 4.5], [F.x + 8.8, F.y, fz + 6], [F.x + 8.8, F.y, fz - 6]],
   });
   b.zone('Foundry', F.x - F.w / 2, fz - F.d / 2, F.x + F.w / 2, fz + F.d / 2);
   b.waypoint('Foundry', doorX, F.y + 0.1, fz - F.d / 2 - 3);
@@ -195,12 +195,11 @@ export function buildLeft(b: LevelBuilder) {
   b.crate(H.x - 3, H.y, hz + 15, 1.2, 0.5);
   b.prop('lamp', [H.x - 4, H.y, hz]);
   b.prop('lamp', [H.x + 9, H.y, hz + 3]);
-  b.enemy('melee', H.x - 3, H.y, hz + 2, PI, {
-    patrol: [[H.x - 4, H.y, hz - 16], [H.x + 11, H.y, hz - 6], [H.x + 10, H.y, hz + 16], [H.x - 4, H.y, hz + 14]],
-  });
+  // stalker pacing the open floor past the gondola
+  b.enemy('melee', H.x + 6.8, H.y, hz + 8, PI, { patrol: [[H.x + 6.8, H.y, hz + 8], [H.x + 11.5, H.y, hz + 8]] });
   // a second stalker guards the jammed shutter from inside
-  b.enemy('melee', doorX + 6, H.y, hz + 13.5, 0, {
-    patrol: [[doorX - 5, H.y, hz + 13.5], [doorX + 6, H.y, hz + 13.5], [doorX + 6, H.y, hz + 17.5], [doorX - 5, H.y, hz + 17.5]], leash: 18,
+  b.enemy('melee', doorX - 5.5, H.y, hz + 12.75, 0, {
+    patrol: [[doorX - 5.5, H.y, hz + 12.75], [doorX + 6, H.y, hz + 12.75], [doorX + 6, H.y, hz + 17.5], [doorX - 5.5, H.y, hz + 17.5]], leash: 18,
   });
   b.zone('Hangar', H.x - H.w / 2, hz - H.d / 2, H.x + H.w / 2, hz + H.d / 2);
   b.waypoint('Hangar', doorX, H.y + 0.1, hz - H.d / 2 - 3);

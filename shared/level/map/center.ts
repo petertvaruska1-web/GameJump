@@ -94,10 +94,8 @@ export function buildCenter(b: LevelBuilder) {
   b.plat(19.5, py + 9, pz + 13, 4.2, 4.2, { mat: 'metal', hazard: 'nsew', supports: false });
   b.prop('redLight', [21.3, py + 9.2, pz + 14.8]);
   b.enemy('ranged', 19.5, py + 9, pz + 13, Math.atan2(-19.5, -15));
-  // stalker guarding the north-right corner
-  b.enemy('melee', -9, py, pz + 9, PI, {
-    patrol: [[-9, py, pz + 9], [-11, py, pz - 7], [-2, py, pz + 12], [6, py, pz + 9]],
-  });
+  // stalker guarding the north-right corner: paces between the container and the far pillar, in the open
+  b.enemy('melee', -12.8, py, pz + 7.4, PI / 2, { patrol: [[-12.8, py, pz + 7.4], [-5.6, py, pz + 7.4]] });
   b.zone('Plaza', -15, pz - 15, 15, pz + 15);
   b.waypoint('Plaza', 0, py + 0.1, pz - 12);
 
@@ -193,9 +191,9 @@ export function buildCenter(b: LevelBuilder) {
   b.block(2.3, vy, v0 + 12, 2.8, 3, 9, 'rust', 0.12);
   b.block(-3, vy, v0 + 18.5, 1.5, 2.8, 1.5, 'concreteDark');
   b.block(-3.2, vy, v0 + 5, 1.4, 2.4, 1.4, 'concreteDark');
-  // stalker working the first slab, right where the swing starts
-  b.enemy('melee', -3, vy, v0 + 8, 0, {
-    patrol: [[-3, vy, v0 + 4], [3, vy, v0 + 6], [3, vy, v0 + 20], [-3, vy, v0 + 18]], leash: 24,
+  // stalker working the far end of the first slab, clear of the rust block, right where the swing starts
+  b.enemy('melee', -1.5, vy, v0 + 21.5, 0, {
+    patrol: [[-1.5, vy, v0 + 21.5], [3.5, vy, v0 + 21.5], [4, vy, v0 + 18], [-0.5, vy, v0 + 17.5]], leash: 24,
   });
   // the span beyond this stub collapsed: swing across on a hook hanging from the surviving arch
   b.plat(0, vy, v0 + 26, 6, 4, { mat: 'concrete', hazard: 'n', th: 2.4 });
@@ -227,8 +225,6 @@ export function buildCenter(b: LevelBuilder) {
     b.plat(sx, v3y + 7, v0 + 114, 3.6, 3.6, { mat: 'metal', hazard: 'nsew', supports: false });
   }
   b.enemy('ranged', -7.5, v3y + 7, v0 + 114, PI - 0.12);
-  // stalker on the middle slab (where the hangar link lands)
-  b.enemy('melee', 4, v3y, v0 + 50, 0, { patrol: [[4, v3y, v0 + 50], [4, v3y, v0 + 59]], leash: 22 });
   b.zone('Viaduct', -8, v0, 8, v0 + 107);
   b.waypoint('Viaduct', 0, vy + 0.1, v0 + 4);
 

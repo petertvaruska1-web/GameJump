@@ -78,10 +78,6 @@ function buildAssemblyLine(b: LevelBuilder) {
   b.prop('lamp', [x - 3.6, pressY, pressZ0 + 10.5]);
   b.prop('pipe', [x + 5.6, y0 - 1.5, z0 - 2], { q: [x + 5.6, y0 - 1.5, boostZ + 10], s: [0.7, 0.7, 0.7] });
   b.prop('pipe', [x - 5.8, y0 - 3.2, z0 + 10], { q: [x - 5.8, y0 - 3.2, boostZ + 20], s: [1.0, 1.0, 1.0] });
-  // stalker working the landing platform after the boost-belt jump
-  b.enemy('melee', x, pressY - 1, boostZ + 22, PI, {
-    patrol: [[x - 2, pressY - 1, boostZ + 19], [x + 2, pressY - 1, boostZ + 19], [x + 2, pressY - 1, boostZ + 25], [x - 2, pressY - 1, boostZ + 25]], leash: 16,
-  });
   b.crate(x + 2, pressY - 1, boostZ + 21, 1.2);
   b.crate(x - 2, pressY - 1, boostZ + 23, 1.0, 0.4);
   // sentinel watching the sorting floor from the east
@@ -152,8 +148,8 @@ function buildLaserGalleries(b: LevelBuilder) {
   b.block(x + 1.5, y0, dz - 1, 2.4, 2.3, 0.6, 'concreteDark');
   b.block(x - 2.2, y0, dz + 1.5, 0.6, 2.3, 2.6, 'concreteDark');
   b.crate(x + 0.5, y0, dz + 1.2, 1.2);
-  b.enemy('melee', x - 3.5, y0, dz + 3.5, 0, {
-    patrol: [[x - 3.5, y0, dz + 3.5], [x + 3.5, y0, dz + 3.5], [x + 3.5, y0, dz - 3.5], [x - 3.5, y0, dz - 3.5]], leash: 14,
+  b.enemy('melee', x - 3.8, y0, dz + 3.8, 0, {
+    patrol: [[x - 3.8, y0, dz + 3.8], [x + 3.7, y0, dz + 3.8], [x + 3.7, y0, dz - 3.5], [x - 3.8, y0, dz - 3.5]], leash: 14,
   });
   c = b.chain(c, [
     { t: 'stairs', len: 7, w: 3.5, dy: 2.5 },

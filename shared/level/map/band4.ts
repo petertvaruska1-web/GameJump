@@ -77,8 +77,6 @@ export function buildCableYards(b: LevelBuilder, start: Cursor): Cursor {
   b.tower(-8.5, z0 + 145, 51, 2, { light: true });
   b.plat(-8.5, 52, z0 + 145, 3.6, 3.6, { mat: 'metal', hazard: 'nsew', supports: false });
   b.enemy('ranged', -8.5, 52, z0 + 145, PI - 0.3);
-  // stalker in the last yard
-  b.enemy('melee', 0, yardY, yardD, PI, { patrol: [[-3.5, yardY, yardD - 4.5], [3.5, yardY, yardD - 4.5], [3.5, yardY, yardD + 4.5], [-3.5, yardY, yardD + 4.5]], leash: 30 });
   b.zone('Cable Yards', -8, z0, 8, edge);
   b.waypoint('Cable Yards', 0, 42.6, yA - 3);
   return c;
@@ -111,8 +109,9 @@ export function buildCoolingWorks(b: LevelBuilder, start: Cursor, x: number): Cu
   b.crate(x + 2.5, y1, hz + 11, 1.2);
   b.prop('lamp', [x - 2.8, y1, hz]);
   b.prop('lamp', [x + 2.8, y1, hz + 9]);
-  b.enemy('melee', x, y1, hz, 0, {
-    patrol: [[x - 7.5, y1, hz - 12], [x + 7.5, y1, hz - 1], [x - 1, y1, hz + 12], [x - 7.5, y1, hz + 2]], leash: 28,
+  // stalker walking the open west half of the hall, clear of the cooling tanks
+  b.enemy('melee', x - 8.25, y1, hz, 0, {
+    patrol: [[x - 8.25, y1, hz], [x, y1, hz], [x - 1, y1, hz + 12.5], [x - 8.25, y1, hz + 12.5]], leash: 28,
   });
   c = b.cursor(x, y1, hz + 15, 0);
   c = b.chain(c, [{ t: 'plat', len: 6, w: 6, mat: 'concrete', hazard: 'n' }]);
@@ -142,9 +141,7 @@ export function buildCoolingWorks(b: LevelBuilder, start: Cursor, x: number): Cu
   b.crate(x + 8.5, y2, pz - 10, 1.3);
   b.prop('lamp', [x + 2.5, y2, pz - 6]);
   b.prop('redLight', [x - 6, y2 + 3.2, pz - 4]);
-  b.enemy('melee', x + 1, y2, pz, PI, {
-    patrol: [[x - 9.5, y2, pz - 10], [x + 9.5, y2, pz - 9], [x + 1, y2, pz + 11], [x - 9.5, y2, pz + 9]], leash: 26,
-  });
+  b.enemy('melee', x + 10, y2, pz - 4, PI, { patrol: [[x + 10, y2, pz - 4], [x + 10, y2, pz + 10]], leash: 26 });
   // the exit is laser-locked on a cycle: time it with the stalker behind you
   b.laserGate(x - 1.6, pz + 13.75, x + 1.6, pz + 13.75, y2, { cycle: 3.6, duty: 0.5, phase: 0.1, posts: false });
   b.prop('redLight', [x, y2 + 3.8, pz + 13.4]);

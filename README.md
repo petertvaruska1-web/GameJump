@@ -203,7 +203,7 @@ conveyor belts, launch pads, zip lines and laser gates/bars/windmills.
 | Route | Character |
 |---|---|
 | **Left** (covered walkway → scaffold yard → catwalk → foundry → pipe yard → hangar → terrace gardens → cooling hall → pump station) | Longest. Most cover, easy jumps, and Stalkers you can sneak around. Conveyor belts in the foundry, a launch pad over the gardens, and a laser-locked exit from the pump station. **Slide obstacle:** the hangar's north shutter is jammed 0.95 m above the floor over an 8 m baggage tunnel. You must slide through, and the two stalkers inside can't follow. |
-| **Centre** (broken bridge → plaza → gantry → twin rails → collapsed viaduct → cable yards) | Medium length and open, with Sentinel sightlines, movers, a sweeper and crumbling floor. A laser gate and a zip line across the Cable Yards. **Grapple obstacle:** the viaduct's middle span collapsed, leaving a 14 m gap. Swing across on a hook hanging from the surviving arch, landing next to a stalker. |
+| **Centre** (broken bridge → plaza → gantry → twin rails → collapsed viaduct → cable yards) | Medium length and open, with Sentinel sightlines, movers, a sweeper and crumbling floor. A laser gate and a zip line across the Cable Yards. **Grapple obstacle:** the viaduct's middle span collapsed, leaving a 14 m gap. Swing across on a hook hanging from the surviving arch; a stalker paces the slab you jump from. |
 | **Right** (rooftops → water-tower roof → smokestacks → antenna array → wrecked skybridge) | Shortest. Brutal sprint jumps, wind gusts on narrow beams, Sentinels and Drones. A launch pad up the antenna array and a zip line along the skybridge's last cable. **Grapple + slide obstacle:** between the smokestacks you swing from one hook to the next without touching down. You land on a railed flue walkway where a chest-high beam sweeps back and forth, and slide under it. |
 
 Cross-links let players switch routes: the pipe crossing, the plaza container climb,
@@ -226,7 +226,7 @@ so you have to time your grab. The east one stops at a relay mast with a Drone.
 From the Foothills you take either the slow covered **service elevator** or the fast,
 exposed **broken stairway** to the Spire.
 
-The course is about 920 m deep with 46 enemies (18 stalkers, 13 sentinels, 15 drones).
+The course is about 920 m deep with 42 enemies (14 stalkers, 13 sentinels, 15 drones).
 Stalkers hit harder than they used to: they see further, commit sooner and chase
 faster — though a stalker's top speed is capped 2% under your sprint, so it can
 never outrun you, only wear you down. Drones see almost all round but are slower than a
@@ -286,7 +286,7 @@ Break line of sight and they search your last known position, then walk back to 
 
 | Enemy | Behaviour |
 |---|---|
-| **Stalker** (melee, 18 of them) | Spots you at 34 m through a 135 deg cone and commits in 0.44 s. Chases at 8.72 m/s — exactly 2% under your 8.9 m/s sprint, with no burst above it, so a sprint always pulls away but only by about 0.2 m/s, and a jog is hopeless. Stops at edges, but leaps gaps up to 6.25 m while chasing. Contact inside 1.31 m kills. Break line of sight, slide through a gap it cannot follow, or keep sprinting. |
+| **Stalker** (melee, 14 of them) | Spots you at 34 m through a 135 deg cone and commits in 0.44 s. Chases at 8.72 m/s — exactly 2% under your 8.9 m/s sprint, with no burst above it, so a sprint always pulls away but only by about 0.2 m/s, and a jog is hopeless. Stops at edges, but leaps gaps up to 6.25 m while chasing. Contact inside 1.31 m kills. Break line of sight, slide through a gap it cannot follow, or keep sprinting. |
 | **Sentinel** (ranged, 13 of them) | Stationary turret with a visible searchlight. Sees 39 m through a 90 deg cone (51 m once it is already tracking you). Charges for 0.8 s (a glowing orb), then fires a slow, visible projectile with wide aim scatter and a weak lead — about 10% per shot at 30 m if you stand still, 2–4% if you keep moving. A hit kills. |
 | **Drone** (flyer, 15 of them) | Hovers on a patrol, sees 40 m almost all round, then flies straight at you (vertically too) at 7.3 m/s and climbs over obstacles, diving at 10.2 m/s over the last 4.5 m. A sprint pulls away from one. It gives up 2 s after losing sight of you and never follows more than 32 m from its post, so breaking line of sight and putting some distance in loses it. Contact kills. |
 

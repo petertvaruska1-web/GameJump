@@ -38,7 +38,7 @@ function scenario(name: string, place: [number, number, number], seconds: number
   for (const l of log.filter((l) => !l.includes('"crumble"')).slice(0, 8)) console.log('   ', l);
 }
 
-// Plaza stalker (patrols near x=-9, z~86); stand on the plaza facing it.
+// Plaza stalker (paces x=-12.8..-5.6 at z~84); stand on the plaza facing it.
 scenario('melee (plaza stalker)', [-4, 36.05, 80], 12);
 // Viaduct sentinels look down the deck from z=318.
 scenario('ranged (viaduct sentinels)', [0, 39.55, 290], 10);

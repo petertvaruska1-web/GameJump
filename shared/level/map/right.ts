@@ -64,7 +64,8 @@ export function buildRight(b: LevelBuilder) {
     leash: 42,
     patrol: [[R1.x - 6, R1.y + 7, R1.z - 5], [R1.x + 6, R1.y + 8, R1.z + 6], [R1.x, R1.y + 8.5, R1.z + 20], [R1.x - 2, R1.y + 9, R1.z + 34]],
   });
-  b.enemy('melee', R1.x + 7, R1.y, R1.z - 6, 0, { patrol: [[R1.x + 7, R1.y, R1.z - 6], [R1.x + 7, R1.y, R1.z + 6], [R1.x - 3, R1.y, R1.z + 6]], leash: 20 });
+  // stalker pacing the middle of the roof, away from the top of the pipe climb
+  b.enemy('melee', R1.x - 3.8, R1.y, R1.z + 2.6, 0, { patrol: [[R1.x - 3.8, R1.y, R1.z + 2.6], [R1.x + 2, R1.y, R1.z + 2.6]], leash: 20 });
   b.zone('Water Tower Roof', R1.x - R1.w / 2, R1.z - R1.d / 2, R1.x + R1.w / 2, R1.z + R1.d / 2);
   b.waypoint('Water Tower Roof', R1.x + 4, R1.y + 0.1, R1.z - 5);
 
@@ -190,10 +191,6 @@ export function buildRight(b: LevelBuilder) {
   // antennas + dishes
   b.tower(R1.x + 3.5, base1 + 3.5, 49 + 12, 0.8);
   b.prop('dish', [R1.x - 3, 49, base1 - 2.5], { ry: 0.7 });
-  // stalker patrolling base 2, where the drop-jump from the dish deck lands
-  b.enemy('melee', R1.x, base2y, base2 + 2, PI, {
-    patrol: [[R1.x - 1.5, base2y, base2 - 3], [R1.x + 1.5, base2y, base2 + 3], [R1.x - 1, base2y, base2 + 4]], leash: 18,
-  });
   b.tower(R1.x - 2.2, base2 + 2.5, base2y + 14, 0.8);
   b.prop('dish', [R1.x + 1.8, base2y, base2 + 3], { ry: -0.6 });
   // sentinel on a mast platform covering the white steps and base 2

@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { zoneAt } from '../shared/hazards';
 import { buildLevel, levelWarnings } from '../shared/level/map/index';
 import { CollisionWorld } from '../shared/physics/world';
+import { patrolClearance } from './enemy-audit';
 
 const level = buildLevel();
 const solids = level.boxes.filter((b) => b.solid);
@@ -19,6 +20,11 @@ for (const e of level.enemies) {
   if (e.kind === 'flyer') continue;
   const d = world.groundBelow(e.p[0], e.p[1] + 0.5, e.p[2], 3);
   if (!isFinite(d)) console.log(`WARN enemy ${e.id} (${e.kind}, ${e.tag}) has no ground at ${e.p.join(',')}`);
+  // a stalker whose patrol runs through a wall ends up pressed against it, marching on the spot
+  if (e.kind === 'melee') {
+    const cl = patrolClearance(world, e);
+    if (cl.min < 0.6) console.log(`WARN stalker ${e.id} (${e.tag}) patrol passes ${cl.min.toFixed(2)} m from a wall at ${cl.at.map((v) => v.toFixed(1)).join(',')}`);
+  }
 }
 for (const w of [...level.waypoints, ...level.spawns.map((p, i) => ({ name: 'spawn' + i, p }))]) {
   const d = world.groundBelow(w.p[0], w.p[1] + 0.5, w.p[2], 3);
