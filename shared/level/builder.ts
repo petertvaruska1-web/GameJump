@@ -122,8 +122,63 @@ export class LevelBuilder {
     return this.box([x, y0 + h / 2, z], [w, h, d], mat, { ry, ...o });
   }
 
+  /**
+   * Decorative prop. Anything with some bulk also gets an invisible solid proxy
+   * roughly its shape, so runners can bump into it and stand on it instead of
+   * falling through something that looks solid. Proxies do not block sight, so
+   * enemies see exactly what they did before.
+   */
   prop(t: PropType, p: V3, extra: Partial<PropDef> = {}) {
+    const def: PropDef = { t, p, ...extra };
+    this.props.push(def);
+    this.propProxy(def);
+  }
+
+  /** A prop whose collision the caller builds itself (crates, walkable pipes). */
+  private propVisual(t: PropType, p: V3, extra: Partial<PropDef> = {}) {
     this.props.push({ t, p, ...extra });
+  }
+
+  private propProxy(d: PropDef) {
+    const [x, y, z] = d.p;
+    const ry = d.ry ?? 0;
+    // tint given so proxies do not use up the random stream the visible boxes are tinted from
+    const o: BoxOpts = { visible: false, sight: false, tint: 1 };
+    const pole = (w: number, h: number) => this.box([x, y + h / 2, z], [w, h, w], 'invisible', o);
+    // round things: two boxes at 45 degrees make an octagon just inside the visible surface
+    const round = (r: number, h: number) => {
+      for (const a of [0, Math.PI / 4]) this.box([x, y + h / 2, z], [r * 1.8, h, r * 1.8], 'invisible', { ...o, ry: a });
+    };
+    switch (d.t) {
+      case 'pipe': {
+        const q = d.q!, r = d.s?.[0] ?? 0.6;
+        const len = Math.hypot(q[0] - x, q[2] - z);
+        if (len < 0.5) break;
+        const pry = Math.atan2(q[0] - x, q[2] - z), mx = (x + q[0]) / 2, mz = (z + q[2]) / 2;
+        // flat-topped where the round top is, about as wide as it is at that height
+        if (Math.abs(q[1] - y) < 0.05) this.box([mx, y + r * 0.2, mz], [r * 1.5, r * 1.6, len], 'invisible', { ...o, ry: pry });
+        else this.rampBox(mx, mz, y + r, q[1] + r, pry, r * 1.5, len, 'invisible', r * 1.6, o);
+        break;
+      }
+      case 'tank': round(d.s?.[0] ?? 2, (d.s?.[1] ?? 4) + 0.3); break;
+      case 'chimney': round(d.s?.[0] ?? 2, d.s?.[1] ?? 60); break;
+      case 'lamp': pole(0.16, 3.2); break;
+      case 'antenna': pole(0.16, d.s?.[1] ?? 6); break;
+      case 'windsock': pole(0.14, 4); break;
+      case 'barrel': pole(0.62, 0.94); break;
+      case 'dish': {
+        pole(0.26, 2);
+        // the bowl leans back at about 55 degrees: a block from its low rim to its high rim
+        const [bx, bz] = this.local(x, z, ry, 0, -0.85);
+        this.box([bx, y + 1.85, bz], [2.4, 1.9, 1.5], 'invisible', { ...o, ry });
+        break;
+      }
+      case 'debris':
+        if (d.v === 1) pole(0.22, 2.2); // dead tree
+        else this.box([x, y + 0.2, z], [1.8, 0.4, 1.8], 'invisible', { ...o, ry }); // low rubble: a step you walk over
+        break;
+      default: break; // lights, cables, the finish beacon: nothing to stand on
+    }
   }
 
   // ---------------------------------------------------------------- platforms
@@ -357,7 +412,7 @@ export class LevelBuilder {
     const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
     if (Math.abs(top2 - top1) < 0.01) this.box([mx, top1 - 0.3, mz], [w, 0.6, len], 'invisible', { ry, visible: false, sight: false });
     else this.rampBox(mx, mz, top1, top2, ry, w, len, 'invisible', 0.6, { visible: false, sight: false });
-    this.prop('pipe', [x1, top1 - r, z1], { q: [x2, top2 - r, z2], s: [r, r, r] });
+    this.propVisual('pipe', [x1, top1 - r, z1], { q: [x2, top2 - r, z2], s: [r, r, r] });
   }
 
   /** Rooftop of a tower block rising out of the clouds. */
@@ -599,7 +654,7 @@ export class LevelBuilder {
 
   crate(x: number, y0: number, z: number, s = 1.2, ry = 0) {
     this.block(x, y0, z, s, s, s, 'invisible', ry, { visible: false, sight: true });
-    this.prop('crate', [x, y0, z], { s: [s, s, s], ry });
+    this.propVisual('crate', [x, y0, z], { s: [s, s, s], ry });
   }
 
   /** Tall lattice tower (visual + solid core) rising from the clouds. */

@@ -76,8 +76,9 @@ function buildAssemblyLine(b: LevelBuilder) {
   }
   b.prop('lamp', [x + 2.9, y0, z0 + 16 + 6.5]);
   b.prop('lamp', [x - 3.6, pressY, pressZ0 + 10.5]);
-  b.prop('pipe', [x + 5.6, y0 - 1.5, z0 - 2], { q: [x + 5.6, y0 - 1.5, boostZ + 10], s: [0.7, 0.7, 0.7] });
-  b.prop('pipe', [x - 5.8, y0 - 3.2, z0 + 10], { q: [x - 5.8, y0 - 3.2, boostZ + 20], s: [1.0, 1.0, 1.0] });
+  // pipes are solid: they hang too far below the line to climb back from, so they are no way round the gate and belts
+  b.prop('pipe', [x + 5.6, y0 - 4.6, z0 - 2], { q: [x + 5.6, y0 - 4.6, boostZ + 10], s: [0.7, 0.7, 0.7] });
+  b.prop('pipe', [x - 5.8, y0 - 6.2, z0 + 10], { q: [x - 5.8, y0 - 6.2, boostZ + 20], s: [1.0, 1.0, 1.0] });
   b.crate(x + 2, pressY - 1, boostZ + 21, 1.2);
   b.crate(x - 2, pressY - 1, boostZ + 23, 1.0, 0.4);
   // sentinel watching the sorting floor from the east

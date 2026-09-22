@@ -185,6 +185,13 @@ The map lives in `shared/level/map/*` as data, built with a small toolkit
 buildings with doorways, containers, movers, crumbling slabs, sweepers, wind zones,
 conveyor belts, launch pads, zip lines and laser gates/bars/windmills.
 
+Everything that looks solid is solid. Each prop with some bulk gets an invisible
+collision proxy roughly its shape: lamp posts, antennas, windsocks, barrels, tanks,
+chimneys, pipes, satellite dishes, rubble piles and dead trees. You can bump into
+them and stand on them. The proxies don't block enemy sight, so the AI sees the
+level as it did before. The same goes for the second girder over the broken
+bridge, the twin rails' sleepers and the reactor ring's maintenance spokes.
+
 ```
                          SPIRE (finish beacon)
                  elevator /          \ broken stairway

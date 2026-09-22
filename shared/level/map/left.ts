@@ -124,7 +124,7 @@ export function buildLeft(b: LevelBuilder) {
   b.crate(F.x + 9.5, F.y, fz - 17, 1.3);
   b.pickup('cloak', F.x + 9.8, F.y, fz + 15.5); // tucked behind the north furnace
   b.crate(F.x - 10, F.y, fz + 17.5, 1.2, 0.3);
-  b.prop('lamp', [F.x + 1, F.y, fz - 6]);
+  b.prop('lamp', [F.x + 2.2, F.y, fz - 5]);
   b.prop('lamp', [F.x + 1, F.y, fz + 7]);
   b.prop('redLight', [F.x + 5, F.y + 6.2, fz - 11]);
   b.prop('chimney', [F.x + 5, F.y + F.h, fz - 11], { s: [1.3, 12, 1.3] });
@@ -193,7 +193,7 @@ export function buildLeft(b: LevelBuilder) {
   b.block(H.x + 10, H.y, hz + 12, 3, 2.2, 3, 'metal');
   b.crate(H.x + 10.5, H.y, hz - 14, 1.3);
   b.crate(H.x - 3, H.y, hz + 15, 1.2, 0.5);
-  b.prop('lamp', [H.x - 4, H.y, hz]);
+  b.prop('lamp', [H.x - 5.5, H.y, hz]);
   b.prop('lamp', [H.x + 9, H.y, hz + 3]);
   // stalker pacing the open floor past the gondola
   b.enemy('melee', H.x + 6.8, H.y, hz + 8, PI, { patrol: [[H.x + 6.8, H.y, hz + 8], [H.x + 11.5, H.y, hz + 8]] });

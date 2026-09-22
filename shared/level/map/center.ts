@@ -58,9 +58,10 @@ export function buildCenter(b: LevelBuilder) {
   ]);
   // collapsed railing lying across the deck: vault it
   b.block(0, 38.5, 39, 3.5, 0.8, 0.5, 'hazard', 0.06);
-  b.prop('debris', [1.1, 39.3, 20.6], { ry: 0.4 });
-  b.prop('debris', [-1.6, 37.6, 32.4], { ry: 2.2 });
-  b.deco([1.3, 38.2, 32.2], [0.5, 0.4, 4.2], 'steel', 0.25);
+  // rubble piled at the broken edges, and a second, narrower girder lying across the hole
+  b.prop('debris', [1.1, 40, 19.1], { ry: 0.4 });
+  b.prop('debris', [-0.85, 38.5, 35.4], { ry: 2.2 });
+  b.box([1.3, 38.2, 32.2], [0.5, 0.4, 4.2], 'steel', { ry: 0.25, sight: false });
   b.prop('cable', [-2, 44, 15], { q: [-2, 39.6, 30] });
   b.prop('cable', [2, 44, 15], { q: [2, 39.6, 30] });
   b.tower(-2.6, 15, 44, 0.6, { light: true });
@@ -79,9 +80,11 @@ export function buildCenter(b: LevelBuilder) {
   b.block(9, py, pz + 5.5, 1.7, 4.6, 1.7, 'concreteDark');
   b.container(11, py, pz + 10, 0.15);
   b.container(-10.5, py, pz + 1.5, -0.08);
+  // monument: a stepped plinth (waist-high cover you can vault onto) and a capped white column
   b.block(1, py, pz - 1, 4, 1.0, 4, 'concrete');
+  b.block(1, py + 1, pz - 1, 2.6, 0.3, 2.6, 'concreteDark', 0, { tint: 1 });
   b.block(1, py + 1, pz - 1, 1.4, 3.4, 1.4, 'white');
-  b.prop('debris', [2.8, py + 1, pz - 2.2], { ry: 1.1 });
+  b.block(1, py + 4.4, pz - 1, 1.9, 0.35, 1.9, 'concreteDark', 0, { tint: 1 });
   // low barriers (vault over; they do not hide you)
   b.block(-7.5, py, pz + 10.5, 5, 0.9, 0.6, 'hazard');
   b.block(4.5, py, pz + 12.5, 4, 0.9, 0.6, 'hazard', 0.1);
@@ -171,10 +174,8 @@ export function buildCenter(b: LevelBuilder) {
   for (let zz = r0 + 1.5; zz < VIADUCT_Z0 - 1; zz += 3.2) {
     const brokenA = zz > r0 + 13.5 && zz < r0 + 17.5;
     const brokenB = zz > r0 + 20 && zz < r0 + 23.5;
-    if (!brokenA && !brokenB) b.deco([0, g.y - 0.7, zz], [7.4, 0.3, 0.5], 'rust');
+    if (!brokenA && !brokenB) b.box([0, g.y - 0.7, zz], [7.4, 0.3, 0.5], 'rust', { sight: false }); // sleepers you can land on
   }
-  b.prop('debris', [3, g.y - 0.6, r0 + 14.4], { ry: 0.2 });
-  b.prop('debris', [-3, g.y - 0.6, r0 + 22.8], { ry: 2.8 });
   b.enemy('flyer', 0, g.y + 6, r0 + 16, PI, { patrol: [[-4, g.y + 6, r0 + 4], [4, g.y + 7, r0 + 18], [-3, g.y + 6, r0 + 28]], leash: 30 });
   // detour: swing off the east rail to a hidden ledge with a boost crate, then walk a plank to the viaduct
   b.plat(10, g.y, r0 + 18, 4, 4, { mat: 'metal', hazard: 'nsew' });

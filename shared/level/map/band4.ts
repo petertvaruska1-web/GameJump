@@ -107,7 +107,7 @@ export function buildCoolingWorks(b: LevelBuilder, start: Cursor, x: number): Cu
   b.block(x + 5.5, y1, hz - 8, 3, 2.2, 5, 'steel');
   b.block(x - 5.5, y1, hz + 8, 3, 1.0, 6, 'steel');
   b.crate(x + 2.5, y1, hz + 11, 1.2);
-  b.prop('lamp', [x - 2.8, y1, hz]);
+  b.prop('lamp', [x - 2.8, y1, hz - 2.2]);
   b.prop('lamp', [x + 2.8, y1, hz + 9]);
   // stalker walking the open west half of the hall, clear of the cooling tanks
   b.enemy('melee', x - 8.25, y1, hz, 0, {

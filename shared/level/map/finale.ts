@@ -21,11 +21,11 @@ export function buildRing(b: LevelBuilder) {
   b.box([x, (coreBottom + coreTop) / 2, z], [13, coreTop - coreBottom, 13], 'invisible', { visible: false, sight: true });
   b.box([x, (coreBottom + coreTop) / 2, z], [13, coreTop - coreBottom, 13], 'invisible', { visible: false, sight: true, ry: PI / 4 });
   b.prop('tank', [x, coreBottom, z], { s: [7.2, coreTop - coreBottom, 7.2], v: 1 });
-  // maintenance spokes (visual) from ring to core
+  // maintenance spokes from ring to core: solid, so a slip off the inner edge can land on one
   for (let k = 0; k < 4; k++) {
     const a = PI / 4 + (k * PI) / 2;
     const r0 = 7.4, r1 = RING.R - width / 2;
-    b.deco([x + Math.sin(a) * (r0 + r1) / 2, y - 3, z + Math.cos(a) * (r0 + r1) / 2], [0.8, 0.8, r1 - r0], 'steel', a);
+    b.box([x + Math.sin(a) * (r0 + r1) / 2, y - 3, z + Math.cos(a) * (r0 + r1) / 2], [0.8, 0.8, r1 - r0], 'steel', { ry: a, sight: false });
   }
   // cover blocks on the ring
   for (const k of [1, 3, 5, 7]) {
@@ -117,9 +117,9 @@ export function buildFinale(b: LevelBuilder) {
     { t: 'stairs', len: 9, w: 3, dy: 5.6 },
     { t: 'plat', len: 4, w: 4, mat: 'concrete', hazard: 'e' },
   ]);
-  b.prop('debris', [-18.6, y0 + 3, jz + 18], { ry: 0.3 });
+  b.prop('debris', [-17.35, y0 + 3.6, jz + 19.5], { ry: 0.3 });
   b.grapple([-15.5, y0 + 9.5, jz + 13.8], { optional: true, mount: [-20.5, -110, jz + 13.8] });
-  b.prop('debris', [-12.5, y0 + 9.5, jz + 44], { ry: 2.1 });
+  b.prop('debris', [-14.5, y0 + 9.8, jz + 44], { ry: 2.1 });
   b.enemy('flyer', -22, y0 + 12, jz + 32, 0, {
     patrol: [[-22, y0 + 10, jz + 14], [-24, y0 + 15, jz + 46], [-11, y0 + 14, jz + 34], [-20, y0 + 18, jz + 64]],
   });
