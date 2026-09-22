@@ -250,7 +250,7 @@ three routes come out as three different tests rather than three versions of one
 | Clean run to the North Junction | 86.6 s | 84.3 s | 82.7 s (80.7 s by the Leap of Faith) |
 | A jump taken this early kills you | never (tested to 1.5 m early) | about 1.2 m (the Cable Yards mover) | 1.0 m (the skybridge mover) |
 | Stopping a second to line up a jump | always safe | kills on every crumbling floor | kills on its crumbling slabs |
-| Would-be deaths for a runner who ignores enemies | 3.8, mostly stalkers | 3.3, drones and sentinels | 2.9 |
+| Would-be deaths for a runner who ignores enemies | 2.9, mostly stalkers | 4.6, stalkers and drones | 1.5, drones and sentinels |
 
 The **left** asks for patience and stealth: nothing underfoot punishes you for waiting,
 but its interiors are stalker country. The **centre** asks for momentum across open,
@@ -274,6 +274,12 @@ Tuning that came out of these measurements (each a small change to one obstacle)
   perfect run is thrown off at some arrival times) and the left route (widening the gap
   onto its one mover jumps straight from forgiving to right-route-hard, with no step
   between).
+- Stalkers were moved out of spots where they caught you with nowhere to dash
+  (`npx tsx scripts/enemy-audit.ts` replays the routes and counts those). The right
+  route lost its two (the water-tower stalker waited at the top of the pipe climb and
+  caught every run), so it is now the gentlest on enemies. The centre's plaza stalker,
+  which had been stuck against a wall, now patrols, so the centre became the most
+  hunted, but it charges across open floor, where one dash takes you out of its way.
 
 ## Enemies
 
