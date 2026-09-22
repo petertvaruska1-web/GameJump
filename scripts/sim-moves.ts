@@ -266,6 +266,40 @@ function jumpRun(taps: number[]): { dist: number; flips: number; peak: number } 
   }
 }
 
+// ---------------------------------------------------------------- steep stairs
+// Sprinting up the steepest flight in the level (5.6 m over 9 m, like the finale's)
+// and jumping, then flipping, at every moment along the way. A jump that rises
+// slower than the steps used to sink into them until they shoved the runner out
+// through the gap underneath.
+{
+  const rise = 5.6, len = 9, w = 3;
+  const level = lvl([[[0, -0.5, -10], [w, 1, 20]], [[0, rise - 0.5, len + 10], [w, 1, 20]]]);
+  level.boxes.push({ id: 2, p: [0, -0.3, len / 2], s: [w, 0.6, len], ry: 0, rise, mat: 'invisible', kind: 'static', solid: true, visible: false, blocksSight: false });
+  let tried = 0, lost = 0, worst = '';
+  for (let jumpZ = -2; jumpZ <= 6; jumpZ += 0.5) {
+    for (let flipAfter = -0.04; flipAfter <= 0.6; flipAfter += 0.04) {
+      const world = new CollisionWorld(level);
+      const m = new PlayerMotor();
+      m.spawn(0, 0, -12, 0);
+      let t = 0, jumpedAt = -1, flipped = flipAfter < 0;
+      for (let i = 0; i < 120 * 4; i++) {
+        const b = m.body;
+        const jump = jumpedAt < 0 && b.grounded && b.pos.z >= jumpZ;
+        if (jump) jumpedAt = t;
+        const flip = jumpedAt >= 0 && !flipped && t - jumpedAt >= flipAfter;
+        if (flip) flipped = true;
+        world.update(t);
+        m.step(world, PHYS.STEP, inp({ z: 1, sprint: true, jumpHeld: true, jumpPressed: jump || flip }));
+        t += PHYS.STEP;
+        if (b.pos.y < -1 || Math.abs(b.pos.x) > 0.3) { lost++; worst ||= `jump at z=${jumpZ}, flip +${flipAfter.toFixed(2)} s`; break; }
+        if (b.pos.z > len + 5) break;
+      }
+      tried++;
+    }
+  }
+  check('jumping and flipping up steep stairs never drops you through them', lost === 0, `${lost}/${tried} runs fell through ${worst}`);
+}
+
 // ---------------------------------------------------------------- dash
 /** Runs head-on at a charging stalker and dashes aside at `dashAt` metres. Returns what happened. */
 function headOn(dashAt: number, repeat = false): string {

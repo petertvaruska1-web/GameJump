@@ -83,6 +83,17 @@ export function stepBody(world: CollisionWorld, b: CharBody, dt: number, jumped:
     }
     b.pos.y = newY;
     b.grounded = false; b.ground = null;
+    // Still rising, but over stairs or a ramp that climbs faster than you do (a
+    // sprint jump, or a front flip, up a steep flight): the slope catches your
+    // feet. Left alone they sank into it until it counted as a wall, which
+    // shoved you off the side or through the gap beneath it.
+    world.groundProbe(b.pos.x, b.pos.z, gr, oldY + PLAYER.AIR_STEP, gh);
+    if (gh.c && gh.c.rise !== 0 && gh.top >= newY) {
+      info.landed = true; info.impact = 0;
+      b.pos.y = gh.top;
+      b.vel.y = 0; b.ext.y = 0;
+      b.grounded = true; b.ground = gh.c;
+    }
   } else {
     const probeTop = oldY + (wasGrounded ? PLAYER.STEP_HEIGHT : PLAYER.AIR_STEP);
     world.groundProbe(b.pos.x, b.pos.z, gr, probeTop, gh);
