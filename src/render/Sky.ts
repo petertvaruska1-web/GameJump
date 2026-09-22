@@ -106,6 +106,18 @@ export class Sky {
 
     this.buildPuffs();
     this.buildSilhouettes();
+    this.buildSkyWriting();
+  }
+
+  /** A faint word written in cloud far ahead of the course, for anyone who looks up. */
+  private buildSkyWriting() {
+    const mat = new THREE.MeshBasicMaterial({ map: cloudWriting('majo.majer'), transparent: true, opacity: 0.5, depthWrite: false, fog: false, color: 0xf4efe8 });
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(460, 115), mat);
+    sign.position.set(200, 330, 1300);
+    // face back down the course, tipped toward runners below it
+    sign.rotation.set(0.3, Math.atan2(0 - 200, 450 - 1300), 0, 'YXZ');
+    sign.renderOrder = -5;
+    this.group.add(sign);
   }
 
   private buildPuffs() {
@@ -223,6 +235,41 @@ function cloudTexture(): THREE.Texture {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, 256, 128);
   }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Text traced in soft cloud puffs, so it reads as skywriting rather than lettering. */
+function cloudWriting(text: string): THREE.Texture {
+  const W = 1024, H = 256;
+  const mask = document.createElement('canvas');
+  mask.width = W; mask.height = H;
+  const m = mask.getContext('2d')!;
+  m.fillStyle = '#fff';
+  m.font = '900 150px "Arial Rounded MT Bold", "Trebuchet MS", Arial, sans-serif';
+  m.textAlign = 'center'; m.textBaseline = 'middle';
+  m.fillText(text, W / 2, H / 2 + 6);
+  const px = m.getImageData(0, 0, W, H).data;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d')!;
+  const r = rng(314);
+  const puff = (x: number, y: number, rad: number, a: number) => {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+    g.addColorStop(0, `rgba(255,255,255,${a})`);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  };
+  for (let y = 0; y < H; y += 5) {
+    for (let x = 0; x < W; x += 5) {
+      if (px[(y * W + x) * 4 + 3] < 128 || r() > 0.55) continue;
+      puff(x + (r() - 0.5) * 6, y + (r() - 0.5) * 6, 9 + r() * 12, 0.16 + r() * 0.1);
+    }
+  }
+  // a few loose wisps so the edges fray into the sky
+  for (let i = 0; i < 40; i++) puff(80 + r() * (W - 160), 40 + r() * (H - 80), 20 + r() * 30, 0.04);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
