@@ -195,7 +195,7 @@ export function buildSkybridge(b: LevelBuilder, start: Cursor): Cursor {
   // the deck between the pylons fell away: one suspension cable survives as a zip line
   const zipZ0 = z0 + 2 + 8 + 12, zipY = sy0;
   b.zipline([x, zipY + 3.1, zipZ0 - 3], [x, zipY - 2.5 + 2.65, zipZ0 + 30.5 + 2.2], { postA: zipY, postB: zipY - 2.5 });
-  // skybridge suspension pylons and hanging debris at the broken ends
+  // skybridge suspension pylons, and debris where the deck broke off (none on the landing: it is solid, and riders drop there)
   for (const zz of [z0 + 14, z0 + 40, z0 + 55]) {
     for (const sx of [-2.6, 2.6]) b.tower(x + sx, zz, 64, 0.6, { light: sx < 0 });
     b.prop('cable', [x - 2.6, 63.5, zz], { q: [x - 1.4, 54.2, zz + 9] });
@@ -204,7 +204,6 @@ export function buildSkybridge(b: LevelBuilder, start: Cursor): Cursor {
   b.prop('debris', [x + 0.8, zipY, zipZ0 - 3], { ry: 0.6 });
   // rescue hook above the two offset hops after the zip line
   b.grapple([x + 0.5, zipY + 5.5, zipZ0 + 46], { optional: true, mount: [x + 5, -110, zipZ0 + 46] });
-  b.prop('debris', [x - 0.6, zipY - 2.5, zipZ0 + 36], { ry: 2.4 });
   const mast = z0 + 90;
   b.tower(x + 3.5, mast, 70, 1.0, { light: true });
   b.prop('dish', [x - 3, 53.1, mast + 2], { ry: 3.4 });

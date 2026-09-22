@@ -58,8 +58,7 @@ export function buildCenter(b: LevelBuilder) {
   ]);
   // collapsed railing lying across the deck: vault it
   b.block(0, 38.5, 39, 3.5, 0.8, 0.5, 'hazard', 0.06);
-  // rubble piled at the broken edges, and a second, narrower girder lying across the hole
-  b.prop('debris', [1.1, 40, 19.1], { ry: 0.4 });
+  // rubble piled where the girder lands, and a second, narrower girder lying across the hole
   b.prop('debris', [-0.85, 38.5, 35.4], { ry: 2.2 });
   b.box([1.3, 38.2, 32.2], [0.5, 0.4, 4.2], 'steel', { ry: 0.25, sight: false });
   b.prop('cable', [-2, 44, 15], { q: [-2, 39.6, 30] });
