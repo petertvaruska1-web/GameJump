@@ -319,9 +319,12 @@ export const POWER = {
   SHIELD_GRACE: 2.2,
   STUN: 3.5,
   CLOAK_TIME: 15,
-  JET_TIME: 22,
-  /** Jet boots: one extra jump in the air at this share of a normal jump. */
-  AIR_JUMP: 0.95,
+  /** Boost: you run faster and jump further for this long. */
+  BOOST_TIME: 22,
+  /** ...run and sprint speed x this (a boosted sprint is 10.9 m/s, well clear of a stalker)... */
+  BOOST_SPEED: 1.22,
+  /** ...and take off at this share of a normal jump, so a sprint jump carries about a third further. */
+  BOOST_JUMP: 1.08,
 };
 
 export const LASER = {

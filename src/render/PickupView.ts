@@ -4,9 +4,9 @@
 import * as THREE from 'three';
 import type { LevelData, PowerKind } from '../../shared/level/types';
 
-export const POWER_COLOR: Record<PowerKind, number> = { shield: 0x5ef0ff, cloak: 0xc38bff, jet: 0xffa640 };
-export const POWER_CSS: Record<PowerKind, string> = { shield: '#5ef0ff', cloak: '#c38bff', jet: '#ffa640' };
-export const POWER_NAME: Record<PowerKind, string> = { shield: 'Shield', cloak: 'Cloak', jet: 'Jet boots' };
+export const POWER_COLOR: Record<PowerKind, number> = { shield: 0x5ef0ff, cloak: 0xc38bff, boost: 0xffa640 };
+export const POWER_CSS: Record<PowerKind, string> = { shield: '#5ef0ff', cloak: '#c38bff', boost: '#ffa640' };
+export const POWER_NAME: Record<PowerKind, string> = { shield: 'Shield', cloak: 'Cloak', boost: 'Boost' };
 
 interface CrateVis { root: THREE.Group; box: THREE.Mesh; pillar: THREE.Mesh; glow: THREE.Sprite; base: THREE.Vector3; taken: boolean; popT: number }
 
@@ -28,8 +28,10 @@ function iconTexture(kind: PowerKind): THREE.CanvasTexture {
     ctx.beginPath(); ctx.arc(64, 64, 11, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.moveTo(34, 96); ctx.lineTo(94, 32); ctx.stroke();
   } else {
-    for (const y of [70, 44]) { ctx.beginPath(); ctx.moveTo(36, y + 20); ctx.lineTo(64, y - 6); ctx.lineTo(92, y + 20); ctx.stroke(); }
-    ctx.beginPath(); ctx.moveTo(52, 104); ctx.lineTo(64, 90); ctx.lineTo(76, 104); ctx.stroke();
+    // boost: a fast-forward double chevron trailing speed lines
+    for (const x of [58, 84]) { ctx.beginPath(); ctx.moveTo(x - 18, 36); ctx.lineTo(x + 8, 64); ctx.lineTo(x - 18, 92); ctx.stroke(); }
+    ctx.lineWidth = 6;
+    for (const [y, x0] of [[50, 24], [64, 16], [78, 24]]) { ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + 12, y); ctx.stroke(); }
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
@@ -45,7 +47,7 @@ export class PickupView {
     const pillarGeo = new THREE.CylinderGeometry(0.28, 0.5, 7, 12, 1, true);
     pillarGeo.translate(0, 3.5, 0);
     const mats = new Map<PowerKind, { box: THREE.Material; pillar: THREE.Material }>();
-    for (const kind of ['shield', 'cloak', 'jet'] as PowerKind[]) {
+    for (const kind of ['shield', 'cloak', 'boost'] as PowerKind[]) {
       const col = new THREE.Color(POWER_COLOR[kind]);
       mats.set(kind, {
         box: new THREE.MeshStandardMaterial({ map: iconTexture(kind), emissive: col, emissiveIntensity: 0.55, emissiveMap: iconTexture(kind), roughness: 0.4, metalness: 0.3 }),

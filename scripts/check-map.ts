@@ -10,7 +10,7 @@ const level = buildLevel();
 const solids = level.boxes.filter((b) => b.solid);
 console.log(`boxes=${level.boxes.length} solid=${solids.length} props=${level.props.length} enemies=${level.enemies.length} winds=${level.winds.length}`);
 console.log(`zip lines=${level.ziplines.length} lasers=${level.lasers.length} (gates/bars=${new Set(level.lasers.map((l) => l.group)).size}) belts=${level.boxes.filter((b) => b.belt).length} launch pads=${level.boxes.filter((b) => b.launch).length} hints=${level.hints.length}`);
-console.log(`grapple anchors=${level.grapples.length} (optional ${level.grapples.filter((g) => g.optional).length}) crates=${level.pickups.length} (${['shield', 'cloak', 'jet'].map((k) => `${k} ${level.pickups.filter((p) => p.kind === k).length}`).join(', ')})`);
+console.log(`grapple anchors=${level.grapples.length} (optional ${level.grapples.filter((g) => g.optional).length}) crates=${level.pickups.length} (${['shield', 'cloak', 'boost'].map((k) => `${k} ${level.pickups.filter((p) => p.kind === k).length}`).join(', ')})`);
 console.log('bounds', JSON.stringify(level.bounds));
 for (const w of levelWarnings) console.log('WARN', w);
 

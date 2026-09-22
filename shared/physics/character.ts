@@ -1,7 +1,7 @@
 // Arcade character controller: cylinder vs world, step-up, ground snap,
 // coyote time, jump buffering, jump cut, air control, auto-mantle/vault,
 // ledge climbing, sliding, front flips, sideways dashes, grapple swinging,
-// jet-boot air jumps, moving-platform and conveyor carry, launch pads, zip
+// boosted running and jumping, moving-platform and conveyor carry, launch pads, zip
 // lines and external pushes (wind, sweepers).
 
 import { CLIMB, CORPSE, DASH, FLIP, GRAPPLE, LAUNCH, PHYS, PLAYER, POWER, SLIDE, ZIP } from '../constants';
@@ -212,8 +212,6 @@ export interface MotorEvents {
   hooked: number;
   /** Let go of a grapple rope this step. */
   unhooked: boolean;
-  /** Jet-boot jump in mid-air this step. */
-  airJumped: boolean;
   /** Started a front flip this step. */
   flipped: boolean;
   /** Started a dash this step (-1 left, 1 right, 0 none). */
@@ -239,7 +237,7 @@ export class PlayerMotor {
   readonly platVel = v3();
   readonly events: MotorEvents = {
     jumped: false, landed: false, impact: 0, mantled: false, surface: '', launched: -1, zipOn: -1, zipOff: -1,
-    slid: false, hooked: -1, unhooked: false, airJumped: false, flipped: false, dashed: 0,
+    slid: false, hooked: -1, unhooked: false, flipped: false, dashed: 0,
   };
 
   /** Sliding: low body, locked direction, decaying speed. */
@@ -279,9 +277,8 @@ export class PlayerMotor {
   private dashKeepZ = 0;
   private dashAir = false;
   private airDashUsed = false;
-  /** Jet boots power: one extra jump in the air per airtime while true. */
-  jetBoots = false;
-  private airJumps = 0;
+  /** Boost power: faster running and longer jumps while true. */
+  boost = false;
 
   /** In flight after a launch pad: no air drag, reduced air control. */
   launched = false;
@@ -343,7 +340,6 @@ export class PlayerMotor {
     this.climbCooldown = 0;
     this.wallPush = 0;
     this.yawVel = 0;
-    this.airJumps = 0;
     this.flipping = false;
     this.flipT = 0;
     this.flippedThisAir = false;
@@ -357,7 +353,7 @@ export class PlayerMotor {
     const ev = this.events;
     ev.jumped = false; ev.landed = false; ev.impact = 0; ev.mantled = false;
     ev.launched = -1; ev.zipOn = -1; ev.zipOff = -1;
-    ev.slid = false; ev.hooked = -1; ev.unhooked = false; ev.airJumped = false;
+    ev.slid = false; ev.hooked = -1; ev.unhooked = false;
     ev.flipped = false; ev.dashed = 0;
     if (this.flipping) { this.flipT += dt; if (this.flipT >= FLIP.TIME) this.flipping = false; }
     if (this.zipCooldown > 0) this.zipCooldown -= dt;
@@ -399,7 +395,8 @@ export class PlayerMotor {
     if (inp.jumpPressed) this.pressJump(); else this.jumpBuffer -= dt;
     if (this.landSlow > 0) this.landSlow -= dt;
 
-    const baseSpeed = inp.sprint ? PLAYER.SPRINT_SPEED : PLAYER.RUN_SPEED;
+    const boostK = this.boost ? POWER.BOOST_SPEED : 1;
+    const baseSpeed = (inp.sprint ? PLAYER.SPRINT_SPEED : PLAYER.RUN_SPEED) * boostK;
     const v = b.vel;
 
     // Dash: a short sidestep that owns your horizontal velocity while it runs.
@@ -502,11 +499,11 @@ export class PlayerMotor {
     if (this.jumpBuffer > 0 && !this.dashing && (b.grounded || this.coyote > 0) && slideJumpOk) {
       if (this.sliding) {
         // jumping out of a slide keeps its speed, up to a little more than a sprint
-        const sp = Math.min(this.slideSpeed, SLIDE.JUMP_MAX);
+        const sp = Math.min(this.slideSpeed, SLIDE.JUMP_MAX * boostK);
         v.x = this.slideDirX * sp; v.z = this.slideDirZ * sp;
         this.endSlide();
       }
-      v.y = PLAYER.JUMP_VELOCITY;
+      v.y = PLAYER.JUMP_VELOCITY * (this.boost ? POWER.BOOST_JUMP : 1);
       // Inherit platform motion
       v.x += this.platVel.x; v.z += this.platVel.z;
       if (this.platVel.y > 0) v.y += this.platVel.y;
@@ -514,14 +511,6 @@ export class PlayerMotor {
       this.coyote = 0; this.jumpBuffer = 0; this.jumpCutReady = true;
       jumped = true; ev.jumped = true;
       this.jumpedThisAir = true;
-    } else if (this.jumpBuffer > 0 && !b.grounded && this.coyote <= 0 && this.jetBoots && this.airJumps > 0 && !this.grapple && !this.flipping) {
-      // jet boots: one extra jump in mid-air
-      v.y = Math.max(v.y, PLAYER.JUMP_VELOCITY * POWER.AIR_JUMP);
-      this.airJumps--;
-      this.jumpBuffer = 0;
-      this.launched = false;
-      this.jumpedThisAir = true;
-      ev.airJumped = true;
     }
     if (this.jumpCutReady && !inp.jumpHeld && v.y > 0) { v.y *= PLAYER.JUMP_CUT; this.jumpCutReady = false; }
     if (v.y <= 0) this.jumpCutReady = false;
@@ -603,7 +592,6 @@ export class PlayerMotor {
       this.flipping = false;
       this.airDashUsed = false;
       this.launched = false;
-      this.airJumps = 1;
       this.lastGroundY = b.pos.y;
       ev.surface = b.ground?.def.mat ?? '';
       const pad = b.ground?.def.launch;
@@ -611,7 +599,7 @@ export class PlayerMotor {
     } else {
       this.airTime += dt;
       if (!this.grapple) this.tryZip(world);
-      if (this.zip) { this.airJumps = 1; return; }
+      if (this.zip) return;
     }
 
     // Holding forward into a ledge pulls you over it: the quick vault / ledge grab
@@ -697,7 +685,7 @@ export class PlayerMotor {
     const dx = hs > 0.5 ? v.x / hs : Math.sin(this.yaw);
     const dz = hs > 0.5 ? v.z / hs : Math.cos(this.yaw);
     v.x += dx * FLIP.PUSH; v.z += dz * FLIP.PUSH;
-    v.y = Math.min(v.y + FLIP.LIFT, PLAYER.JUMP_VELOCITY);
+    v.y = Math.min(v.y + FLIP.LIFT, PLAYER.JUMP_VELOCITY * (this.boost ? POWER.BOOST_JUMP : 1));
     this.flipping = true;
     this.flipT = 0;
     this.flippedThisAir = true;
@@ -798,7 +786,6 @@ export class PlayerMotor {
     this.coyote = 0;
     this.jumpBuffer = 0;
     this.launched = false;
-    this.airJumps = 1;
     this.jumpedThisAir = true;
     this.events.hooked = g.id;
     this.anim = Anim.Swing;

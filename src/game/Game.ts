@@ -33,11 +33,11 @@ type Mode = 'menu' | 'connecting' | 'lobby' | 'playing' | 'results';
 const POWER_TIP: Record<PowerKind, string> = {
   shield: 'Soaks one hit from an enemy or a laser',
   cloak: `Enemies cannot see you for ${POWER.CLOAK_TIME} s`,
-  jet: `Jump once more in mid-air for ${POWER.JET_TIME} s`,
+  boost: `Run faster and jump further for ${POWER.BOOST_TIME} s`,
 };
 
 /**
- * Is a timed power (cloak, jet boots) running at this match time? `until` is 0
+ * Is a timed power (cloak, boost) running at this match time? `until` is 0
  * until a crate is actually taken, and the match clock counts *up through zero*
  * during the countdown, so a bare `mt < until` reports both as active on the
  * start line of every run.
@@ -315,7 +315,7 @@ export class Game {
         this.conn?.seedClock(m.now);
         this.beginMatch(m.goAt, m.spawns, !!m.resume, m.crumbles ?? []);
         for (const id of m.taken ?? []) { this.taken.add(id); this.pickups.take(id); }
-        for (const [id, sh, cl, jt] of m.powers ?? []) { const ps = this.powerOf(id); ps.shield = !!sh; ps.cloakUntil = cl; ps.jetUntil = jt; }
+        for (const [id, sh, cl, bt] of m.powers ?? []) { const ps = this.powerOf(id); ps.shield = !!sh; ps.cloakUntil = cl; ps.boostUntil = bt; }
         break;
       case 'snap':
         this.onSnapshot(m.ts, m.p, m.e);
@@ -375,7 +375,13 @@ export class Game {
     // local player
     const mine = spawns[this.meId];
     this.local = new LocalPlayer((this.meId - 1) % 3, this.r.shadows, this.level, {
-      jump: () => this.audio.jump(),
+      jump: () => {
+        this.audio.jump();
+        if (!this.local!.motor.boost) return;
+        this.audio.boostJump();
+        const p = this.local!.pos;
+        this.effects.particles.burst(p.x, p.y + 0.05, p.z, 18, 3, 0.4, 0.25, [1, 0.55, 0.15], 0.7, 6, -3);
+      },
       land: (impact) => {
         this.audio.land(impact);
         this.cam.landing(impact);
@@ -410,11 +416,6 @@ export class Game {
       },
       hooked: () => this.audio.grappleHook(),
       unhooked: () => this.audio.grappleRelease(),
-      airJumped: () => {
-        this.audio.airJump();
-        const p = this.local!.pos;
-        this.effects.particles.burst(p.x, p.y + 0.05, p.z, 30, 4, 0.5, 0.3, [1, 0.55, 0.15], 0.9, 6, -3);
-      },
       flipped: () => {
         this.audio.flip();
         const p = this.local!.pos;
@@ -458,7 +459,7 @@ export class Game {
   }
 
   private localDeathShown = false;
-  private powers = new Map<number, { shield: boolean; cloakUntil: number; jetUntil: number }>();
+  private powers = new Map<number, { shield: boolean; cloakUntil: number; boostUntil: number }>();
   private taken = new Set<number>();
   /** Crates this client hid when its runner touched them, waiting for the server (id -> time). */
   private predicted = new Map<number, number>();
@@ -471,7 +472,7 @@ export class Game {
 
   private powerOf(id: number) {
     let ps = this.powers.get(id);
-    if (!ps) { ps = { shield: false, cloakUntil: 0, jetUntil: 0 }; this.powers.set(id, ps); }
+    if (!ps) { ps = { shield: false, cloakUntil: 0, boostUntil: 0 }; this.powers.set(id, ps); }
     return ps;
   }
 
@@ -560,18 +561,18 @@ export class Game {
     // powers: motor, runner visuals and HUD
     const me = this.powerOf(this.meId);
     if (local) {
-      local.motor.jetBoots = timedPower(me.jetUntil, mt);
-      local.model.setPowers(me.shield && !local.dead, timedPower(me.cloakUntil, mt) ? 0.65 : 0, timedPower(me.jetUntil, mt));
+      local.motor.boost = timedPower(me.boostUntil, mt);
+      local.model.setPowers(me.shield && !local.dead, timedPower(me.cloakUntil, mt) ? 0.65 : 0, local.motor.boost);
     }
     for (const rp of this.remotes.values()) {
       const ps = this.powerOf(rp.id);
-      rp.model.setPowers(ps.shield && rp.status === Status.Alive, timedPower(ps.cloakUntil, mt) ? 0.85 : 0, timedPower(ps.jetUntil, mt));
+      rp.model.setPowers(ps.shield && rp.status === Status.Alive, timedPower(ps.cloakUntil, mt) ? 0.85 : 0, timedPower(ps.boostUntil, mt));
     }
     const hud: { name: string; color: string; remaining?: number; total?: number }[] = [];
     if (local && !local.dead) {
       if (me.shield) hud.push({ name: POWER_NAME.shield, color: POWER_CSS.shield });
       if (timedPower(me.cloakUntil, mt)) hud.push({ name: POWER_NAME.cloak, color: POWER_CSS.cloak, remaining: me.cloakUntil - mt, total: POWER.CLOAK_TIME });
-      if (timedPower(me.jetUntil, mt)) hud.push({ name: POWER_NAME.jet, color: POWER_CSS.jet, remaining: me.jetUntil - mt, total: POWER.JET_TIME });
+      if (timedPower(me.boostUntil, mt)) hud.push({ name: POWER_NAME.boost, color: POWER_CSS.boost, remaining: me.boostUntil - mt, total: POWER.BOOST_TIME });
     }
     this.ui.powers(hud);
   }
@@ -727,7 +728,7 @@ export class Game {
         const ps = this.powerOf(e.p);
         if (e.kind === 'shield') ps.shield = true;
         else if (e.kind === 'cloak') ps.cloakUntil = e.until;
-        else ps.jetUntil = e.until;
+        else ps.boostUntil = e.until;
         this.pickups.centre(e.id, tmpV);
         const c = new THREE.Color(POWER_COLOR[e.kind]);
         this.effects.particles.burst(tmpV.x, tmpV.y, tmpV.z, 50, 5, 0.9, 0.35, [c.r, c.g, c.b], 0.9, 2, 2);
@@ -1036,7 +1037,7 @@ export class Game {
       this.ui.bottom(local.finished ? 'Waiting for the others…' : '');
     }
     const b = local.motor.body;
-    this.cam.update(dt, { pos: local.renderPos, vel: local.renderVel, grounded: b.grounded, sprinting: local.motor.anim === Anim.Sprint, riding: !!local.motor.zip || !!local.motor.grapple, low: local.motor.sliding, dashing: this.dashKick > 0.05 }, this.world, mt);
+    this.cam.update(dt, { pos: local.renderPos, vel: local.renderVel, grounded: b.grounded, sprinting: local.motor.anim === Anim.Sprint, riding: !!local.motor.zip || !!local.motor.grapple, low: local.motor.sliding, dashing: this.dashKick > 0.05, boosted: local.motor.boost }, this.world, mt);
     this.dashKick = Math.max(0, this.dashKick - dt * 3);
   }
 

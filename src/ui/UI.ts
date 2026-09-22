@@ -170,7 +170,7 @@ export class UI {
         <li>Rare glowing crates: walk through one to take it. The first runner to reach a crate gets it.</li>
         <li><b style="color:#5ef0ff">Shield</b> soaks one hit (a stalker, drone, shot or laser) and staggers the attacker. It does not save you from falling.</li>
         <li><b style="color:#c38bff">Cloak</b>: for 15 seconds enemies cannot see you, and any that were chasing you lose you.</li>
-        <li><b style="color:#ffa640">Jet boots</b>: for 22 seconds you can jump once more in mid-air.</li>
+        <li><b style="color:#ffa640">Boost</b>: for 22 seconds you run faster and every jump carries further.</li>
       </ul>
       <h3>Enemies</h3>
       <ul>

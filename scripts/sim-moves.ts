@@ -191,15 +191,16 @@ function standHook(gap: number, dy: number, ah: number, releaseAfter: number, ju
  * seconds after take-off. Returns the range of the jump (distance covered before
  * dropping back to take-off height), how high it went and how many flips fired.
  */
-function jumpRun(taps: number[]): { dist: number; flips: number; peak: number } {
+function jumpRun(taps: number[], boost = false): { dist: number; flips: number; peak: number; speed: number } {
   const world = new CollisionWorld(lvl([[[0, -0.5, -10], [10, 1, 40]]]));
   const m = new PlayerMotor();
   m.spawn(0, 0, -20, 0);
-  let t = 0, jumpedAt = -1, edge = 0, flips = 0, peak = 0, dist = 0;
+  m.boost = boost;
+  let t = 0, jumpedAt = -1, edge = 0, flips = 0, peak = 0, dist = 0, speed = 0;
   for (let i = 0; i < 120 * 6; i++) {
     const b = m.body;
     const jump = jumpedAt < 0 && b.pos.z > 9.2 && b.grounded;
-    if (jump) { jumpedAt = t; edge = b.pos.z; }
+    if (jump) { jumpedAt = t; edge = b.pos.z; speed = Math.hypot(b.vel.x, b.vel.z); }
     const tap = jumpedAt >= 0 && taps.some((x) => t - jumpedAt >= x && t - jumpedAt < x + PHYS.STEP);
     world.update(t);
     m.step(world, PHYS.STEP, inp({ z: 1, sprint: true, jumpPressed: jump || tap }));
@@ -210,7 +211,7 @@ function jumpRun(taps: number[]): { dist: number; flips: number; peak: number } 
     if (jumpedAt >= 0 && !dist && b.pos.y <= 0 && b.vel.y < 0 && t - jumpedAt > 0.1) dist = b.pos.z - edge;
     if (jumpedAt >= 0 && b.pos.y < -8) break;
   }
-  return { dist, flips, peak };
+  return { dist, flips, peak, speed };
 }
 
 {
@@ -225,6 +226,12 @@ function jumpRun(taps: number[]): { dist: number; flips: number; peak: number } 
     `peak ${plain.peak.toFixed(2)} m -> ${flipped.peak.toFixed(2)} m`);
   const twice = jumpRun([0.12, 0.45, 0.55]);
   check('only one flip fits in an airtime', twice.flips === 1, `flips=${twice.flips}`);
+  // the boost crate: faster running and a longer jump, without turning it into a high jump
+  const boosted = jumpRun([], true);
+  const boostGain = boosted.dist / plain.dist - 1;
+  check('a boost speeds up the sprint', boosted.speed > plain.speed * 1.18 && boosted.speed < 12, `take-off ${plain.speed.toFixed(2)} m/s -> ${boosted.speed.toFixed(2)} m/s`);
+  check('a boosted sprint jump carries about a third further', boostGain > 0.25 && boostGain < 0.45,
+    `range ${plain.dist.toFixed(2)} m -> ${boosted.dist.toFixed(2)} m (+${(boostGain * 100).toFixed(0)}%), peak ${plain.peak.toFixed(2)} m -> ${boosted.peak.toFixed(2)} m`);
   // a long fall: press Space seconds after leaving the ground and it still flips
   {
     const world = new CollisionWorld(lvl([[[0, -0.5, -10], [10, 1, 40]]]));

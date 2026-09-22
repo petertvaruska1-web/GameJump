@@ -118,7 +118,7 @@ export interface GrappleDef {
   tag?: string;
 }
 
-export type PowerKind = 'shield' | 'cloak' | 'jet';
+export type PowerKind = 'shield' | 'cloak' | 'boost';
 
 /** Power-up crate, taken by walking through it (once per match). */
 export interface PickupDef {

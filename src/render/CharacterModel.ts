@@ -236,12 +236,12 @@ export class CharacterModel {
 
   setTagVisible(v: boolean) { if (this.tag) this.tag.visible = v; }
 
-  /** Powers shown on the runner: shield bubble, cloak (0 visible .. 1 cloaked), glowing jet boots. */
-  setPowers(shield: boolean, cloak: number, jet: boolean) {
+  /** Powers shown on the runner: shield bubble, cloak (0 visible .. 1 cloaked), glowing boots while boosted. */
+  setPowers(shield: boolean, cloak: number, boost: boolean) {
     this.bubble.visible = shield;
     this.cloakTarget = cloak;
-    this.boots.emissive.setHex(jet ? 0xff7a1a : 0x000000);
-    this.boots.emissiveIntensity = jet ? 1.6 : 0;
+    this.boots.emissive.setHex(boost ? 0xff7a1a : 0x000000);
+    this.boots.emissiveIntensity = boost ? 1.6 : 0;
   }
 
   /** Smoothly drive a joint value toward a target. */

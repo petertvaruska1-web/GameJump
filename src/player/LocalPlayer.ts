@@ -21,7 +21,6 @@ export interface PlayerHooks {
   slid(): void;
   hooked(id: number): void;
   unhooked(): void;
-  airJumped(): void;
   /** Started a front flip. */
   flipped(): void;
   /** Started a dash (-1 left, 1 right). */
@@ -171,7 +170,6 @@ export class LocalPlayer {
       if (ev.slid) this.hooks.slid();
       if (ev.hooked >= 0) this.hooks.hooked(ev.hooked);
       if (ev.unhooked) this.hooks.unhooked();
-      if (ev.airJumped) this.hooks.airJumped();
       if (ev.flipped) this.hooks.flipped();
       if (ev.dashed !== 0) this.hooks.dashed(ev.dashed);
       if (!this.frozen && !this.dead && !this.immune && stepT >= this.laserGraceUntil && this.level.lasers.length

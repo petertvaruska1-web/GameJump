@@ -194,10 +194,10 @@ function buildLaunchYard(b: LevelBuilder) {
   b.prop('redLight', [-11.2, 57.2, 706.8]);
   b.prop('redLight', [11.2, 66.2, 706.8]);
   b.hint('launch', -3, y, 700, 8, 'Launch pads throw you onto the next platform. Just step on, you can steer a little in the air.');
-  // detour: a hook out over the gap west of the yard swings you to a ledge with jet boots (and back)
+  // detour: a hook out over the gap west of the yard swings you to a ledge with a boost crate (and back)
   b.plat(-35, y + 0.5, 694, 4, 4, { mat: 'metal', hazard: 'nsew' });
   b.grapple([-28, y + 9, 694], { optional: true, mount: [-35.8, y + 0.5, 694] });
-  b.pickup('jet', -35, y + 0.5, 694);
+  b.pickup('boost', -35, y + 0.5, 694);
   // stalker patrolling between the containers; the pad is the way out
   b.enemy('melee', 0, y, zc - 5, 0, { patrol: [[-13, y, zc - 5], [13, y, zc - 5], [13, y, zc + 4], [-13, y, zc + 4]], leash: 22 });
   b.zone('Launch Yard', -w / 2, z0, w / 2, STATION.z0);

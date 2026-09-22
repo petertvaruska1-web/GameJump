@@ -176,10 +176,10 @@ export function buildCenter(b: LevelBuilder) {
   b.prop('debris', [3, g.y - 0.6, r0 + 14.4], { ry: 0.2 });
   b.prop('debris', [-3, g.y - 0.6, r0 + 22.8], { ry: 2.8 });
   b.enemy('flyer', 0, g.y + 6, r0 + 16, PI, { patrol: [[-4, g.y + 6, r0 + 4], [4, g.y + 7, r0 + 18], [-3, g.y + 6, r0 + 28]], leash: 30 });
-  // detour: swing off the east rail to a hidden ledge with jet boots, then walk a plank to the viaduct
+  // detour: swing off the east rail to a hidden ledge with a boost crate, then walk a plank to the viaduct
   b.plat(10, g.y, r0 + 18, 4, 4, { mat: 'metal', hazard: 'nsew' });
   b.grapple([6.5, g.y + 7, r0 + 18], { optional: true, mount: [10.8, g.y, r0 + 18] });
-  b.pickup('jet', 10, g.y, r0 + 18);
+  b.pickup('boost', 10, g.y, r0 + 18);
   b.beam(10, r0 + 20, 4.5, VIADUCT_Z0 + 1, g.y, 0.8, 'rust');
   b.zone('Twin Rails', -6, r0, 6, VIADUCT_Z0);
 

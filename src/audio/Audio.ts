@@ -316,7 +316,8 @@ export class AudioEngine {
     this.tone(this.sfx, { type: 'triangle', f0: 160, f1: 70, gain: 0.07, decay: 0.16, lp: 900 });
   }
 
-  airJump() {
+  /** A boosted take-off: a rising whoosh under the normal jump. */
+  boostJump() {
     if (!this.ready) return;
     this.noiseHit(this.sfx, { type: 'lowpass', freq: 400, freqEnd: 2400, gain: 0.25, attack: 0.02, decay: 0.3 });
     this.tone(this.sfx, { type: 'sawtooth', f0: 90, f1: 240, gain: 0.08, decay: 0.25, lp: 1200 });

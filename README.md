@@ -146,7 +146,7 @@ because there is no floor behind its lip, the pull-up takes up to 0.7 s during
 which you cannot act, you arrive at walking pace, and there is a 0.9 s pause
 before the next one.
 
-There's no double jump or wall run, except for the jet boots power below.
+There's no double jump or wall run.
 
 ## Obstacles
 
@@ -176,7 +176,7 @@ it first. Each route has two, and the Upper Works has two.
 |---|---|
 | **Shield** (3 crates) | Soaks one hit from a stalker, drone, Sentinel shot or laser. You then get 2.2 s of grace, and the attacker is stunned for 3.5 s before it gives up the chase. It doesn't save you from falling. |
 | **Cloak** (3 crates) | For 15 s enemies can't see you, and any that were chasing you lose you. You turn ghostly. |
-| **Jet boots** (2 crates) | For 22 s you can jump once more in mid-air. |
+| **Boost** (2 crates) | For 22 s you run 22% faster (a sprint of 10.9 m/s, which leaves any stalker behind) and take off 8% harder, so a sprint jump carries about a third further (5.9 m -> 7.8 m) while rising only a little higher. Your boots glow and the view widens at speed. |
 
 ## The level
 
@@ -363,7 +363,7 @@ landings above 17 m/s cost you a beat and shake the camera.
   Riding a zip line over open air is not a fall.
 - Crates are handed out by the server, first come first served. The client hides a crate
   as soon as you touch it and brings it back if the server gives it to someone else.
-  Shields, cloaks and jet boots are tracked on the server. It knows when you're sliding
+  Shields, cloaks and boosts are tracked on the server. It knows when you're sliding
   from your reported animation, and uses the smaller body for shots and lasers.
 - Lasers are checked by both sides. The client detects a touch at its synced clock and
   reports it straight away, so the death shows without lag. The server re-checks every

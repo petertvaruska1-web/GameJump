@@ -35,10 +35,10 @@ export class RoomPlayer implements Target {
   cause: DeathCause | undefined;
   /** Debug: enemies cannot kill this player. */
   god = false;
-  /** Powers: one-hit shield, cloak and jet boots (match times), plus the grace after a shield breaks. */
+  /** Powers: one-hit shield, cloak and boost (match times), plus the grace after a shield breaks. */
   shield = false;
   cloakUntil = 0;
-  jetUntil = 0;
+  boostUntil = 0;
   graceUntil = 0;
   cloaked = false;
   constructor(public readonly id: number, public name: string, public readonly token: string, public conn: Conn | null) {}
@@ -48,7 +48,7 @@ export class RoomPlayer implements Target {
   get low() { return this.anim === Anim.Slide; }
   /** Mid front flip: tucked, so shots are aimed below the chest. */
   get tucked() { return this.anim === Anim.Flip; }
-  resetPowers() { this.shield = false; this.cloakUntil = 0; this.jetUntil = 0; this.graceUntil = 0; this.cloaked = false; }
+  resetPowers() { this.shield = false; this.cloakUntil = 0; this.boostUntil = 0; this.graceUntil = 0; this.cloaked = false; }
 }
 
 interface Projectile { id: number; owner: number; pos: Vec3; vel: Vec3; born: number }
@@ -292,7 +292,7 @@ export class Room implements EnemyHost {
     for (const q of this.players) spawns[q.id] = [round3(q.pos.x), round3(q.pos.y), round3(q.pos.z)];
     const crumbles: [number, string, number][] = [];
     for (const [id, s] of this.crumbles) if (s.s !== 'idle') crumbles.push([id, s.s, s.t]);
-    const powers: [number, number, number, number][] = this.players.map((q) => [q.id, q.shield ? 1 : 0, round2(q.cloakUntil), round2(q.jetUntil)]);
+    const powers: [number, number, number, number][] = this.players.map((q) => [q.id, q.shield ? 1 : 0, round2(q.cloakUntil), round2(q.boostUntil)]);
     p.conn?.send({ t: 'start', goAt: round3(this.goAt), now: round3(this.now), spawns, resume, crumbles, taken: [...this.taken], powers });
   }
 
@@ -373,7 +373,7 @@ export class Room implements EnemyHost {
       let until = 0;
       if (c.kind === 'shield') p.shield = true;
       else if (c.kind === 'cloak') { p.cloakUntil = until = t + POWER.CLOAK_TIME; p.cloaked = true; }
-      else { p.jetUntil = until = t + POWER.JET_TIME; }
+      else { p.boostUntil = until = t + POWER.BOOST_TIME; }
       this.pushEvent({ k: 'pickup', id: c.id, p: p.id, kind: c.kind, until: round2(until) });
     }
   }

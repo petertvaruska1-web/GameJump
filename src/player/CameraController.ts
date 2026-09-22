@@ -20,6 +20,8 @@ export interface CamTarget {
   low?: boolean;
   /** Mid dash: a brief widening of the view. */
   dashing?: boolean;
+  /** Boost power running: the view widens further at speed. */
+  boosted?: boolean;
 }
 
 const BASE_DIST = 5.0;
@@ -183,7 +185,7 @@ export class CameraController {
       this.shake = Math.max(0, this.shake - dt * 2.4);
     }
     // FOV kick
-    const kick = (t.sprinting && hs > 7 ? 6 : 0) + (t.low ? 5 : 0) + (t.dashing ? 7 : 0) + clamp((-t.vel.y - 14) * 0.5, 0, 12);
+    const kick = (t.sprinting && hs > 7 ? 6 : 0) + (t.boosted && hs > 7 ? 5 : 0) + (t.low ? 5 : 0) + (t.dashing ? 7 : 0) + clamp((-t.vel.y - 14) * 0.5, 0, 12);
     this.fovKick += (kick - this.fovKick) * damp(3, dt);
     const fov = this.baseFov + this.fovKick;
     if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }

@@ -81,7 +81,7 @@ export type S2C =
   | { t: 'err'; code: ErrCode; msg: string }
   | {
     t: 'start'; goAt: number; now: number; spawns: Record<number, [number, number, number]>; resume?: boolean; crumbles?: [number, string, number][];
-    /** Crates already taken, and per player [id, shield 0/1, cloakUntil, jetUntil] (for resumes). */
+    /** Crates already taken, and per player [id, shield 0/1, cloakUntil, boostUntil] (for resumes). */
     taken?: number[]; powers?: [number, number, number, number][];
   }
   | { t: 'snap'; ts: number; p: PlayerSnap[]; e: EnemySnap[] }
