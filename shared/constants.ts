@@ -307,7 +307,7 @@ export const GRAPPLE = {
   TAUT: 0.85,
   /** ...but never shorter than this. */
   REEL_MIN: 6,
-  /** A jump press this soon after hooking does not let go (hook, then jump, keeps the rope). */
+  /** A jump press, or letting go of the grapple button, this soon after hooking does not let go yet. */
   RELEASE_LOCK: 0.3,
 };
 

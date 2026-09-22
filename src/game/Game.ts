@@ -859,6 +859,8 @@ export class Game {
       jumpHeld: can && inp.isDown('Space'),
       jumpPressed: can && inp.wasPressed('Space'),
       slidePressed: can && inp.wasPressed('KeyC'),
+      // the rope stays on only while the right mouse button is held
+      grappleHeld: can && inp.mouseRightDown,
       // the runner squares up to the camera and strafes, rather than turning its
       // whole body every time you step sideways
       aimYaw: this.cam.yaw,

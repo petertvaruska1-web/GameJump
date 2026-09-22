@@ -9,6 +9,8 @@ export class Input {
   mouseClicked = false;
   /** Right mouse button pressed this frame (grapple). */
   mouseRightPressed = false;
+  /** Right mouse button held down right now (the grapple hangs on while it is). */
+  mouseRightDown = false;
   locked = false;
   onLockChange?: (locked: boolean) => void;
   onKey?: (code: string) => void;
@@ -27,7 +29,7 @@ export class Input {
       this.down.delete(e.code);
       this.released.add(e.code);
     });
-    window.addEventListener('blur', () => { this.down.clear(); });
+    window.addEventListener('blur', () => { this.down.clear(); this.mouseRightDown = false; });
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
       this.mouseDX += e.movementX;
@@ -35,12 +37,14 @@ export class Input {
     });
     canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0) this.mouseClicked = true;
-      if (e.button === 2) this.mouseRightPressed = true;
+      if (e.button === 2) { this.mouseRightPressed = true; this.mouseRightDown = true; }
     });
+    // on the window, so letting go over a menu or outside the page still counts
+    window.addEventListener('mouseup', (e) => { if (e.button === 2) this.mouseRightDown = false; });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.canvas;
-      if (!this.locked) this.down.clear();
+      if (!this.locked) { this.down.clear(); this.mouseRightDown = false; }
       this.onLockChange?.(this.locked);
     });
   }

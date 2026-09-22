@@ -94,7 +94,7 @@ What a static host can and cannot do:
 | `W` at a ledge | Climb: hold forward and you pull yourself up |
 | `Q` / `E` | Dash left / right: a 2.6 m sidestep out of a charge, on the ground or in the air |
 | `C` | Slide (while running): low under gaps, chest-high beams and shots. Press again to stand |
-| Right mouse | Grapple the anchor marked by the green reticle; press again (or `Space`) to let go |
+| Right mouse (hold) | Grapple the anchor marked by the green reticle and hang on while you hold it; let go of the button (or press `Space`) to drop off |
 | `Esc` | Pause menu / release the mouse |
 | `Space` / `E` while dead or finished | Cycle the spectated teammate |
 
@@ -113,7 +113,7 @@ ledge. On top of that come two movement skills:
 | Skill | How it works | Where it's useful |
 |---|---|---|
 | **Slide** (`C`) | From a run you drop to 0.9 m tall and keep your speed (a little boost, then friction; you pick up speed downhill). Under a low ceiling you keep crawling forward until there's room to stand. Jumping out of a slide keeps up to 9.8 m/s (a sprint is 8.9). | Required: the hangar's jammed shutter and tunnel (left), the flue walkway's beam (right). Elsewhere: chest-high laser beams, faster descents on stairs and ramps, a stalker-proof escape through low gaps (they're too tall to follow), and dodging a Sentinel shot. It only dodges a shot if you're not already sliding when it fires. |
-| **Grapple** (right mouse) | Hook a glowing green anchor within 17 m that is ahead of you and in sight. The hook pulls you toward the anchor and off the ground, so it works from a standstill; the rope then reels in to 85% of its length, and holding a direction pushes you along the arc rather than against the rope. Let go as you swing up. Touching the ground unhooks you. | Required: the viaduct gap (centre) and a double swing between the smokestacks (right). Six optional anchors elsewhere: rescue hooks beside hard jumps (rooftops, skybridge hops, Leap of Faith, broken stairway) and detours to hidden crates (twin rails, launch yard). |
+| **Grapple** (right mouse) | Hook a glowing green anchor within 17 m that is ahead of you and in sight. The hook pulls you toward the anchor and off the ground, so it works from a standstill; the rope then reels in to 85% of its length, and holding a direction pushes you along the arc rather than against the rope. You hang on while you hold the button; let go of it (or press `Space`) as you swing up. A quick tap still holds on for 0.3 s. Touching the ground unhooks you. | Required: the viaduct gap (centre) and a double swing between the smokestacks (right). Six optional anchors elsewhere: rescue hooks beside hard jumps (rooftops, skybridge hops, Leap of Faith, broken stairway) and detours to hidden crates (twin rails, launch yard). |
 
 Two more are built on those keys. A **front flip** comes from pressing `Space`
 again while you are off the ground — a quick second tap after the jump, or

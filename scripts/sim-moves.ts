@@ -6,7 +6,7 @@
 // that a dash takes you out of a stalker's charge without ever becoming a
 // longer jump.
 // Usage: npx tsx scripts/sim-moves.ts
-import { CLIMB, DASH, PHYS, PLAYER } from '../shared/constants';
+import { CLIMB, DASH, GRAPPLE, PHYS, PLAYER } from '../shared/constants';
 import type { BoxDef, LevelData, V3 } from '../shared/level/types';
 import { PlayerMotor, type MoveInput } from '../shared/physics/character';
 import { CollisionWorld } from '../shared/physics/world';
@@ -183,6 +183,34 @@ function standHook(gap: number, dy: number, ah: number, releaseAfter: number, ju
   check('a jump right after hooking keeps the rope', early === 'still hooked', early);
   const late = standHook(14, 0, 8, 9, 0.5);
   check('a jump later in the swing lets go', late === 'dropped', late);
+}
+{
+  // the rope stays on while the grapple button is held and comes off when it is let go
+  function holdHook(holdFor: number): { swung: number; landed: string } {
+    const world = new CollisionWorld(lvl([[[0, -0.5, -20], [8, 1, 40]], [[0, -0.5, 14 + 20], [8, 1, 40]]], [[0, 8, 7]]));
+    const m = new PlayerMotor();
+    m.spawn(0, 0, -0.8, 0);
+    let t = 0, hookedAt = -1, swung = -1, landed = 'no';
+    for (let i = 0; i < 120 * 8; i++) {
+      const b = m.body;
+      const settle = i < 30;
+      const hook = !settle && hookedAt < 0 && m.canHook ? 0 : -1;
+      const held = hookedAt < 0 ? !settle : t - hookedAt < holdFor;
+      world.update(t);
+      m.step(world, PHYS.STEP, inp({ x: 0, z: settle ? 0 : 1, sprint: false, grapple: hook, grappleHeld: held }));
+      t += PHYS.STEP;
+      if (m.events.hooked >= 0) hookedAt = t;
+      if (m.events.unhooked && swung < 0) swung = t - hookedAt;
+      if (b.grounded && b.pos.z > 14.2) { landed = `LAND z=${b.pos.z.toFixed(1)}`; break; }
+      if (b.pos.y < -12) { landed = 'fall'; break; }
+    }
+    return { swung, landed };
+  }
+  const held = holdHook(0.9);
+  check('letting go of the grapple button lets go of the rope', Math.abs(held.swung - 0.9) < 0.02 && held.landed.startsWith('LAND'),
+    `button up after 0.90 s, rope off after ${held.swung.toFixed(3)} s, ${held.landed}`);
+  const tap = holdHook(0.05);
+  check('a quick tap still hangs on for a moment', Math.abs(tap.swung - GRAPPLE.RELEASE_LOCK) < 0.02, `rope off after ${tap.swung.toFixed(3)} s`);
 }
 
 // ---------------------------------------------------------------- front flip

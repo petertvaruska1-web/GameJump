@@ -43,7 +43,7 @@ const CONTROLS = `
     <span><kbd>Q</kbd> / <kbd>E</kbd></span><span>Dash left / right — steps you out of a charge, on the ground or in the air</span>
     <span><kbd>Shift</kbd></span><span>Sprint — needed for long gaps</span>
     <span><kbd>C</kbd></span><span>Slide — while running: under low gaps and chest-high lasers</span>
-    <span><kbd>Right mouse</kbd></span><span>Grapple a green anchor in view · press again or Space to let go</span>
+    <span><kbd>Right mouse</kbd></span><span>Hold to grapple a green anchor in view · let go (or Space) to drop off</span>
     <span><kbd>Esc</kbd></span><span>Pause menu / release the mouse</span>
   </div>`;
 
@@ -163,7 +163,7 @@ export class UI {
       <h3>Slide and grapple</h3>
       <ul>
         <li><b>Slide</b> (<kbd>C</kbd> while running): you drop low and keep your speed. Slide under jammed shutters and chest-high lasers, down stairs faster, and under shots aimed at your chest. Stalkers are too tall to follow you through low gaps. Jumping out of a slide goes a little further than a normal jump.</li>
-        <li><b>Grapple</b> (right mouse): hook a glowing green anchor when the reticle marks it. The hook yanks you off your feet and toward the anchor, so you can fire it standing still — no need to jump first. The rope reels itself tight, and holding a direction pushes you along the arc, so steer with <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd> and let go (press again or <kbd>Space</kbd>) as you swing up. Some anchors are required; others are rescue points beside hard jumps.</li>
+        <li><b>Grapple</b> (right mouse): hook a glowing green anchor when the reticle marks it. The hook yanks you off your feet and toward the anchor, so you can fire it standing still — no need to jump first. The rope reels itself tight, and holding a direction pushes you along the arc, so steer with <kbd>W</kbd>/<kbd>A</kbd>/<kbd>S</kbd>/<kbd>D</kbd>. You hang on while you hold the button: let go of it (or press <kbd>Space</kbd>) as you swing up. Some anchors are required; others are rescue points beside hard jumps.</li>
       </ul>
       <h3>Power crates</h3>
       <ul>

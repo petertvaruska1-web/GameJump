@@ -172,6 +172,12 @@ export interface MoveInput {
   grapple?: number;
   /** Let go of the grapple rope this step. */
   grappleRelease?: boolean;
+  /**
+   * The grapple button is held. When given, letting go of it lets go of the
+   * rope (once the rope has been on for GRAPPLE.RELEASE_LOCK, so a quick tap
+   * still gives a short swing). Tools that leave it out release on request only.
+   */
+  grappleHeld?: boolean;
 }
 
 export const Anim = {
@@ -381,7 +387,7 @@ export class PlayerMotor {
     if (this.zip) { this.stepZip(dt, inp); return; }
 
     // Grapple: hook an anchor / let go
-    if (this.grapple && inp.grappleRelease) this.unhook(true);
+    if (this.grapple && (inp.grappleRelease || (inp.grappleHeld === false && this.hookT >= GRAPPLE.RELEASE_LOCK))) this.unhook(true);
     else if (!this.grapple && inp.grapple !== undefined && inp.grapple >= 0 && this.grappleCooldown <= 0) this.hook(world, inp.grapple);
 
     // Input
