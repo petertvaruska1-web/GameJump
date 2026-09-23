@@ -16,6 +16,7 @@ import { Input } from '../input/Input';
 import { Connection } from '../net/Connection';
 import { CameraController } from '../player/CameraController';
 import { LocalPlayer } from '../player/LocalPlayer';
+import { DropShadow } from '../render/DropShadow';
 import { Effects } from '../render/Effects';
 import { HazardView } from '../render/HazardView';
 import { PickupView, POWER_COLOR, POWER_CSS, POWER_NAME } from '../render/PickupView';
@@ -72,6 +73,8 @@ export class Game {
   private readonly debug: Debug;
   private readonly clock = new THREE.Timer();
   private readonly vignette = document.getElementById('vignette')!;
+  /** Where the local runner will come down: a soft disc on the ground below it. */
+  private readonly dropShadow = new DropShadow();
 
   private mode: Mode = 'menu';
   private conn: Connection | null = null;
@@ -131,6 +134,7 @@ export class Game {
     this.r.scene.add(this.pickups.group);
     this.effects = new Effects(this.mats.glowTex, this.level);
     this.r.scene.add(this.effects.group);
+    this.r.scene.add(this.dropShadow.mesh);
     this.input = new Input(canvas);
     this.cam = new CameraController(this.r.camera);
     this.debug = new Debug(this.r.scene, this.level);
@@ -930,6 +934,8 @@ export class Game {
     const lv = this.local ? this.local.renderVel : tmpV.set(0, 0, 0);
     this.effects.update(dt, t, this.r.camera, this.world, lv);
     this.r.focusShadows(this.local ? this.local.renderPos : this.r.camera.position);
+    const lr = this.local;
+    this.dropShadow.update(this.world, lr ? lr.renderPos : tmpV, !!lr && this.mode === 'playing' && !lr.dead && !lr.finished && lr.model.root.visible);
     this.audio.setListener(this.r.camera);
     this.updateAudio(dt);
     this.r.render();
