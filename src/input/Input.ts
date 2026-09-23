@@ -12,6 +12,14 @@ export class Input {
   /** Right mouse button held down right now (the grapple hangs on while it is). */
   mouseRightDown = false;
   locked = false;
+  /**
+   * A lock request is in flight. Starting a run asks for the mouse from the
+   * button's click and again as the run begins; a second request on top of a
+   * pending one could lose the lock, which the game reads as the player
+   * pressing Esc, and "Run it again" landed on the pause menu.
+   */
+  private lockPending = false;
+  private lockPendingAt = 0;
   onLockChange?: (locked: boolean) => void;
   onKey?: (code: string) => void;
   /** When false, gameplay keys are ignored (menus). */
@@ -42,7 +50,9 @@ export class Input {
     // on the window, so letting go over a menu or outside the page still counts
     window.addEventListener('mouseup', (e) => { if (e.button === 2) this.mouseRightDown = false; });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    document.addEventListener('pointerlockerror', () => { this.lockPending = false; });
     document.addEventListener('pointerlockchange', () => {
+      this.lockPending = false;
       this.locked = document.pointerLockElement === this.canvas;
       if (!this.locked) { this.down.clear(); this.mouseRightDown = false; }
       this.onLockChange?.(this.locked);
@@ -51,6 +61,10 @@ export class Input {
 
   requestLock() {
     if (this.locked) return;
+    // one request at a time (a request that never answers is given up after a second)
+    if (this.lockPending && performance.now() - this.lockPendingAt < 1000) return;
+    this.lockPending = true;
+    this.lockPendingAt = performance.now();
     const quiet = (r: unknown) => { if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => { /* not allowed here */ }); };
     try {
       const r = this.canvas.requestPointerLock({ unadjustedMovement: true } as never) as unknown;

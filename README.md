@@ -95,7 +95,7 @@ What a static host can and cannot do:
 | `Q` / `E` | Dash left / right: a 2.6 m sidestep out of a charge, on the ground or in the air |
 | `C` | Slide (while running): low under gaps, chest-high beams and shots. Press again to stand |
 | Right mouse (hold) | Grapple the anchor marked by the green reticle and hang on while you hold it; let go of the button (or press `Space`) to drop off |
-| `Esc` | Pause menu / release the mouse |
+| `Esc` | Pause menu / release the mouse (on your own, the pause menu can also restart the run) |
 | `Space` / `E` while dead or finished | Cycle the spectated teammate |
 
 The runner stays squared up to the camera and strafes, the way third-person

@@ -31,6 +31,8 @@ export type C2S =
   | { t: 'resume'; code: string; token: string; v: number }
   | { t: 'ready'; r: boolean }
   | { t: 'start' }
+  /** Abandon the run in progress and count down a fresh one. Only for a host alone in the room. */
+  | { t: 'restart' }
   | { t: 'lobby' }
   | { t: 'leave' }
   | { t: 'ping'; c: number }

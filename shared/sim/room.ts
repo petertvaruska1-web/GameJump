@@ -199,6 +199,14 @@ export class Room implements EnemyHost {
         if (this.phase === 'ended') this.dropDisconnected();
         this.startMatch();
         return;
+      case 'restart':
+        // A run with no checkpoints: on your own, the pause menu can throw it away
+        // and start over. With anyone else in the room that would end their run
+        // too, so it is only for a host who is alone.
+        if (p.id !== this.hostId || this.players.length !== 1) return;
+        if (this.phase !== 'countdown' && this.phase !== 'playing') return;
+        this.startMatch();
+        return;
       case 'lobby':
         if (p.id !== this.hostId) return;
         this.toLobby();

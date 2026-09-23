@@ -13,6 +13,8 @@ export interface UIHandlers {
   offline(name: string): void;
   ready(r: boolean): void;
   start(): void;
+  /** Throw away the run in progress and count down a new one (host alone in the room). */
+  restart(): void;
   leave(): void;
   resume(): void;
   toLobby(): void;
@@ -402,22 +404,24 @@ export class UI {
 
   // ------------------------------------------------------------------ overlays
 
-  pause(isHost: boolean, offline: boolean) {
+  pause(isHost: boolean, offline: boolean, solo = false) {
     this.closeOverlay();
     const o = el(`<div class="screen center interactive"><div class="panel" style="width:min(380px,92vw)">
       <h2>Paused</h2>
       ${offline ? '' : '<p class="hint">The world keeps moving while you are in this menu.</p>'}
       <div class="menu" style="width:100%">
         <button class="btn primary" data-a="resume">Resume</button>
+        ${isHost && solo ? '<button class="btn" data-a="restart">Restart run</button>' : ''}
         <button class="btn" data-a="settings">Settings</button>
         <button class="btn" data-a="how">How to play</button>
-        ${isHost ? '<button class="btn" data-a="lobby">Return everyone to lobby</button>' : ''}
+        ${isHost ? `<button class="btn" data-a="lobby">${solo ? 'Back to lobby' : 'Return everyone to lobby'}</button>` : ''}
         <button class="btn danger" data-a="leave">Leave game</button>
       </div></div></div>`);
     this.root.appendChild(o);
     this.overlay = o;
     const panel = o.querySelector('.panel')!;
-    const back = () => this.pause(isHost, offline);
+    const back = () => this.pause(isHost, offline, solo);
+    o.querySelector('[data-a=restart]')?.addEventListener('click', () => this.h.restart());
     o.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button')) this.h.click(); });
     o.querySelector('[data-a=resume]')!.addEventListener('click', () => this.h.resume());
     o.querySelector('[data-a=settings]')!.addEventListener('click', () => {

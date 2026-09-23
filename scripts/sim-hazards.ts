@@ -313,6 +313,23 @@ function setupPair() {
   check('a start sent mid-run is ignored', room.phase === 'playing' && room.goAt === t0, `phase=${room.phase}`);
 }
 {
+  // On your own the pause menu can throw a run away and start again...
+  const { room, p } = setup();
+  const t0 = room.goAt;
+  p.pos.z += 30;
+  room.handle(p, { t: 'restart' });
+  check('a solo host can restart mid-run from the pause menu',
+    room.phase === 'countdown' && room.goAt > t0 && p.pos.z === level.spawns[0][2],
+    `phase=${room.phase} z=${p.pos.z}`);
+}
+{
+  // ...but with a team in the room it would end their runs too, so it is refused.
+  const { room, host } = setupPair();
+  const t0 = room.goAt;
+  room.handle(host, { t: 'restart' });
+  check('a restart mid-run is refused with a team in the room', room.phase === 'playing' && room.goAt === t0, `phase=${room.phase}`);
+}
+{
   // Players who dropped out during the run are forgotten by the next one.
   const { room, host, guest } = setupPair();
   room.disconnect(guest);

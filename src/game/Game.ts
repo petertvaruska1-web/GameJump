@@ -149,6 +149,14 @@ export class Game {
       offline: (name) => this.startOffline(name),
       ready: (rdy) => this.conn?.send({ t: 'ready', r: rdy }),
       start: () => { this.input.requestLock(); this.conn?.send({ t: 'start' }); },
+      // unpause without asking for the mouse here: the new run asks for it as it
+      // starts, and a second request in the same click lost the lock and paused again
+      restart: () => {
+        this.paused = false;
+        if (this.offline) this.conn?.setPaused(false);
+        this.ui.closePause();
+        this.conn?.send({ t: 'restart' });
+      },
       leave: () => this.leave(),
       resume: () => this.resume(),
       toLobby: () => this.conn?.send({ t: 'lobby' }),
@@ -842,7 +850,7 @@ export class Game {
   private openPause() {
     this.paused = true;
     if (this.offline) this.conn?.setPaused(true);
-    this.ui.pause(this.hostId === this.meId, this.offline);
+    this.ui.pause(this.hostId === this.meId, this.offline, this.lobbyPlayers.length === 1);
     this.ui.captureHint(false);
   }
 
