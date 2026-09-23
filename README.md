@@ -468,8 +468,18 @@ The settings menu has an FPS counter for normal play.
 
 ## Performance notes
 
-- Static level geometry is merged per material and 70 m chunk: a few hundred draw
-  calls for about 2,900 boxes. The whole scene is roughly 70k triangles.
+- About 530 draw calls and 105k triangles in the busiest views (the start line and the
+  plaza), down from about 1,170. A render takes about 2.8 ms on the development
+  machine, down from 6.1 ms.
+- Static level geometry is merged per material and 150 m chunk.
+- Enemies have three levels of detail. Within 115 m every jointed part is drawn and
+  animated. Beyond that, one merged mesh of the rest pose stands in, with the eye,
+  lens and searchlight still live. Beyond 330 m (a fogged two-pixel speck) they aren't
+  drawn at all. Searchlights fade out before that, since they ignore fog.
+- Glows on warning lights, lamps and skyline beacons, chimney smoke and the distant
+  cloud banks are instanced camera-facing quads (`src/render/Billboards.ts`): four
+  draw calls instead of about 230 sprites. Blinking runs on the GPU. Far glows fade
+  into the fog instead of turning into pale blobs.
 - All 48 laser beams are three instanced meshes (cores, glows, emitters). Zip cables are
   one merged mesh, and belts scroll a per-belt texture offset.
 - Props are merged per material, particles use a single `Points` draw call, and all

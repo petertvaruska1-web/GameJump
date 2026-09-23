@@ -6,6 +6,7 @@
 // lights shift from calm amber to red.
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { EnemyKind } from '../../shared/constants';
 import { ENEMY } from '../../shared/constants';
 import { clamp, damp } from '../../shared/math';
@@ -42,6 +43,21 @@ function beamMaterial(color: number, len: number): THREE.ShaderMaterial {
   });
 }
 
+/**
+ * Level of detail. Past FAR_AT an enemy is a handful of pixels, so its dozen
+ * jointed parts are swapped for one merged mesh of its rest pose (its glowing eye,
+ * lens and searchlight stay live, so its state still reads). Past HIDE_AT it is a
+ * fogged two-pixel speck and is not drawn at all. Each switch has a few metres of
+ * hysteresis so nothing flickers at the boundary.
+ */
+const FAR_AT = 115, NEAR_AT = 105;
+const HIDE_AT = 330, SHOW_AT = 310;
+/** Searchlights ignore fog, so they fade out with distance before the enemy is hidden. */
+const BEAM_FADE_FROM = 200, BEAM_FADE_TO = 300;
+
+const farGeo = new Map<EnemyKind, THREE.BufferGeometry>();
+const farMat = new Map<EnemyKind, THREE.MeshStandardMaterial>();
+
 const CALM = new THREE.Color(1.6, 1.0, 0.35);
 const ANGRY = new THREE.Color(3.0, 0.25, 0.15);
 const SEARCH = new THREE.Color(2.2, 1.6, 0.2);
@@ -61,6 +77,12 @@ export class EnemyView {
   private lastPos = new THREE.Vector3();
   private speed = 0;
   private color = CALM.clone();
+  /** Jointed parts that the far mesh stands in for. */
+  private detail: THREE.Mesh[] = [];
+  private far: THREE.Mesh | null = null;
+  private isFar = false;
+  private culled = false;
+  private beamFade = 1;
   state: number = EState.Idle;
 
   constructor(readonly kind: EnemyKind, shadows: boolean, glowTex: THREE.Texture) {
@@ -69,6 +91,7 @@ export class EnemyView {
     if (kind === 'melee') this.buildStalker(shadows);
     else if (kind === 'ranged') this.buildSentinel(shadows, glowTex);
     else this.buildDrone(shadows);
+    this.buildFar();
     this.icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: iconTex('!', '#ff4040'), transparent: true, depthWrite: false, depthTest: false }));
     this.icon.scale.setScalar(0.9);
     this.icon.position.y = kind === 'melee' ? 2.8 : kind === 'ranged' ? 3.6 : 1.4;
@@ -176,8 +199,65 @@ export class EnemyView {
     this.model.add(this.cone);
   }
 
+  /** Merges the opaque parts, as posed at rest, into one vertex-coloured mesh (shared per kind). */
+  private buildFar() {
+    const parts: THREE.Mesh[] = [];
+    this.model.updateMatrixWorld(true);
+    this.model.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const mat = m.material as THREE.Material;
+      if (mat.transparent || mat === this.eyeMat || m === this.cone || m === this.orb || !(mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) return;
+      parts.push(m);
+    });
+    this.detail = parts;
+    let geo = farGeo.get(this.kind);
+    if (!geo) {
+      const geos = parts.map((m) => {
+        const g = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone());
+        for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+        g.applyMatrix4(m.matrixWorld);
+        const c = (m.material as THREE.MeshStandardMaterial).color;
+        const n = g.getAttribute('position').count;
+        const col = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        return g;
+      });
+      geo = mergeGeometries(geos, false)!;
+      geos.forEach((g) => g.dispose());
+      geo.computeBoundingSphere();
+      farGeo.set(this.kind, geo);
+      farMat.set(this.kind, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.5 }));
+    }
+    this.far = new THREE.Mesh(geo, farMat.get(this.kind)!);
+    this.far.visible = false;
+    this.model.add(this.far);
+  }
+
+  /** Picks near / far / hidden from the distance to the camera. */
+  private lod(camDist: number) {
+    const cull = this.culled ? camDist > SHOW_AT : camDist > HIDE_AT;
+    if (cull !== this.culled) { this.culled = cull; this.root.visible = !cull; }
+    const far = this.isFar ? camDist > NEAR_AT : camDist > FAR_AT;
+    if (far !== this.isFar) {
+      this.isFar = far;
+      for (const m of this.detail) m.visible = !far;
+      for (const r of this.rotors) r.visible = !far;
+      if (this.far) this.far.visible = far;
+      if (far) {
+        // hold the rest pose the far mesh was built from
+        this.model.position.set(0, 0, 0);
+        this.model.rotation.set(0, 0, 0);
+      }
+    }
+    this.beamFade = 1 - Math.min(1, Math.max(0, (camDist - BEAM_FADE_FROM) / (BEAM_FADE_TO - BEAM_FADE_FROM)));
+  }
+
   /** Called every render frame with interpolated server state. */
-  update(pos: THREE.Vector3, yaw: number, state: number, aux: number, dt: number, t: number) {
+  update(pos: THREE.Vector3, yaw: number, state: number, aux: number, dt: number, t: number, camDist = 0) {
+    this.lod(camDist);
+    if (this.culled) { this.root.position.copy(pos); this.lastPos.copy(pos); this.state = state; return; }
     if (dt > 0) {
       const v = this.lastPos.distanceTo(pos) / dt;
       this.speed += (Math.min(v, 15) - this.speed) * damp(8, dt);
@@ -196,7 +276,7 @@ export class EnemyView {
       if (this.head) this.head.rotation.y = yaw;
       if (this.coneMat) {
         this.coneMat.uniforms.uColor.value.setRGB(this.color.r / 3, this.color.g / 3, this.color.b / 3);
-        this.coneMat.uniforms.uOpacity.value = hunting ? 0.5 + aux * 0.5 : 0.32;
+        this.coneMat.uniforms.uOpacity.value = (hunting ? 0.5 + aux * 0.5 : 0.32) * this.beamFade;
       }
       if (this.orb) {
         this.orb.visible = aux > 0.02;
@@ -204,13 +284,15 @@ export class EnemyView {
       }
     } else if (this.kind === 'flyer') {
       this.root.rotation.y = yaw;
-      this.model.position.y = Math.sin(t * 2.4 + this.phase) * 0.18;
-      this.model.rotation.x = clamp(this.speed * 0.04, 0, 0.35);
-      for (const r of this.rotors) r.rotation.y += dt * 40;
-      if (this.coneMat) this.coneMat.uniforms.uOpacity.value = hunting ? 0.45 : 0.22;
+      if (!this.isFar) {
+        this.model.position.y = Math.sin(t * 2.4 + this.phase) * 0.18;
+        this.model.rotation.x = clamp(this.speed * 0.04, 0, 0.35);
+        for (const r of this.rotors) r.rotation.y += dt * 40;
+      }
+      if (this.coneMat) this.coneMat.uniforms.uOpacity.value = (hunting ? 0.45 : 0.22) * this.beamFade;
     } else {
       this.root.rotation.y = yaw;
-      this.animateStalker(dt, t, hunting, state === EState.Attack);
+      if (!this.isFar) this.animateStalker(dt, t, hunting, state === EState.Attack);
     }
 
     this.icon.visible = hunting || searching;

@@ -9,7 +9,7 @@ import type { CollisionWorld } from '../../shared/physics/world';
 import { GeoBuilder } from './geometry';
 import { Materials, TEX_SCALE } from './Materials';
 
-const CHUNK = 70;
+const CHUNK = 150;
 
 interface CrumbleVis { mesh: THREE.Mesh; state: 'idle' | 'shake' | 'fall' | 'reset'; t0: number; vy: number; spin: THREE.Vector3 }
 

@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { rng } from '../../shared/math';
+import { Billboards, Blink } from './Billboards';
 
 export const SUN_DIR = new THREE.Vector3(-0.55, 0.42, 0.72).normalize();
 export const FOG_COLOR = new THREE.Color(0xaebdcb);
@@ -23,7 +24,9 @@ export class Sky {
   private domeMat: THREE.ShaderMaterial;
   private sea: THREE.Mesh;
   private seaMat: THREE.ShaderMaterial;
-  private puffs: { s: THREE.Sprite; speed: number; base: THREE.Vector3 }[] = [];
+  private puffs: { i: number; speed: number; base: THREE.Vector3; w: number; h: number; a: number }[] = [];
+  private puffQuads!: Billboards;
+  private lights!: Billboards;
   private flash = 0;
   private nextFlash = 18;
   private flashDir = new THREE.Vector3();
@@ -123,18 +126,17 @@ export class Sky {
   private buildPuffs() {
     const tex = cloudTexture();
     const r = rng(99);
+    this.puffQuads = new Billboards(46, { map: tex, fog: 'mix' });
+    this.group.add(this.puffQuads.mesh);
     for (let i = 0; i < 46; i++) {
       const a = r() * Math.PI * 2;
       const dist = 120 + r() * 700;
       const y = CLOUD_Y + 8 + r() * (i < 12 ? 70 : 30);
-      const mat = new THREE.SpriteMaterial({ map: tex, color: 0xffffff, transparent: true, depthWrite: false, opacity: 0.55 + r() * 0.35, fog: true });
-      const s = new THREE.Sprite(mat);
+      const alpha = 0.55 + r() * 0.35;
       const base = new THREE.Vector3(Math.sin(a) * dist, y, 240 + Math.cos(a) * dist);
-      s.position.copy(base);
       const size = 60 + r() * 140;
-      s.scale.set(size * 1.8, size * 0.8, 1);
-      this.group.add(s);
-      this.puffs.push({ s, speed: 0.6 + r() * 1.4, base });
+      const q = this.puffQuads.add(base.x, base.y, base.z, size * 1.8, size * 0.8, 0xffffff, alpha);
+      this.puffs.push({ i: q, speed: 0.6 + r() * 1.4, base, w: size * 1.8, h: size * 0.8, a: alpha });
     }
   }
 
@@ -174,14 +176,9 @@ export class Sky {
     const mesh = new THREE.Mesh(merged, mat);
     mesh.matrixAutoUpdate = false;
     this.group.add(mesh);
-    const glowTex = cloudGlow();
-    for (const p of lights) {
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff3a2a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
-      s.position.copy(p);
-      s.scale.setScalar(9);
-      this.group.add(s);
-      (s.userData as { blink: number }).blink = r() * 6;
-    }
+    this.lights = new Billboards(Math.max(1, lights.length), { map: cloudGlow(), additive: true });
+    this.group.add(this.lights.mesh);
+    for (const p of lights) this.lights.add(p.x, p.y, p.z, 9, 9, 0xff3a2a, 1, Blink.Beacon, r() * 6);
   }
 
   update(t: number, dt: number, camPos: THREE.Vector3) {
@@ -191,13 +188,11 @@ export class Sky {
     this.sea.position.x = camPos.x;
     this.sea.position.z = camPos.z;
     for (const p of this.puffs) {
-      p.s.position.x = p.base.x + Math.sin(t * 0.01 * p.speed + p.base.z) * 30 + t * p.speed * 0.4;
-      if (p.s.position.x - camPos.x > 900) p.base.x -= 1800;
+      const x = p.base.x + Math.sin(t * 0.01 * p.speed + p.base.z) * 30 + t * p.speed * 0.4;
+      if (x - camPos.x > 900) p.base.x -= 1800;
+      this.puffQuads.set(p.i, x, p.base.y, p.base.z, p.w, p.h, p.a);
     }
-    for (const c of this.group.children) {
-      const b = (c.userData as { blink?: number }).blink;
-      if (b !== undefined) ((c as THREE.Sprite).material as THREE.SpriteMaterial).opacity = Math.sin(t * 2.4 + b) > 0.3 ? 1 : 0.1;
-    }
+    this.lights.setTime(t);
     // lightning
     this.nextFlash -= dt;
     if (this.nextFlash <= 0) {

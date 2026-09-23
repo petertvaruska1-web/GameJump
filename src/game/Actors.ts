@@ -111,11 +111,11 @@ export class EnemyProxy {
     this.state = 0; this.target = 0; this.aux = 0;
   }
 
-  update(renderT: number, dt: number, t: number) {
+  update(renderT: number, dt: number, t: number, cam: THREE.Vector3) {
     if (this.buf.sample(renderT, this.tmp, [3])) {
       this.pos.set(this.tmp[0], this.tmp[1], this.tmp[2]);
       this.yaw = this.tmp[3];
     }
-    this.view.update(this.pos, this.yaw, this.state, this.aux, dt, t);
+    this.view.update(this.pos, this.yaw, this.state, this.aux, dt, t, this.pos.distanceTo(cam));
   }
 }

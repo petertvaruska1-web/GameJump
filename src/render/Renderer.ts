@@ -63,7 +63,8 @@ export class Renderer {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.shadows = quality !== 'low';
     this.renderer.shadowMap.enabled = this.shadows;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCF is what three uses now (the old soft variant was folded into it)
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     // soft image-based lighting so metals and shaded faces never go pitch black
     const pmrem = new THREE.PMREMGenerator(this.renderer);

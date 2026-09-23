@@ -70,7 +70,7 @@ export class Game {
   private readonly audio = new AudioEngine();
   private readonly ui: UI;
   private readonly debug: Debug;
-  private readonly clock = new THREE.Clock();
+  private readonly clock = new THREE.Timer();
   private readonly vignette = document.getElementById('vignette')!;
 
   private mode: Mode = 'menu';
@@ -871,6 +871,7 @@ export class Game {
   // ------------------------------------------------------------------ frame
 
   private frame() {
+    this.clock.update();
     const dt = Math.min(0.05, this.clock.getDelta());
     this.time += dt;
     this.debug.tick(dt);
@@ -940,7 +941,7 @@ export class Game {
     let droneD = Infinity;
     const lp = local ? local.renderPos : this.r.camera.position;
     for (const e of this.enemies) {
-      e.update(renderT, dt, mt);
+      e.update(renderT, dt, mt, this.r.camera.position);
       const hunting = e.state === EState.Chase || e.state === EState.Alert || e.state === EState.Attack;
       if (hunting && e.target === this.meId && local && !local.dead) chasers++;
       if (e.kind === 'flyer') { const d = e.pos.distanceTo(lp); if (d < droneD) { droneD = d; nearestDrone = e.pos; } }

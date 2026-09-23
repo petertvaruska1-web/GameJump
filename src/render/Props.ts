@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { LevelData, PropDef } from '../../shared/level/types';
 import { rng } from '../../shared/math';
+import { Billboards, Blink } from './Billboards';
 import { withColor } from './geometry';
 import { Materials } from './Materials';
 
@@ -16,13 +17,21 @@ const UP = new THREE.Vector3(0, 1, 0);
 export class PropsView {
   readonly group = new THREE.Group();
   private buckets = new Map<THREE.Material, Bucket>();
-  private redSprites: THREE.Sprite[] = [];
-  private smoke: { s: THREE.Sprite; base: THREE.Vector3; t: number; speed: number }[] = [];
+  /** Warning-light and lamp glows, all in one draw call. */
+  private glows: Billboards;
+  /** Chimney smoke puffs, one draw call. */
+  private smokeQuads: Billboards;
+  private smoke: { i: number; base: THREE.Vector3; t: number; speed: number }[] = [];
   private beacon: { beam: THREE.Mesh; ring: THREE.Mesh; halo: THREE.Sprite; mat: THREE.ShaderMaterial } | null = null;
   private extraMats = new Map<string, THREE.Material>();
   private r = rng(4242);
 
   constructor(level: LevelData, private mats: Materials, shadows: boolean) {
+    const lights = level.props.filter((p) => p.t === 'redLight' || p.t === 'lamp' || p.t === 'antenna' || p.t === 'tank').length;
+    const stacks = level.props.filter((p) => p.t === 'chimney').length;
+    this.glows = new Billboards(lights + 8, { map: mats.glowTex, additive: true, fog: 'fade' });
+    this.smokeQuads = new Billboards(stacks * 7 + 1, { map: smokeTexture(), fog: 'mix' });
+    this.group.add(this.glows.mesh, this.smokeQuads.mesh);
     for (const p of level.props) this.addProp(p);
     for (const b of this.buckets.values()) {
       if (!b.geos.length) continue;
@@ -66,6 +75,11 @@ export class PropsView {
     return new THREE.Matrix4().compose(new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5), q, new THREE.Vector3(radius, len, radius));
   }
 
+  /** A glow that never moves: batched with every other one. */
+  private glow(x: number, y: number, z: number, color: number, size: number, alpha = 1, blink: number = Blink.None) {
+    this.glows.add(x, y, z, size, size, color, alpha, blink);
+  }
+
   private glowSprite(x: number, y: number, z: number, color: number, size: number, fog = true) {
     const m = new THREE.SpriteMaterial({ map: this.mats.glowTex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog });
     const s = new THREE.Sprite(m);
@@ -105,7 +119,7 @@ export class PropsView {
         if (core) {
           for (let yy = 4; yy < h - 1; yy += 5) this.add(cyl, M.cyanLight, this.m4(x, y + yy, z, 0, 0, 0, r * 1.03, 0.45, r * 1.03), 1, false);
           this.add(cyl, M.cyanLight, this.m4(x, y + h + 0.35, z, 0, 0, 0, r * 0.5, 0.25, r * 0.5), 1, false);
-          this.glowSprite(x, y + h + 1.5, z, 0x5ef0ff, 16);
+          this.glow(x, y + h + 1.5, z, 0x5ef0ff, 16);
         } else {
           for (let yy = 1; yy < h; yy += 1.6) this.add(cyl, M.get('steel'), this.m4(x, y + yy, z, 0, 0, 0, r * 1.02, 0.12, r * 1.02), 1);
         }
@@ -116,10 +130,8 @@ export class PropsView {
         this.add(cyl, M.get('concreteDark'), this.m4(x, y + h / 2, z, 0, 0, 0, r, h, r), 1);
         for (let k = 0; k < 3; k++) this.add(cyl, M.get(k === 1 ? 'white' : 'hazard'), this.m4(x, y + h - 1 - k * 1.6, z, 0, 0, 0, r * 1.04, 1.4, r * 1.04), 1);
         for (let i = 0; i < 7; i++) {
-          const sm = new THREE.SpriteMaterial({ map: smokeTexture(), color: 0xb9b3aa, transparent: true, depthWrite: false, opacity: 0.5 });
-          const s = new THREE.Sprite(sm);
-          this.group.add(s);
-          this.smoke.push({ s, base: new THREE.Vector3(x, y + h + 0.5, z), t: i / 7, speed: 0.07 + this.r() * 0.03 });
+          const q = this.smokeQuads.add(x, y + h + 0.5, z, 1, 1, 0xb9b3aa, 0);
+          this.smoke.push({ i: q, base: new THREE.Vector3(x, y + h + 0.5, z), t: i / 7, speed: 0.07 + this.r() * 0.03 });
         }
         break;
       }
@@ -137,7 +149,7 @@ export class PropsView {
         this.add(cyl6, M.get('steel'), this.m4(x, y + 1.6, z, 0, 0, 0, 0.06, 3.2, 0.06), 1);
         this.add(box, M.get('steel'), this.m4(x, y + 3.2, z, 0, 0, 0, 0.5, 0.18, 0.3), 1);
         this.add(box, M.warmLight, this.m4(x, y + 3.1, z, 0, 0, 0, 0.42, 0.04, 0.24), 1, false);
-        (this.glowSprite(x, y + 3.0, z, 0xffc47a, 1.3).material as THREE.SpriteMaterial).opacity = 0.7;
+        this.glow(x, y + 3.0, z, 0xffc47a, 1.3, 0.7);
         break;
       }
       case 'crate': {
@@ -211,7 +223,7 @@ export class PropsView {
 
   private addRedLight(x: number, y: number, z: number) {
     this.add(new THREE.SphereGeometry(0.14, 8, 6), this.mats.redLight, this.m4(x, y, z), 1, false);
-    this.redSprites.push(this.glowSprite(x, y, z, 0xff3030, 2.2));
+    this.glow(x, y, z, 0xff3030, 2.2, 1, Blink.Warning);
   }
 
   private addBeacon(x: number, y: number, z: number) {
@@ -247,13 +259,11 @@ export class PropsView {
   update(t: number, dt: number) {
     const blink = (Math.sin(t * 3.2) > 0.2 ? 1 : 0.15);
     this.mats.redLight.color.setRGB(3 * blink + 0.3, 0.25 * blink, 0.2 * blink);
-    for (const s of this.redSprites) (s.material as THREE.SpriteMaterial).opacity = 0.2 + blink * 0.8;
+    this.glows.setTime(t);
     for (const p of this.smoke) {
       p.t = (p.t + dt * p.speed) % 1;
-      const k = p.t;
-      p.s.position.set(p.base.x + k * 9 + Math.sin(k * 6 + p.base.z) * 1.2, p.base.y + k * 14, p.base.z + k * 3);
-      p.s.scale.setScalar(3 + k * 13);
-      (p.s.material as THREE.SpriteMaterial).opacity = Math.sin(k * Math.PI) * 0.35;
+      const k = p.t, s = 3 + k * 13;
+      this.smokeQuads.set(p.i, p.base.x + k * 9 + Math.sin(k * 6 + p.base.z) * 1.2, p.base.y + k * 14, p.base.z + k * 3, s, s, Math.sin(k * Math.PI) * 0.35);
     }
     if (this.beacon) {
       this.beacon.mat.uniforms.uTime.value = t;
