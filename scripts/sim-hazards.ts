@@ -1,14 +1,16 @@
 // Server-authority checks for the new obstacles, run against the real Room:
 // laser gates kill (judged at the client's clock), a switched-off gate does not,
 // self-reported laser deaths are accepted, riding a zip line over the void is
-// not a fall, and a launch-pad arc is not rejected as a speed hack.
+// not a fall, and a launch-pad arc is not rejected as a speed hack. And the
+// portal: how often and where it opens, who it takes and when, what nothing can
+// do to you while you are away, and the flight you come back with.
 // Usage: npx tsx scripts/sim-hazards.ts
-import { PHYS } from '../shared/constants';
+import { FLY, PHYS, PORTAL } from '../shared/constants';
 import { laserOn } from '../shared/hazards';
 import { getLevel } from '../shared/level/map/index';
 import { Anim, PlayerMotor, type MoveInput } from '../shared/physics/character';
 import { CollisionWorld } from '../shared/physics/world';
-import { Status, type S2C } from '../shared/protocol';
+import { Status, type GameEvent, type S2C } from '../shared/protocol';
 import { Room, type RoomPlayer } from '../shared/sim/room';
 
 const level = getLevel();
@@ -373,6 +375,183 @@ function setupPair() {
   check('a restart forgets players who dropped out',
     room.phase === 'countdown' && !room.players.includes(guest),
     `phase=${room.phase} players=${room.players.length}`);
+}
+
+// ---------------------------------------------------------------- the portal and Viktor's gift
+
+/** A solo room whose portal dice are loaded: `rolls` come out in order, then 0.99 (no portal). */
+function setupPortal(rolls: number[]) {
+  now = 0;
+  let i = 0;
+  const room = new Room('TEST', level, () => now, true, () => (i < rolls.length ? rolls[i++] : 0.99));
+  const log: GameEvent[] = [];
+  const fixes: S2C[] = [];
+  const conn = { send(m: S2C) { if (m.t === 'ev') log.push(...m.e); if (m.t === 'fix') fixes.push(m); }, close() {} };
+  const p = room.join(conn, 'bot') as RoomPlayer;
+  room.handle(p, { t: 'start' });
+  now += 3.6;
+  room.tick(1 / 30);
+  return { room, p, log, fixes };
+}
+function sendA(room: Room, p: RoomPlayer, x: number, y: number, z: number, anim: number, vx = 0, vy = 0, vz = 0) {
+  now += 1 / 30;
+  room.handle(p, { t: 'st', s: seq++, p: [x, y, z], v: [vx, vy, vz], y: 0, a: anim, g: -1, tm: room.matchTime });
+  room.tick(1 / 30);
+}
+function waitUntil(room: Room, p: RoomPlayer, mt: number) {
+  while (room.matchTime < mt) { now += 1 / 30; room.tick(1 / 30); if (!p.away) p.lastMsgT = now; }
+}
+/** Walks the runner up to the portal's ring (keeping the server's speed check happy) and says it went through. */
+function stepThrough(room: Room, p: RoomPlayer) {
+  const s = room.portal!.spot.p;
+  room.handle(p, { t: 'dbg', cmd: 'tp', p: [s[0], s[1], s[2] - 3] });
+  sendA(room, p, s[0], s[1], s[2] - 3, 1);
+  sendA(room, p, s[0], s[1], s[2] - 0.3, 1);
+  room.handle(p, { t: 'portal' });
+  room.tick(1 / 30);
+}
+const spots = level.portals ?? [];
+{
+  // about one run in ten gets a portal, and over many runs it turns up all over the course
+  now = 0;
+  const room = new Room('ROLL', level, () => now, true);
+  const p = room.join({ send() {}, close() {} }, 'x') as RoomPlayer;
+  room.handle(p, { t: 'start' });
+  const N = 4000, used = new Set<string>();
+  let n = 0;
+  for (let k = 0; k < N; k++) {
+    room.handle(p, { t: 'restart' });
+    if (room.portal) { n++; used.add(room.portal.spot.p.join(',')); }
+  }
+  check('about one run in ten has a portal', n / N > 0.085 && n / N < 0.115, `${n}/${N} = ${(100 * n / N).toFixed(1)}%`);
+  check('the portal opens all over the course', spots.length >= 30 && used.size >= spots.length * 0.9, `${used.size} of ${spots.length} spots used`);
+  const opens = [...Array(200)].map(() => { room.handle(p, { t: 'restart' }); return room.portal?.at; }).filter((a): a is number => a !== undefined);
+  check('it opens a few seconds into the run', opens.every((a) => a >= 3 && a <= 9), `open times ${Math.min(...opens).toFixed(1)}..${Math.max(...opens).toFixed(1)} s`);
+}
+{
+  // no portal this run: nothing to step through
+  const { room, p } = setupPortal([0.5]);
+  const s = spots[0].p;
+  room.handle(p, { t: 'dbg', cmd: 'tp', p: [s[0], s[1], s[2]] });
+  sendA(room, p, s[0], s[1], s[2], 1);
+  room.handle(p, { t: 'portal' });
+  check('without a portal there is nothing to step through', room.portal === null && !p.away, `portal=${!!room.portal} away=${p.away}`);
+}
+{
+  // it stays shut until it opens, and only takes a runner standing at the ring
+  const { room, p, log } = setupPortal([0.01, 0, 0.99]);
+  stepThrough(room, p);
+  const shutRefused = !p.away;
+  waitUntil(room, p, room.portal!.at + 0.1);
+  const s = room.portal!.spot.p;
+  room.handle(p, { t: 'dbg', cmd: 'tp', p: [s[0] + 9, s[1], s[2]] });
+  sendA(room, p, s[0] + 9, s[1], s[2], 1);
+  room.handle(p, { t: 'portal' });
+  const farRefused = !p.away;
+  stepThrough(room, p);
+  check('the portal is shut until it opens', shutRefused);
+  check('a runner away from the ring cannot go through', farRefused);
+  check('stepping through the open portal takes you away', p.away && p.status === Status.Alive && log.some((e) => e.k === 'heaven' && e.s === 'in' && e.id === p.id),
+    `away=${p.away} events=${log.map((e) => e.k).join(',')}`);
+}
+{
+  // while with Viktor nothing on the course can touch you, and your state messages are ignored
+  const { room, p } = setupPortal([0.01, 0, 0]);
+  waitUntil(room, p, room.portal!.at + 0.1);
+  stepThrough(room, p);
+  const at = { x: p.pos.x, y: p.pos.y, z: p.pos.z };
+  sendA(room, p, at.x + 40, at.y, at.z, 1);
+  const ignored = p.pos.x === at.x;
+  room.handle(p, { t: 'die', cause: 'laser' });
+  room.kill(p, 'shot', null);
+  const untouchable = p.status === Status.Alive;
+  check('while away your position reports are ignored', ignored, `x ${at.x} -> ${p.pos.x}`);
+  check('while away nothing can kill you or see you', untouchable && !p.targetable, `status=${p.status} targetable=${p.targetable}`);
+  // the conversation cannot be skipped outright
+  room.handle(p, { t: 'bless' });
+  const tooSoon = p.away && !p.canFly;
+  waitUntil(room, p, p.awayAt + PORTAL.MIN_STAY + 0.1);
+  const before = room.matchTime;
+  room.handle(p, { t: 'bless' });
+  const sp = level.spawns[0];
+  check('Viktor will not send you back the instant you arrive', tooSoon);
+  check('after Viktor speaks you are back on the landing pad, able to fly', !p.away && p.canFly && p.pos.x === sp[0] && p.pos.z === sp[2] && p.status === Status.Alive,
+    `away=${p.away} canFly=${p.canFly} pos=${p.pos.x},${p.pos.y},${p.pos.z} t=${before.toFixed(1)}`);
+  // a blessed runner does not go round again
+  stepThrough(room, p);
+  check('a runner who can fly cannot go through again', !p.away);
+}
+{
+  // flying out over the void (and sinking 20 m) is not a fall; the same trip without flight is
+  const fly = setupPortal([0.01, 0, 0]);
+  waitUntil(fly.room, fly.p, fly.room.portal!.at + 0.1);
+  stepThrough(fly.room, fly.p);
+  waitUntil(fly.room, fly.p, fly.p.awayAt + PORTAL.MIN_STAY + 0.1);
+  fly.room.handle(fly.p, { t: 'bless' });
+  const path: [number, number, number][] = [];
+  for (let k = 0; k <= 60; k++) path.push([0, 40.05 - Math.max(0, k - 20) * 0.5, -5.6 - k * 0.4]);
+  for (const q of path) sendA(fly.room, fly.p, q[0], q[1], q[2], Anim.Fly, 0, -6, -12);
+  check('flying over the void is not a fall', fly.p.status === Status.Alive && fly.fixes.length === 0 && fly.p.pos.y < 21,
+    `status=${fly.p.status} cause=${fly.p.cause ?? '-'} fixes=${fly.fixes.length} y=${fly.p.pos.y.toFixed(1)}`);
+  // stopping flying out there drops you like anyone else
+  for (let k = 1; k <= 40; k++) sendA(fly.room, fly.p, 0, 20 - k * 0.5, path[60][2], Anim.Fall, 0, -15, 0);
+  check('stopping flying over the void is a fall', fly.p.status === Status.Dead && fly.p.cause === 'fall', `status=${fly.p.status} cause=${fly.p.cause ?? '-'}`);
+  const walk = setupPortal([0.5]);
+  for (const q of path) sendA(walk.room, walk.p, q[0], q[1], q[2], Anim.Fly, 0, -6, -12);
+  check('claiming to fly without the gift is still a fall', walk.p.status === Status.Dead && walk.p.cause === 'fall', `status=${walk.p.status} cause=${walk.p.cause ?? '-'}`);
+}
+{
+  // a flyer's top speed is fine; the same speed from anyone else is a teleport. The
+  // server allows a slack of a couple of metres per message, so this is a client that
+  // only reports once a second (a laggy one), flying out over the void behind the pad
+  const second = (room: Room, p: RoomPlayer, z: number, anim: number) => {
+    for (let k = 0; k < 30; k++) { now += 1 / 30; room.tick(1 / 30); }
+    room.handle(p, { t: 'st', s: seq++, p: [p.pos.x, 45, z], v: [0, 0, -FLY.FAST], y: 0, a: anim, g: -1, tm: room.matchTime });
+  };
+  const fly = setupPortal([0.01, 0, 0]);
+  waitUntil(fly.room, fly.p, fly.room.portal!.at + 0.1);
+  stepThrough(fly.room, fly.p);
+  waitUntil(fly.room, fly.p, fly.p.awayAt + PORTAL.MIN_STAY + 0.1);
+  fly.room.handle(fly.p, { t: 'bless' });
+  const z0 = fly.p.pos.z;
+  for (let k = 1; k <= 3; k++) second(fly.room, fly.p, z0 - k * FLY.FAST, Anim.Fly);
+  const run = setupPortal([0.5]);
+  const z1 = run.p.pos.z;
+  for (let k = 1; k <= 3; k++) second(run.room, run.p, z1 - k * FLY.FAST, Anim.Jump);
+  check('a flyer at full speed is accepted', fly.fixes.length === 0 && fly.p.status === Status.Alive && fly.p.pos.z < z0 - 50, `fixes=${fly.fixes.length} z=${fly.p.pos.z.toFixed(1)}`);
+  check('the same speed without the gift is corrected', run.fixes.length > 0, `fixes=${run.fixes.length}`);
+}
+{
+  // the gift lasts one run
+  const { room, p } = setupPortal([0.01, 0, 0]);
+  waitUntil(room, p, room.portal!.at + 0.1);
+  stepThrough(room, p);
+  waitUntil(room, p, p.awayAt + PORTAL.MIN_STAY + 0.1);
+  room.handle(p, { t: 'bless' });
+  const had = p.canFly;
+  room.handle(p, { t: 'restart' });
+  check('a new run takes the gift away', had && !p.canFly && !p.away, `had=${had} canFly=${p.canFly}`);
+}
+{
+  // dropping out mid-conversation: coming back puts you on the pad with the gift
+  const { room, p } = setupPortal([0.01, 0, 0]);
+  waitUntil(room, p, room.portal!.at + 0.1);
+  stepThrough(room, p);
+  room.disconnect(p);
+  const got: S2C[] = [];
+  room.resume({ send(m: S2C) { got.push(m); }, close() {} }, p.token);
+  const start = got.find((m) => m.t === 'start') as Extract<S2C, { t: 'start' }> | undefined;
+  check('reconnecting mid-conversation brings you back blessed', !p.away && p.canFly && !!start?.fly?.includes(p.id) && !!start?.portal,
+    `away=${p.away} canFly=${p.canFly} fly=${JSON.stringify(start?.fly)}`);
+}
+{
+  // debug: a portal right in front of you, open at once
+  const { room, p, log } = setupPortal([0.5]);
+  p.yaw = 0;
+  room.handle(p, { t: 'dbg', cmd: 'portal' });
+  room.tick(1 / 30);
+  const s = room.portal?.spot.p;
+  check('the debug portal opens in front of you', !!s && Math.abs(s[2] - (p.pos.z + 5)) < 0.1 && log.some((e) => e.k === 'portal'), `spot=${s?.join(',')}`);
 }
 
 process.exit(fails ? 1 : 0);

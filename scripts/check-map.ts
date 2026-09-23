@@ -5,6 +5,7 @@ import { zoneAt } from '../shared/hazards';
 import { buildLevel, levelWarnings } from '../shared/level/map/index';
 import { CollisionWorld } from '../shared/physics/world';
 import { patrolClearance } from './enemy-audit';
+import { rejectSpot } from './portal-spots';
 
 const level = buildLevel();
 const solids = level.boxes.filter((b) => b.solid);
@@ -40,6 +41,17 @@ const zoned = level.boxes.filter((b) => zoneAt(level, b.p[0], b.p[2]) !== null).
 const zonedPct = (zoned / level.boxes.length) * 100;
 console.log(`zones=${level.zones.length} covering ${zonedPct.toFixed(1)}% of level boxes`);
 if (zonedPct < 90) console.log(`WARN only ${zonedPct.toFixed(1)}% of the level sits in a named zone`);
+
+// The portal's spots were found by walking the routes; a map edit can take the
+// floor out from under one, or put a laser or a cable next to it.
+const spots = level.portals ?? [];
+let brokenSpots = 0;
+for (const sp of spots) {
+  const why = rejectSpot(sp.p[0], sp.p[1], sp.p[2]);
+  if (why) { brokenSpots++; console.log(`WARN portal spot ${sp.p.join(',')} no longer holds (${why}): rerun scripts/portal-spots.ts`); }
+}
+console.log(`portal spots=${spots.length}${brokenSpots ? ` (${brokenSpots} broken)` : ''}`);
+if (!spots.length) console.log('WARN the level has no portal spots: the portal can never open');
 
 // SVG overview
 const [minX, minZ] = level.bounds.min, [maxX, maxZ] = level.bounds.max;
@@ -77,6 +89,9 @@ for (const pk of level.pickups) {
 for (const e of level.enemies) {
   const c = e.kind === 'melee' ? '#ff3b3b' : e.kind === 'ranged' ? '#ff9f1a' : '#d04bff';
   svg += `<circle cx="${tx(e.p[0])}" cy="${tz(e.p[2])}" r="5" fill="${c}" stroke="#fff"/>`;
+}
+for (const sp of spots) {
+  svg += `<circle cx="${tx(sp.p[0])}" cy="${tz(sp.p[2])}" r="3.5" fill="#fff6d0" stroke="#ffc233" stroke-width="1.5"/>`;
 }
 for (const w of level.waypoints) {
   svg += `<text x="${tx(w.p[0]) + 6}" y="${tz(w.p[2])}" fill="#fff" font-size="11" font-family="sans-serif">${w.name}</text>`;

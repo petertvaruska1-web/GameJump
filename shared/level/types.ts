@@ -198,6 +198,16 @@ export interface ZoneDef {
   max: [number, number];
 }
 
+/**
+ * Somewhere a portal can open: on the ground beside a route, found by walking
+ * the routes with the bot (scripts/portal-spots.ts). `yaw` turns the ring to
+ * face runners coming along that route.
+ */
+export interface PortalSpot {
+  p: V3;
+  yaw: number;
+}
+
 export interface LevelData {
   name: string;
   boxes: BoxDef[];
@@ -218,4 +228,6 @@ export interface LevelData {
   hints: HintDef[];
   grapples: GrappleDef[];
   pickups: PickupDef[];
+  /** Where the rare portal can open (none: it never does). */
+  portals?: PortalSpot[];
 }

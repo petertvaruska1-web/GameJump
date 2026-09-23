@@ -3,7 +3,7 @@
 import type { EnemyKind } from './constants';
 import type { PowerKind } from './level/types';
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 export type Phase = 'lobby' | 'countdown' | 'playing' | 'ended';
 
@@ -40,7 +40,13 @@ export type C2S =
   | { t: 'st'; s: number; p: [number, number, number]; v: [number, number, number]; y: number; a: number; g: number; tm?: number }
   /** The client saw its own runner touch a laser (a client can only report its own death). */
   | { t: 'die'; cause: 'laser' }
+  /** The client's runner stepped through the open portal. */
+  | { t: 'portal' }
+  /** Viktor has finished speaking: send the runner back to the start, able to fly. */
+  | { t: 'bless' }
   | { t: 'dbg'; cmd: 'tp'; p: [number, number, number] }
+  /** Debug: open the portal a few metres in front of the runner, right now. */
+  | { t: 'dbg'; cmd: 'portal' }
   | { t: 'dbg'; cmd: 'restart' }
   | { t: 'dbg'; cmd: 'god' };
 
@@ -64,6 +70,10 @@ export type GameEvent =
   | { k: 'pickup'; id: number; p: number; kind: PowerKind; until: number }
   /** Player `id`'s shield soaked a hit (from enemy `by`, -1 for lasers). */
   | { k: 'shield'; id: number; by: number; v?: [number, number, number] }
+  /** A portal stands at `p` turned to `yaw`, open from match time `at` (only sent when it is placed mid-run). */
+  | { k: 'portal'; p: [number, number, number]; yaw: number; at: number }
+  /** Player `id` stepped through the portal ('in'), or came back to `p` able to fly ('out'). */
+  | { k: 'heaven'; id: number; s: 'in' | 'out'; p?: [number, number, number] }
   | { k: 'left'; id: number }
   | { k: 'reconnected'; id: number }
   | { k: 'lostconn'; id: number };
@@ -85,6 +95,10 @@ export type S2C =
     t: 'start'; goAt: number; now: number; spawns: Record<number, [number, number, number]>; resume?: boolean; crumbles?: [number, string, number][];
     /** Crates already taken, and per player [id, shield 0/1, cloakUntil, boostUntil] (for resumes). */
     taken?: number[]; powers?: [number, number, number, number][];
+    /** This run's portal, [x, y, z, yaw, opens at match time], if it has one. */
+    portal?: [number, number, number, number, number];
+    /** Players who can fly (they have been to Viktor this run). */
+    fly?: number[];
   }
   | { t: 'snap'; ts: number; p: PlayerSnap[]; e: EnemySnap[] }
   | { t: 'ev'; e: GameEvent[] }

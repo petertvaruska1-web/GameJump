@@ -7,6 +7,7 @@ import { buildCenter, buildStart } from './center';
 import { buildFinale, buildRing } from './finale';
 import { SPIRE, START } from './layout';
 import { buildLeft } from './left';
+import { PORTAL_SPOTS } from './portals';
 import { buildRight } from './right';
 import { buildUpperWorks } from './upper';
 
@@ -28,6 +29,7 @@ export function buildLevel(): LevelData {
     beacon: [SPIRE.x, SPIRE.y, SPIRE.z],
     killY: -40,
   });
+  level.portals = PORTAL_SPOTS;
   levelWarnings = b.warnings;
   levelChains = b.chainPoints;
   return level;

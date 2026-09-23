@@ -2,10 +2,10 @@
 // enemies, projectiles, crumbling floors. Transport-agnostic (runs in Node or
 // in the browser for offline play).
 
-import { CORPSE, CRUMBLE, DEATH, GRAPPLE, LASER, MAX_PLAYERS, NET, PLAYER, POWER, RANGED, SLIDE } from '../constants';
+import { CORPSE, CRUMBLE, DEATH, FLY, GRAPPLE, LASER, MAX_PLAYERS, NET, PLAYER, PORTAL, POWER, RANGED, SLIDE } from '../constants';
 import { laserHit, onAnyZipline, windAt } from '../hazards';
 import { Anim, makeBody, stepCorpse, type CharBody, type StepInfo } from '../physics/character';
-import type { LevelData } from '../level/types';
+import type { LevelData, PortalSpot } from '../level/types';
 import { round2, round3, v3, type Vec3 } from '../math';
 import { CollisionWorld } from '../physics/world';
 import {
@@ -41,20 +41,32 @@ export class RoomPlayer implements Target {
   boostUntil = 0;
   graceUntil = 0;
   cloaked = false;
+  /** Through the portal and with Viktor: off the course, untouchable, unseen. */
+  away = false;
+  awayAt = 0;
+  /** Viktor's gift: this runner can fly for the rest of the run. */
+  canFly = false;
   constructor(public readonly id: number, public name: string, public readonly token: string, public conn: Conn | null) {}
   get connected() { return this.conn !== null; }
-  get targetable() { return this.status === Status.Alive && this.conn !== null && !this.cloaked; }
+  get targetable() { return this.status === Status.Alive && this.conn !== null && !this.cloaked && !this.away; }
+  /** Flying right now: it has the gift and says it is in the air under its own power. */
+  get flying() { return this.canFly && this.anim === Anim.Fly; }
   /** Sliding: smaller silhouette and hitbox. */
   get low() { return this.anim === Anim.Slide; }
   /** Mid front flip: tucked, so shots are aimed below the chest. */
   get tucked() { return this.anim === Anim.Flip; }
-  resetPowers() { this.shield = false; this.cloakUntil = 0; this.boostUntil = 0; this.graceUntil = 0; this.cloaked = false; }
+  resetPowers() {
+    this.shield = false; this.cloakUntil = 0; this.boostUntil = 0; this.graceUntil = 0; this.cloaked = false;
+    this.away = false; this.awayAt = 0; this.canFly = false;
+  }
 }
 
 interface Projectile { id: number; owner: number; pos: Vec3; vel: Vec3; born: number }
 /** A dead runner's body, still falling / sliding / riding platforms. */
 interface Corpse { p: RoomPlayer; body: CharBody; t: number }
 interface CrumbleState { s: 'idle' | 'shake' | 'fall'; t: number }
+/** This run's portal: where it stands and the match time it opens. */
+interface OpenPortal { spot: PortalSpot; at: number }
 
 const ALLOWED_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const corpseWind: [number, number] = [0, 0];
@@ -88,6 +100,8 @@ export class Room implements EnemyHost {
   private corpses: Corpse[] = [];
   private readonly corpseInfo: StepInfo = { landed: false, impact: 0, wall: null, dynamicHit: null };
   private events: GameEvent[] = [];
+  /** The rare portal to Viktor, when this run has one. */
+  portal: OpenPortal | null = null;
   private snapAcc = 0;
   private endedAt = 0;
   lastActivity = 0;
@@ -97,6 +111,8 @@ export class Room implements EnemyHost {
     public readonly level: LevelData,
     private readonly clock: () => number,
     public readonly debug: boolean,
+    /** Dice for the portal roll (tests pass their own). */
+    private readonly rand: () => number = Math.random,
   ) {
     this.world = new CollisionWorld(level);
     this.lastActivity = clock();
@@ -133,6 +149,8 @@ export class Room implements EnemyHost {
     conn.send({ t: 'joined', code: this.code, id: p.id, token: p.token, debug: this.debug });
     this.broadcastRoom();
     if (this.phase === 'countdown' || this.phase === 'playing') {
+      // dropped out mid-conversation: Viktor has said enough, back to the pad with the gift
+      if (p.away) this.bless(p, true);
       this.sendStart(p, true);
       this.pushEvent({ k: 'reconnected', id: p.id });
     } else if (this.phase === 'ended') {
@@ -183,6 +201,12 @@ export class Room implements EnemyHost {
       case 'die':
         if (this.phase === 'playing' && p.status === Status.Alive && msg.cause === 'laser') this.kill(p, 'laser', null);
         return;
+      case 'portal':
+        this.enterPortal(p);
+        return;
+      case 'bless':
+        this.bless(p, false);
+        return;
       case 'ready':
         if (this.phase !== 'lobby') return;
         p.ready = !!msg.r;
@@ -225,6 +249,15 @@ export class Room implements EnemyHost {
           this.startMatch();
         } else if (msg.cmd === 'god') {
           p.god = !p.god;
+        } else if (msg.cmd === 'portal' && p.status === Status.Alive && !p.away && (this.phase === 'playing' || this.phase === 'countdown')) {
+          // a portal right in front of the runner, open at once (for trying the easter egg out)
+          const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw);
+          const x = p.pos.x + fx * 5, z = p.pos.z + fz * 5;
+          const below = this.world.groundBelow(x, p.pos.y + 1.5, z, 6);
+          const y = isFinite(below) ? p.pos.y + 1.5 - below : p.pos.y;
+          this.portal = { spot: { p: [round2(x), round2(y), round2(z)], yaw: round2(p.yaw + Math.PI) }, at: Math.max(0, this.matchTime) };
+          const s = this.portal.spot;
+          this.pushEvent({ k: 'portal', p: s.p, yaw: s.yaw, at: round2(this.portal.at) });
         }
         return;
       default:
@@ -233,7 +266,7 @@ export class Room implements EnemyHost {
   }
 
   private onState(p: RoomPlayer, m: Extract<C2S, { t: 'st' }>) {
-    if (p.status !== Status.Alive) return;
+    if (p.status !== Status.Alive || p.away) return;
     if (this.phase !== 'playing' && this.phase !== 'countdown') return;
     const [x, y, z] = m.p;
     if (!isFinite(x) || !isFinite(y) || !isFinite(z)) return;
@@ -243,13 +276,16 @@ export class Room implements EnemyHost {
     const moved = Math.hypot(x - p.pos.x, z - p.pos.z);
     const rise = y - p.pos.y;
     const frozen = this.phase === 'countdown';
-    if (moved > NET.MAX_CLIENT_SPEED * dt + 2.5 || rise > 20 * dt + 3 || (frozen && moved > 1.5)) {
+    const maxSpeed = p.canFly ? FLY.MAX_CLIENT_SPEED : NET.MAX_CLIENT_SPEED;
+    if (moved > maxSpeed * dt + 2.5 || rise > 20 * dt + 3 || (frozen && moved > 1.5)) {
       p.conn?.send({ t: 'fix', p: [p.pos.x, p.pos.y, p.pos.z] });
       return;
     }
     p.pos.x = x; p.pos.y = y; p.pos.z = z;
     p.vel.x = m.v[0]; p.vel.y = m.v[1]; p.vel.z = m.v[2];
     p.yaw = m.y; p.anim = m.a | 0; p.ground = m.g | 0;
+    // only the portal itself takes a runner off the course
+    if (p.anim === Anim.Away) p.anim = Anim.Idle;
     if (p.ground >= 0) this.touchCrumble(p.ground);
     this.checkPlayer(p);
     // lasers: judged at the client's own clock (clamped), so latency never kills unfairly
@@ -272,6 +308,7 @@ export class Room implements EnemyHost {
     this.taken.clear();
     for (const c of this.world.crumbles) { c.enabled = true; c.shakeStart = -1; }
     this.enemies = this.level.enemies.map((d) => new Enemy(d));
+    this.portal = this.rollPortal();
     const spawns = this.level.spawns;
     this.players.forEach((p, i) => {
       if (p.status === Status.Left && !p.connected) return;
@@ -301,7 +338,53 @@ export class Room implements EnemyHost {
     const crumbles: [number, string, number][] = [];
     for (const [id, s] of this.crumbles) if (s.s !== 'idle') crumbles.push([id, s.s, s.t]);
     const powers: [number, number, number, number][] = this.players.map((q) => [q.id, q.shield ? 1 : 0, round2(q.cloakUntil), round2(q.boostUntil)]);
-    p.conn?.send({ t: 'start', goAt: round3(this.goAt), now: round3(this.now), spawns, resume, crumbles, taken: [...this.taken], powers });
+    const po = this.portal;
+    const portal: [number, number, number, number, number] | undefined = po ? [po.spot.p[0], po.spot.p[1], po.spot.p[2], po.spot.yaw, round2(po.at)] : undefined;
+    const fly = this.players.filter((q) => q.canFly).map((q) => q.id);
+    p.conn?.send({ t: 'start', goAt: round3(this.goAt), now: round3(this.now), spawns, resume, crumbles, taken: [...this.taken], powers, portal, fly });
+  }
+
+  /** One run in ten gets a portal, at a random spot from the level's list, opening a few seconds in. */
+  private rollPortal(): OpenPortal | null {
+    const spots = this.level.portals;
+    if (!spots?.length || this.rand() >= PORTAL.CHANCE) return null;
+    const spot = spots[Math.min(spots.length - 1, Math.floor(this.rand() * spots.length))];
+    return { spot, at: PORTAL.OPEN_MIN + this.rand() * (PORTAL.OPEN_MAX - PORTAL.OPEN_MIN) };
+  }
+
+  /** The runner says it walked into the portal: believe it if it was standing at the ring. */
+  private enterPortal(p: RoomPlayer) {
+    const po = this.portal;
+    if (!po || this.phase !== 'playing' || p.status !== Status.Alive || p.away || p.canFly) return;
+    if (this.matchTime < po.at) return;
+    const c = po.spot.p;
+    const d = Math.hypot(p.pos.x - c[0], p.pos.y + 1 - (c[1] + PORTAL.HEIGHT), p.pos.z - c[2]);
+    if (d > PORTAL.ENTER_RADIUS + PORTAL.SERVER_SLACK) return;
+    p.away = true;
+    p.awayAt = this.matchTime;
+    p.anim = Anim.Away;
+    p.vel.x = p.vel.y = p.vel.z = 0;
+    this.pushEvent({ k: 'heaven', id: p.id, s: 'in' });
+  }
+
+  /**
+   * Viktor has had his say: back to the landing pad, able to fly. `force` skips the
+   * minimum stay (a runner who reconnects mid-conversation is simply sent back).
+   */
+  private bless(p: RoomPlayer, force: boolean) {
+    if (!p.away || p.status !== Status.Alive) return;
+    if (!force && (this.phase !== 'playing' || this.matchTime - p.awayAt < PORTAL.MIN_STAY)) return;
+    const i = Math.max(0, this.players.indexOf(p));
+    const s = this.level.spawns[i % this.level.spawns.length];
+    p.away = false;
+    p.canFly = true;
+    p.pos.x = s[0]; p.pos.y = s[1]; p.pos.z = s[2];
+    p.vel.x = p.vel.y = p.vel.z = 0;
+    p.lastSupportY = s[1];
+    p.lastMsgT = this.now;
+    p.anim = Anim.Idle;
+    p.ground = -1;
+    this.pushEvent({ k: 'heaven', id: p.id, s: 'out', p: [s[0], s[1], s[2]] });
   }
 
   /** Forgets players who are gone for good and hands the room on if the host is one of them. */
@@ -316,6 +399,7 @@ export class Room implements EnemyHost {
     this.dropDisconnected();
     this.projectiles = [];
     this.enemies = [];
+    this.portal = null;
     this.broadcastRoom();
   }
 
@@ -340,7 +424,7 @@ export class Room implements EnemyHost {
   // ------------------------------------------------------------------ gameplay
 
   private checkPlayer(p: RoomPlayer) {
-    if (p.status !== Status.Alive || this.phase !== 'playing') return;
+    if (p.status !== Status.Alive || this.phase !== 'playing' || p.away) return;
     const { x, y, z } = p.pos;
     const f = this.level.finish;
     if (x >= f.min[0] && x <= f.max[0] && y >= f.min[1] && y <= f.max[1] && z >= f.min[2] && z <= f.max[2]) {
@@ -354,6 +438,8 @@ export class Room implements EnemyHost {
     }
     if (y < this.level.killY) { this.kill(p, 'fall', null); return; }
     this.checkPickups(p);
+    // flying under your own power over the void is not falling either
+    if (p.flying) { p.lastSupportY = y; return; }
     // hanging on a zip line or swinging on a grapple rope over the void is not falling
     if (this.level.ziplines.length && onAnyZipline(this.level, x, y, z)) { p.lastSupportY = y; return; }
     if (p.anim === Anim.Swing && this.nearAnchor(x, y, z)) { p.lastSupportY = y; return; }
@@ -426,7 +512,7 @@ export class Room implements EnemyHost {
 
   kill(t: Target, cause: DeathCause, e: Enemy | null, from: Vec3 | null = null) {
     const p = t as RoomPlayer;
-    if (p.status !== Status.Alive) return;
+    if (p.status !== Status.Alive || p.away) return;
     if (p.god && cause !== 'fall') return;
     if (cause !== 'fall') {
       const mt = this.matchTime;
@@ -515,7 +601,7 @@ export class Room implements EnemyHost {
         pr.pos.y += (pr.vel.y / sp) * travel;
         pr.pos.z += (pr.vel.z / sp) * travel;
         for (const p of this.players) {
-          if (p.status !== Status.Alive || !p.connected) continue;
+          if (p.status !== Status.Alive || !p.connected || p.away) continue;
           // sliding runners are a low target: shots aimed at the chest pass over them
           const lo = p.low ? 0.3 : 0.35, hi = p.low ? 0.45 : 1.45, rr = p.low ? RANGED.PROJECTILE_RADIUS + 0.3 : r;
           const cy = Math.min(Math.max(pr.pos.y, p.pos.y + lo), p.pos.y + hi);
