@@ -352,8 +352,18 @@ export const CORPSE = {
   SHOT_PUSH: 5.5,
   SHOT_LIFT: 2.2,
   LASER_LIFT: 2.4,
-  /** A body stops being simulated after this long (or once it is far below the course). */
+  /**
+   * A body at rest on solid ground stops being simulated after this long; one
+   * still moving, or riding a platform, keeps going (up to MAX_LIFE), so it
+   * never freezes in mid-air when the platform under it moves on.
+   */
   LIFE: 12,
+  MAX_LIFE: 90,
+  /** Landing faster than this (m/s) bounces the body back up at this share of the impact speed. */
+  BOUNCE_MIN: 4,
+  BOUNCE: 0.26,
+  /** Share of the velocity into a wall that comes back out of it. */
+  WALL_BOUNCE: 0.4,
   /** Shove when a shield soaks a hit (the runner keeps playing). */
   SHIELD_PUSH: 6.5,
   SHIELD_LIFT: 3.2,

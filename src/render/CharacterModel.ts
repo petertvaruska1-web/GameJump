@@ -38,6 +38,9 @@ export interface AnimInput {
   /** 0..1 landing impact. */
   land: number;
   t: number;
+  /** World-space velocity and whether the body is on the ground (drives the dead body's tumble). */
+  vel?: { x: number; y: number; z: number };
+  grounded?: boolean;
 }
 
 type Joint = THREE.Group;
@@ -63,6 +66,11 @@ function sphere(r: number) {
 }
 
 const TWO_PI = Math.PI * 2;
+const UP = new THREE.Vector3(0, 1, 0);
+const _up = new THREE.Vector3();
+const _ax = new THREE.Vector3();
+const _roll = new THREE.Vector3();
+const _dq = new THREE.Quaternion();
 
 /** Merges the meshes hanging directly off one joint into one mesh per material. */
 function bakeJoint(parent: THREE.Object3D, shadows: boolean) {
@@ -109,6 +117,12 @@ export class CharacterModel {
   phase = 0;
   private cur = new Map<string, number>();
   private deadT = 0;
+  /**
+   * Dead body: an orientation and a spin driven by what the body is actually
+   * doing (the physics body underneath is already thrown, bounces, slides and
+   * rides platforms), instead of a canned fall-over that ignored the ground.
+   */
+  private rag = { on: false, q: new THREE.Quaternion(), w: new THREE.Vector3(), lastVy: 0, jiggle: 0, flat: false };
   /** Climb/vault progress, so a pull-up plays out instead of holding one pose. */
   private mantleT = 0;
   /** Smoothed turn rate: the raw value is noisy, and jumpy for remote runners. */
@@ -352,20 +366,24 @@ export class CharacterModel {
 
     if (a.anim === Anim.Dead) {
       this.deadT += dt;
-      const k = Math.min(1, this.deadT / 0.45);
-      const falling = a.vy < -6;
-      if (falling) {
-        // thrown and tumbling
-        const f = Math.sin(t * 14);
-        thigh = [-0.6 + f * 0.5, -0.6 - f * 0.5]; knee = [1.0, 0.8]; ankle = [-0.3, -0.2];
-        shoulder = [-2.4 + f * 0.6, -2.4 - f * 0.6]; shoulderZ = [1.0, 1.0]; elbow = [-0.3, -0.3];
-        bodyPitch = -0.3 - this.deadT * 2.2;
+      // limp limbs: flung about while the body is in the air, jolted by each impact
+      const jig = this.ragdoll(a, dt);
+      const v = a.vel;
+      const fly = a.grounded === false || (a.grounded === undefined && Math.abs(a.vy) > 0.5)
+        ? clamp((v ? Math.hypot(v.x, v.y, v.z) : Math.abs(a.vy)) / 12, 0.25, 1) : 0;
+      const f = Math.sin(t * 11 + this.gait) * fly, s = Math.sin(t * 29) * jig;
+      if (this.rag.flat) {
+        // lying down: arms and legs fall in alongside the body, whichever side is down,
+        // so nothing sticks up into the air or down through the floor
+        thigh = [-0.08 + s * 0.15, 0.06 - s * 0.1]; knee = [0.25 + s * 0.2, 0.4]; ankle = [0.15, 0.1];
+        shoulder = [-0.15 + s * 0.2, 0.1 - s * 0.15]; shoulderZ = [0.14 + s * 0.12, 0.1]; elbow = [-0.3, -0.45];
       } else {
-        bodyPitch = -k * 1.45;
-        thigh = [-0.3, 0.2]; knee = [0.4, 0.2]; ankle = [0.25, 0.1];
-        shoulder = [-1.2, 0.4]; shoulderZ = [0.9, 0.6]; elbow = [-0.2, -0.5];
-        bob = -k * 0.75;
+        // thrown, tumbling or toppling: limp limbs flung about by the motion
+        thigh = [-0.35 + f * 0.45 + s * 0.3, 0.12 - f * 0.45 - s * 0.2]; knee = [0.6 + s * 0.3, 0.3 + f * 0.3]; ankle = [0.2, 0.1];
+        shoulder = [-0.55 + f * 0.8 + s * 0.4, 0.25 - f * 0.8 - s * 0.3]; shoulderZ = [1.0 + s * 0.3, 0.75 - s * 0.3]; elbow = [-0.35, -0.65];
       }
+      headX = 0.15;
+      rate = 9;
     } else {
       this.deadT = 0;
       if (a.anim === Anim.Finished) {
@@ -581,7 +599,12 @@ export class CharacterModel {
     this.head.rotation.z = -rollA * 0.6 - hipRollA * 0.25;
     // the flip turns the whole runner about the hips; smoothstep so it whips
     // through the middle of the rotation and eases at both ends
-    if (this.flipRun) {
+    if (a.anim === Anim.Dead) { /* the ragdoll owns the pivot */ }
+    else if (this.rag.on) {
+      this.rag.on = false;
+      this.spin.quaternion.identity();
+      this.spin.position.y = 0.95;
+    } else if (this.flipRun) {
       const k = clamp(this.flipK, 0, 1);
       this.spin.rotation.x = TWO_PI * (k * k * (3 - 2 * k));
     } else if (this.spin.rotation.x !== 0) this.spin.rotation.x = 0;
@@ -594,6 +617,77 @@ export class CharacterModel {
       this.scarf[i].rotation.x = i === 0 ? this.scarfAng[0] - leanA : this.scarfAng[i] - this.scarfAng[i - 1];
       this.scarf[i].rotation.z = Math.sin(t * (6 + i * 2.5) + i * 1.3 + this.gait) * 0.1 * (0.25 + trail);
     }
+  }
+
+  /**
+   * Turns the whole body about its hips from its real motion. At death it tips
+   * the way the hit (or the run) was carrying it, keeps any flip it was in, and
+   * tumbles freely through the air. On the ground gravity lays it down until it
+   * lies flat, a slide rolls it along, and the pivot rises or sinks with how
+   * upright it is, so a lying body rests on the floor instead of in it.
+   * Returns how hard it was just jolted (0..1) for the limbs to shake with.
+   */
+  private ragdoll(a: AnimInput, dt: number): number {
+    const r = this.rag;
+    const v = a.vel ?? { x: 0, y: a.vy, z: 0 };
+    // world velocity in the runner's own frame (the root carries its yaw)
+    const yaw = this.root.rotation.y, cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const lx = v.x * cy - v.z * sy, lz = v.x * sy + v.z * cy;
+    const hs = Math.hypot(lx, lz);
+    if (!r.on) {
+      r.on = true;
+      r.q.copy(this.spin.quaternion);
+      // tip over along the push; with nothing to go on, fall backwards
+      const dx = hs > 0.5 ? lx / hs : 0, dz = hs > 0.5 ? lz / hs : -1;
+      const s = clamp(1.6 + hs * 0.8, 1.6, 7);
+      r.w.set(dz * s, 0, -dx * s);
+      if (this.flipRun) { r.w.x += 7; this.flipRun = false; }
+      r.lastVy = v.y; r.jiggle = 0; r.flat = false;
+    }
+    const grounded = a.grounded ?? Math.abs(v.y) < 0.4;
+    _up.copy(UP).applyQuaternion(r.q);
+    const upY = _up.y;
+    if (grounded) {
+      if (Math.abs(upY) > 0.1) {
+        // still upright-ish: gravity keeps it falling the way it already leans
+        _ax.copy(UP).cross(_up);
+        let len = _ax.length();
+        if (len < 1e-3) { _ax.set(r.w.x || 1, 0, r.w.z); len = _ax.length(); }
+        _ax.multiplyScalar(Math.sign(upY) / len);
+        r.w.addScaledVector(_ax, (16 * Math.sqrt(Math.max(0, 1 - upY * upY)) + 4) * dt);
+        if (Math.abs(upY) > 0.3) r.flat = false;
+      } else {
+        if (!r.flat) {
+          // hits the floor flat: most of the spin goes into the impact
+          r.flat = true;
+          r.jiggle = Math.max(r.jiggle, Math.min(1, r.w.length() / 7));
+          r.w.multiplyScalar(0.2);
+        }
+        // lying down: a slide rolls it along, friction stops the rest
+        _roll.set(lz, 0, -lx).multiplyScalar(1 / 0.3);
+        r.w.lerp(_roll, 1 - Math.exp(-6 * dt));
+      }
+      r.w.multiplyScalar(Math.exp(-2.5 * dt));
+    } else {
+      r.w.multiplyScalar(Math.exp(-0.25 * dt));
+    }
+    // a bounce off a hard landing jolts it
+    if (r.lastVy < -3 && v.y > 0.5) r.jiggle = Math.max(r.jiggle, Math.min(1, -r.lastVy / 12));
+    r.lastVy = v.y;
+    const ang = r.w.length() * dt;
+    if (ang > 1e-6) { _dq.setFromAxisAngle(_ax.copy(r.w).normalize(), ang); r.q.premultiply(_dq); }
+    this.spin.quaternion.copy(r.q);
+    // hips height above the feet of the physics body: how far the body reaches down
+    // from the hips in its current orientation, treated as an ellipsoid (0.95 along
+    // the spine, 0.32 across the shoulders, 0.24 front to back), so it rests on the
+    // floor whether it is standing, on its back or on its side
+    const e = r.q, x = e.x, y = e.y, z = e.z, w = e.w;
+    const rY = 2 * (x * y + w * z), uY = 1 - 2 * (x * x + z * z), fY = 2 * (y * z - w * x);
+    const lift = Math.hypot(0.32 * rY, 0.95 * uY, 0.24 * fY);
+    this.spin.position.y = this.j('ragLift', lift, 14, dt);
+    const jig = r.jiggle;
+    r.jiggle = Math.max(0, r.jiggle - dt * 2.2);
+    return jig;
   }
 
   dispose() {

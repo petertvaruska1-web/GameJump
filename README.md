@@ -355,10 +355,19 @@ lean rather than a flick.
 Death is not the end of the physics. A body is thrown by whatever killed it (away from a
 stalker or drone, along the shot, straight up off a laser), keeps the runner's own
 momentum, then falls, tumbles, slides to a stop with friction, rides moving platforms and
-conveyors, gets swatted by sweeper arms and tugged by gusts. If the platform or slab
-holding it goes away, it drops. The server simulates every body — including after the
-match ends, so the last fall plays out for everyone watching — and the client runs the
-same code for your own body so it looks smooth at once.
+conveyors, gets swatted by sweeper arms and tugged by gusts. A hard landing bounces it
+back up a little and a wall knocks it back. If the platform or slab holding it goes away,
+it drops. The server simulates every body — including after the match ends, so the last
+fall plays out for everyone watching — and keeps going for as long as the body is
+moving or riding something. The client runs the same code for your own body so it looks
+smooth at once.
+
+There is no canned death animation. The body tips over the way the hit or the run was
+carrying it (and keeps a flip it was in), tumbles freely in the air, is laid flat by
+gravity when it lands, rolls with a slide, and rests on whatever it ends up on: its
+height is worked out from how it lies (on its back, front or side), so it is never
+sunk into the floor. The limbs flail while it flies, jolt on each impact, and fold in
+alongside the body once it lies still.
 
 A hit your shield soaks shoves you clear of the attacker instead of killing you, and
 landings above 17 m/s cost you a beat and shake the camera.

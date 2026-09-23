@@ -74,6 +74,8 @@ export class RemotePlayer {
     this.model.update({
       speed: Math.hypot(this.vel.x, this.vel.z), vy: this.vel.y, anim, dt, turn,
       land: this.landT, t, fwd: local[0], side: local[1],
+      // a remote body's ground contact is not sent: it is resting when it stops falling
+      vel: this.vel, grounded: Math.abs(this.vel.y) < 0.6,
     });
   }
 }

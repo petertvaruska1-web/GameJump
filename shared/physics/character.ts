@@ -139,7 +139,16 @@ export function stepCorpse(world: CollisionWorld, b: CharBody, dt: number, info:
       v.x *= k; v.z *= k;
     }
   }
+  const vx0 = v.x, vz0 = v.z;
   stepBody(world, b, dt, false, info);
+  // a body is not a sack of sand: it rebounds a little off walls and bounces on a
+  // hard landing (the collision above only ever removes the velocity into a surface)
+  if (info.wall) { v.x += (v.x - vx0) * CORPSE.WALL_BOUNCE; v.z += (v.z - vz0) * CORPSE.WALL_BOUNCE; }
+  if (info.landed && info.impact > CORPSE.BOUNCE_MIN) {
+    v.y = info.impact * CORPSE.BOUNCE;
+    v.x *= 0.8; v.z *= 0.8;
+    b.grounded = false; b.ground = null;
+  }
   // a sweeper arm sends the body flying
   if (info.dynamicHit && info.dynamicHit.kind === 'sweeper') {
     info.dynamicHit.pointVelocity(b.pos.x, b.pos.z, dt, tmpV);

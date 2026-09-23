@@ -416,8 +416,11 @@ export class Room implements EnemyHost {
       stepCorpse(this.world, c.body, dt, this.corpseInfo, corpseWind[0], corpseWind[1]);
       c.p.pos.x = c.body.pos.x; c.p.pos.y = c.body.pos.y; c.p.pos.z = c.body.pos.z;
       c.p.vel.x = c.body.vel.x; c.p.vel.y = c.body.vel.y; c.p.vel.z = c.body.vel.z;
-      // keep simulating even once it settles: the slab under it may still crumble away
-      if (c.t > CORPSE.LIFE || c.body.pos.y < this.level.killY - 20) this.corpses.splice(i, 1);
+      // keep simulating even once it settles: the slab under it may still crumble
+      // away, and a body on a moving platform has to go on riding it (or drop off it)
+      const b = c.body;
+      const atRest = b.grounded && !!b.ground && b.ground.kind === 'static' && Math.hypot(b.vel.x, b.vel.z) < 0.05;
+      if ((c.t > CORPSE.LIFE && atRest) || c.t > CORPSE.MAX_LIFE || b.pos.y < this.level.killY - 20) this.corpses.splice(i, 1);
     }
   }
 

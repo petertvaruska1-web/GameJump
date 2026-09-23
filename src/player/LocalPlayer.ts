@@ -218,6 +218,7 @@ export class LocalPlayer {
     this.model.update({
       speed: this.frozen ? 0 : hs, vy: b.vel.y, anim: this.anim, dt, turn: this.yawRate,
       land: m.landAnim, t: matchTime, fwd: local[0], side: local[1],
+      vel: b.vel, grounded: b.grounded,
     });
 
     // footsteps from the run cycle

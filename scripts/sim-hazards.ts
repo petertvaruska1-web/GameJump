@@ -255,6 +255,39 @@ function crate(kind: string) { return level.pickups.find((c) => c.kind === kind)
   const pushedAway = Math.hypot(p.pos.x - e.pos.x, p.pos.z - e.pos.z) > 1.5;
   check('a stalker kill throws the body clear and it settles', moved > 1 && pushedAway, `moved ${moved.toFixed(1)} m, y ${p.pos.y.toFixed(1)}`);
 }
+{
+  // a body dropped hard on a floor bounces back up a little instead of stopping dead
+  const { room, p } = setup();
+  const [sx, sy, sz] = level.spawns[0];
+  room.handle(p, { t: 'dbg', cmd: 'tp', p: [sx, sy + 5, sz] });
+  send(room, p, sx, sy + 5, sz);
+  room.kill(p, 'shot', null, { x: sx, y: sy + 5, z: sz - 1 } as never);
+  const floor = sy + 0.5 - room.world.groundBelow(sx, sy + 0.5, sz, 5);
+  let lowest = Infinity, bounced = false, peak = -Infinity, prevY = p.pos.y;
+  for (let i = 0; i < 30 * 3; i++) {
+    now += 1 / 30; room.tick(1 / 30);
+    lowest = Math.min(lowest, p.pos.y);
+    if (lowest < floor + 0.02 && p.pos.y > prevY + 0.01) bounced = true;
+    if (bounced) peak = Math.max(peak, p.pos.y);
+    prevY = p.pos.y;
+  }
+  check('a body dropped on a floor bounces, then lies on it', bounced && Math.abs(p.pos.y - floor) < 0.02 && lowest > floor - 0.02,
+    `bounce peak +${(peak - floor).toFixed(2)} m, rests at ${p.pos.y.toFixed(2)} on a floor at ${floor.toFixed(2)}`);
+}
+{
+  // a body on a moving platform rides it for as long as it lies there: it used to
+  // stop being simulated after 12 s and hang in mid-air once the platform moved on
+  const { room, p } = setup();
+  const mover = room.world.dynamics.find((c) => c.kind === 'mover' && c.def.tag === 'Gantry Approach')!;
+  const put = () => { room.handle(p, { t: 'dbg', cmd: 'tp', p: [mover.cx, mover.cy + mover.hy, mover.cz] }); send(room, p, mover.cx, mover.cy + mover.hy, mover.cz); };
+  put();
+  room.kill(p, 'fall', null);
+  const zs: number[] = [];
+  for (let i = 0; i < 30 * 20; i++) { now += 1 / 30; room.tick(1 / 30); if (i > 30 * 13) zs.push(p.pos.z); }
+  const span = Math.max(...zs) - Math.min(...zs);
+  check('a body on a moving platform keeps riding it past 12 s', span > 3 && Math.abs(p.pos.y - (mover.cy + mover.hy)) < 0.3,
+    `moved ${span.toFixed(1)} m between 13 s and 20 s, y ${p.pos.y.toFixed(2)} vs deck ${(mover.cy + mover.hy).toFixed(2)}`);
+}
 
 // ---------------------------------------------------------------- match flow
 
