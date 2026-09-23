@@ -346,12 +346,14 @@ export class Room implements EnemyHost {
 
   /**
    * One run in ten gets a portal, at a random spot from the level's list, opening a
-   * few seconds in. Every run does while someone in the room is called PORTAL.TEST_NAME.
+   * few seconds in. While someone in the room is called PORTAL.TEST_NAME every run
+   * gets one, on the landing pad right in front of the spawns, opening just after "Go!".
    */
   private rollPortal(): OpenPortal | null {
     const spots = this.level.portals;
-    const always = this.players.some((p) => p.name.trim().toLowerCase() === PORTAL.TEST_NAME);
-    if (!spots?.length || (!always && this.rand() >= PORTAL.CHANCE)) return null;
+    const test = this.players.some((p) => p.name.trim().toLowerCase() === PORTAL.TEST_NAME);
+    if (test && this.level.portalTest) return { spot: this.level.portalTest, at: PORTAL.TEST_OPEN };
+    if (!spots?.length || (!test && this.rand() >= PORTAL.CHANCE)) return null;
     const spot = spots[Math.min(spots.length - 1, Math.floor(this.rand() * spots.length))];
     return { spot, at: PORTAL.OPEN_MIN + this.rand() * (PORTAL.OPEN_MAX - PORTAL.OPEN_MIN) };
   }

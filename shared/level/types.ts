@@ -230,4 +230,6 @@ export interface LevelData {
   pickups: PickupDef[];
   /** Where the rare portal can open (none: it never does). */
   portals?: PortalSpot[];
+  /** Where it opens for the test name (PORTAL.TEST_NAME): on the landing pad, in front of the spawns. */
+  portalTest?: PortalSpot;
 }

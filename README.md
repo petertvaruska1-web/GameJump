@@ -261,8 +261,9 @@ on the pad with the gift. With debug keys on, `F9` opens a portal in front of
 you.
 
 To try it without waiting for the one run in ten: enter **vk3** as your runner
-name (any capitals) and every run gets a portal, at a random spot as usual. In
-a team it is enough for one player to be called that.
+name (any capitals) and every run gets a portal, standing on the landing pad
+straight ahead of you and opening a second after "Go!". In a team it is enough
+for one player to be called that.
 
 ## The level
 

@@ -429,15 +429,36 @@ const spots = level.portals ?? [];
   check('it opens a few seconds into the run', opens.every((a) => a >= 3 && a <= 9), `open times ${Math.min(...opens).toFixed(1)}..${Math.max(...opens).toFixed(1)} s`);
 }
 {
-  // testing: a runner called vk3 (any case) gets the portal on every run, and only that changes
+  // testing: a runner called vk3 (any case) gets the portal on every run, on the landing
+  // pad in front of the spawns, opening a second after "Go!" -- and only that changes
   for (const name of ['vk3', 'VK3']) {
     now = 0;
     const room = new Room('VK3', level, () => now, true, () => 0.99);
     const p = room.join({ send() {}, close() {} }, name) as RoomPlayer;
     room.handle(p, { t: 'start' });
     let n = 0;
-    for (let k = 0; k < 200; k++) { room.handle(p, { t: 'restart' }); if (room.portal) n++; }
-    check(`a runner named ${name} gets the portal on every run`, n === 200, `${n}/200`);
+    for (let k = 0; k < 200; k++) {
+      room.handle(p, { t: 'restart' });
+      if (room.portal && room.portal.spot === level.portalTest && room.portal.at === PORTAL.TEST_OPEN) n++;
+    }
+    check(`a runner named ${name} gets the portal on the landing pad every run`, n === 200, `${n}/200`);
+  }
+  {
+    // and can walk straight into it from the spawn once it opens
+    const { room, p } = (() => {
+      now = 0;
+      const r = new Room('VK3', level, () => now, true, () => 0.99);
+      const q = r.join({ send() {}, close() {} }, 'vk3') as RoomPlayer;
+      r.handle(q, { t: 'start' });
+      now += 3.6; r.tick(1 / 30);
+      return { room: r, p: q };
+    })();
+    const s = level.portalTest!.p, sp = level.spawns[0];
+    const d0 = Math.hypot(s[0] - sp[0], s[2] - sp[2]);
+    waitUntil(room, p, PORTAL.TEST_OPEN + 0.05);
+    for (let k = 1; k <= 30; k++) sendA(room, p, sp[0] + ((s[0] - sp[0]) * k) / 30, sp[1], sp[2] + ((s[2] - sp[2]) * k) / 30, 1);
+    room.handle(p, { t: 'portal' });
+    check('the landing-pad portal takes a runner who walks into it from the spawn', p.away && d0 < 12, `${d0.toFixed(1)} m from the spawn, away=${p.away}`);
   }
   now = 0;
   const other = new Room('XYZ', level, () => now, true, () => 0.99);

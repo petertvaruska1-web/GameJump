@@ -56,8 +56,11 @@ function segDist(x: number, z: number, ax: number, az: number, bx: number, bz: n
   return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
 }
 
-/** Why a point cannot hold a portal, or null when it can. Exported for the map check. */
-export function rejectSpot(x: number, y: number, z: number): string | null {
+/**
+ * Why a point cannot hold a portal, or null when it can. Exported for the map check.
+ * `onPad`: the test name's portal, which is meant to stand by the start.
+ */
+export function rejectSpot(x: number, y: number, z: number, onPad = false): string | null {
   world.groundProbe(x, z, 0.2, y + 0.3, gh);
   if (!flatStatic(gh.c) || gh.c.kind === 'crumble' || Math.abs(gh.top - y) > 0.08) return 'no flat floor';
   const top = gh.top;
@@ -85,7 +88,7 @@ export function rejectSpot(x: number, y: number, z: number): string | null {
   for (const g of level.grapples) if (Math.hypot(x - g.p[0], z - g.p[2]) < ANCHOR_GAP) return 'anchor';
   for (const e of level.enemies) if (e.kind !== 'flyer' && Math.hypot(x - e.p[0], z - e.p[2]) < ENEMY_GAP) return 'enemy post';
   const s = level.spawns[0];
-  if (Math.hypot(x - s[0], z - s[2]) < START_GAP) return 'start';
+  if (!onPad && Math.hypot(x - s[0], z - s[2]) < START_GAP) return 'start';
   if (Math.hypot(x - level.beacon[0], z - level.beacon[2]) < FINISH_GAP) return 'finish';
   if (zoneAt(level, x, z) === null) return 'unnamed';
   return null;

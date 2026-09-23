@@ -51,6 +51,9 @@ for (const sp of spots) {
   if (why) { brokenSpots++; console.log(`WARN portal spot ${sp.p.join(',')} no longer holds (${why}): rerun scripts/portal-spots.ts`); }
 }
 console.log(`portal spots=${spots.length}${brokenSpots ? ` (${brokenSpots} broken)` : ''}`);
+const pt = level.portalTest;
+const ptWhy = pt ? rejectSpot(pt.p[0], pt.p[1], pt.p[2], true) : 'missing';
+if (ptWhy) console.log(`WARN the test name's portal on the landing pad does not hold (${ptWhy})`);
 if (!spots.length) console.log('WARN the level has no portal spots: the portal can never open');
 
 // SVG overview

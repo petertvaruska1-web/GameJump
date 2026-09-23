@@ -30,6 +30,8 @@ export function buildLevel(): LevelData {
     killY: -40,
   });
   level.portals = PORTAL_SPOTS;
+  // the test name's portal: straight ahead of the spawns, short of the arch to the Broken Bridge
+  level.portalTest = { p: [START.x, START.y, START.z + 3], yaw: 0 };
   levelWarnings = b.warnings;
   levelChains = b.chainPoints;
   return level;
