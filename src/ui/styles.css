@@ -153,6 +153,16 @@ kbd {
 .results { width: 100%; border-collapse: collapse; margin: 6px 0 20px; }
 .results td { padding: 12px 10px; border-bottom: 1px solid var(--line); font-size: 15px; }
 .results td.r { text-align: right; font-variant-numeric: tabular-nums; }
+.results-panel .btn kbd { min-width: 0; padding: 1px 6px; margin-left: 8px; font-size: 11px; background: rgba(0, 0, 0, 0.18); border-color: rgba(0, 0, 0, 0.25); color: inherit; }
+/* How far the run got: a bar along the course with the personal best marked on it. */
+.run-card { margin: -4px 0 22px; }
+.run-where { font-size: 17px; color: var(--text); margin-bottom: 12px; }
+.run-where b { color: var(--accent); font-weight: 700; }
+.run-bar { position: relative; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); }
+.run-bar > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); animation: run-fill 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.run-bar > em { position: absolute; top: -4px; width: 2px; height: 14px; margin-left: -1px; background: var(--cyan); box-shadow: 0 0 6px rgba(94, 240, 255, 0.8); }
+.run-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; color: var(--dim); font-size: 13px; letter-spacing: 0.04em; }
+@keyframes run-fill { from { width: 0; } }
 
 .modal .panel { width: min(440px, 92vw); }
 .fatal { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; color: var(--text); background: var(--bg); font-family: var(--font); }

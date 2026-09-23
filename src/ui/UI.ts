@@ -4,7 +4,7 @@
 import { MAX_PLAYERS } from '../../shared/constants';
 import { Status, type LobbyPlayer, type MatchResult, type Phase } from '../../shared/protocol';
 import { PLAYER_CSS } from '../render/CharacterModel';
-import type { Settings } from '../settings';
+import type { PersonalBest, Settings } from '../settings';
 import './styles.css';
 
 export interface UIHandlers {
@@ -30,6 +30,21 @@ export interface LobbyView {
 }
 
 export interface HudPlayer { id: number; name: string; status: Status; me: boolean; connected: boolean }
+
+/** How the local runner's run went, for the results screen. */
+export interface RunSummary {
+  /** 0..1 of the way from the start line to the Spire. */
+  progress: number;
+  /** Named area where the run ended (null out over open air before the first one). */
+  area: string | null;
+  escaped: boolean;
+  cause?: string;
+  time: number;
+  /** Best before this run, and which records this run broke. */
+  prevBest: PersonalBest | null;
+  further: boolean;
+  faster: boolean;
+}
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
@@ -407,22 +422,24 @@ export class UI {
 
   closePause() { this.closeOverlay(); }
 
-  results(results: MatchResult[], meId: number, isHost: boolean, duration: number) {
+  results(results: MatchResult[], meId: number, isHost: boolean, duration: number, run?: RunSummary) {
     this.closeOverlay();
     const me = results.find((r) => r.id === meId);
     const escaped = results.filter((r) => r.status === Status.Finished).length;
-    const title = me?.status === Status.Finished ? 'You escaped' : escaped > 0 ? 'The team made it' : 'Nobody escaped';
+    const solo = results.length === 1;
+    const title = me?.status === Status.Finished ? 'You escaped' : solo ? deathHeadline(me?.cause) : escaped > 0 ? 'The team made it' : 'Nobody escaped';
     const rows = results.map((r) => {
       const status = r.status === Status.Finished ? `<span class="s finished">Escaped${r.place ? ` · #${r.place}` : ''}</span>`
         : r.status === Status.Dead ? `<span class="s dead">${causeText(r.cause)}</span>` : '<span class="s left">Left</span>';
       return `<tr><td><span class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${PLAYER_CSS[(r.id - 1) % 3]};margin-right:10px"></span>${esc(r.name)}</td><td>${status}</td><td class="r">${fmtTime(r.time)}</td></tr>`;
     }).join('');
-    const o = el(`<div class="screen center interactive"><div class="panel">
+    const o = el(`<div class="screen center interactive"><div class="panel results-panel">
       <h2>${title}</h2>
-      <table class="results">${rows}</table>
-      <p class="hint">Run length ${fmtTime(duration)}. ${isHost ? '' : 'Waiting for the host to start another run…'}</p>
+      ${run ? runCard(run, solo) : ''}
+      ${solo && run ? '' : `<table class="results">${rows}</table>`}
+      ${solo && run ? '' : `<p class="hint">Run length ${fmtTime(duration)}. ${isHost ? '' : 'Waiting for the host to start another run…'}</p>`}
       <div class="row between"><button class="btn small danger" data-a="leave">Leave</button>${isHost
-        ? '<span class="row"><button class="btn small" data-a="lobby">Back to lobby</button><button class="btn primary" data-a="again">Run it again</button></span>'
+        ? `<span class="row"><button class="btn small" data-a="lobby">${solo ? 'Lobby' : 'Back to lobby'}</button><button class="btn primary" data-a="again">Run it again <kbd>R</kbd></button></span>`
         : ''}</div>
     </div></div>`);
     this.root.appendChild(o);
@@ -452,6 +469,46 @@ export class UI {
 
 export function fatal(title: string, message: string) {
   document.body.innerHTML = `<div class="fatal"><h1>${esc(title)}</h1><p>${esc(message)}</p></div>`;
+}
+
+/** Results title for a solo run that ended short of the Spire. */
+function deathHeadline(c?: string) {
+  switch (c) {
+    case 'fall': return 'You fell';
+    case 'melee': return 'Caught';
+    case 'shot': return 'Shot down';
+    case 'flyer': return 'Taken by a drone';
+    case 'laser': return 'Lasered';
+    default: return 'Run over';
+  }
+}
+
+/**
+ * Where the run ended and how far along the course that is, against the best
+ * this browser has managed: a bar with the best marked on it, so a run that
+ * got further than ever reads as progress rather than as another death.
+ */
+function runCard(r: RunSummary, solo: boolean) {
+  const pct = Math.round(Math.max(0, Math.min(1, r.progress)) * 100);
+  // a solo title already names the cause; with a team it names the outcome, so the card says how you went
+  const place = r.area ? `<b>${esc(r.area)}</b>` : 'the open air';
+  const where = r.escaped
+    ? `Escaped in <b>${fmtTime(r.time)}</b>`
+    : solo ? `In ${place}, ${fmtTime(r.time)} into the run` : `${esc(causeText(r.cause))} in ${place} after ${fmtTime(r.time)}`;
+  const best = r.prevBest;
+  const bestPct = best ? Math.round(best.progress * 100) : null;
+  let meta = r.escaped ? 'The whole course' : `${pct}% of the way to the Spire`;
+  let badge = '';
+  if (best && r.faster && r.escaped) badge = best.time !== undefined ? `<span class="tag ok">New record · was ${fmtTime(best.time)}</span>` : '<span class="tag ok">First escape</span>';
+  else if (best && r.further && !r.escaped) badge = `<span class="tag ok">Furthest yet · was ${bestPct}%</span>`;
+  else if (best && !r.escaped) meta += ` · best ${bestPct}%${best.area ? ` (${esc(best.area)})` : ''}`;
+  else if (best && r.escaped && best.time !== undefined) meta += ` · record ${fmtTime(best.time)}`;
+  const mark = best && !r.further && !r.escaped ? `<em style="left:${bestPct}%"></em>` : '';
+  return `<div class="run-card">
+    <div class="run-where">${where}</div>
+    <div class="run-bar"><i style="width:${r.escaped ? 100 : pct}%"></i>${mark}</div>
+    <div class="run-meta"><span>${meta}</span>${badge}</div>
+  </div>`;
 }
 
 export function causeText(c?: string) {

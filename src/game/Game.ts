@@ -24,8 +24,8 @@ import { Materials } from '../render/Materials';
 import { PropsView } from '../render/Props';
 import { FOG_DENSITY, Renderer } from '../render/Renderer';
 import { Sky } from '../render/Sky';
-import { loadSession, saveSession, saveSettings, type Settings } from '../settings';
-import { causeText, fmtTime, UI } from '../ui/UI';
+import { loadSession, recordRun, saveSession, saveSettings, type Settings } from '../settings';
+import { causeText, fmtTime, UI, type RunSummary } from '../ui/UI';
 import { EnemyProxy, RemotePlayer } from './Actors';
 
 type Mode = 'menu' | 'connecting' | 'lobby' | 'playing' | 'results';
@@ -105,6 +105,9 @@ export class Game {
   private pendingArea: string | null = null;
   private pendingAreaFor = 0;
   private readonly deadSpot = new THREE.Vector3();
+  /** Furthest along the course the local runner got this run (0..1), and how the run ended. */
+  private runProgress = 0;
+  private runSummary: RunSummary | null = null;
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, private settings: Settings) {
     this.level = getLevel();
@@ -333,7 +336,7 @@ export class Game {
         this.ui.closePause();
         this.paused = false;
         window.setTimeout(() => {
-          if (this.mode === 'results') this.ui.results(m.results, this.meId, this.hostId === this.meId, m.duration);
+          if (this.mode === 'results') this.ui.results(m.results, this.meId, this.hostId === this.meId, m.duration, this.runSummary ?? undefined);
         }, 1800);
         break;
       case 'err':
@@ -366,6 +369,7 @@ export class Game {
     this.predicted.clear();
     this.pickups.reset();
     this.localGrace = 0;
+    if (!resume) { this.runProgress = 0; this.runSummary = null; }
     for (const [id, s, t] of crumbles) {
       const c = this.world.get(id);
       if (!c) continue;
@@ -667,7 +671,9 @@ export class Game {
           this.audio.death(e.cause);
           this.cam.addShake(e.cause === 'fall' ? 0.2 : 0.8);
           const txt = e.cause === 'fall' ? 'You fell' : e.cause === 'melee' ? 'Caught' : e.cause === 'shot' ? 'Shot down' : e.cause === 'laser' ? 'Lasered' : 'Taken';
-          this.ui.big(txt, 'danger', this.aliveRemotes() > 0 ? 'Your run is over — watch your team' : 'Your run is over', 4);
+          const pct = Math.round(this.runProgress * 100);
+          this.endRun(false, e.cause, Math.max(0, this.matchTime));
+          this.ui.big(txt, 'danger', this.aliveRemotes() > 0 ? 'Your run is over — watch your team' : `${this.shownArea ? `${this.shownArea} · ` : ''}${pct}% of the way`, 4);
           if (e.cause !== 'fall') this.effects.particles.burst(e.p[0], e.p[1] + 1, e.p[2], 60, 7, 0.9, 0.35, e.cause === 'shot' ? [1, 0.35, 0.7] : e.cause === 'laser' ? [1, 0.2, 0.15] : [1, 0.5, 0.2], 1, 5);
         } else {
           this.ui.toast(`${this.playerName(e.id)} — ${causeText(e.cause).toLowerCase()}`);
@@ -681,6 +687,8 @@ export class Game {
         if (e.id === this.meId && this.local) {
           this.local.finished = true;
           this.deathCam = this.time;
+          this.runProgress = 1;
+          this.endRun(true, undefined, e.time);
           this.audio.finish();
           const place = ['', '1st', '2nd', '3rd'][e.place] ?? `#${e.place}`;
           this.ui.big('Escaped', 'cyan', `${fmtTime(e.time)} · ${place}`, 0);
@@ -771,6 +779,14 @@ export class Game {
     }
   }
 
+  /** Records how the local run ended, against this browser's best, for the results screen. */
+  private endRun(escaped: boolean, cause: string | undefined, time: number) {
+    if (this.runSummary) return;
+    const area = escaped ? 'The Spire' : this.shownArea;
+    const rec = recordRun(this.runProgress, area ?? '', escaped ? time : null);
+    this.runSummary = { progress: this.runProgress, area, escaped, cause, time, prevBest: rec.prev, further: rec.further, faster: rec.faster };
+  }
+
   // ------------------------------------------------------------------ input
 
   private onKey(code: string) {
@@ -802,6 +818,13 @@ export class Game {
     }
     if (code === 'Escape' && this.mode === 'playing') {
       if (this.paused) this.resume();
+    }
+    // R on the results screen: straight into another run (the host decides for everyone)
+    if (code === 'KeyR' && this.mode === 'results' && this.ui.overlayOpen && this.hostId === this.meId) {
+      this.audio.click();
+      this.input.requestLock();
+      this.conn?.send({ t: 'start' });
+      return;
     }
     if (this.mode === 'playing' && this.local && (this.local.dead || this.local.finished) && (code === 'Space' || code === 'KeyE')) this.nextSpectate();
   }
@@ -1086,7 +1109,9 @@ export class Game {
     // out over open air between two areas: keep showing the last one you were in
     if (here !== null && here !== this.shownArea && this.pendingAreaFor >= HUD_AREA_SETTLE) this.shownArea = here;
     const span = this.level.finish.max[2] - this.level.spawns[0][2];
-    this.ui.area(this.shownArea, span > 0 ? (local.pos.z - this.level.spawns[0][2]) / span : 0);
+    const progress = span > 0 ? (local.pos.z - this.level.spawns[0][2]) / span : 0;
+    if (!local.dead) this.runProgress = Math.max(this.runProgress, clamp(progress, 0, 1));
+    this.ui.area(this.shownArea, progress);
   }
 
   private updateHud(mt: number) {

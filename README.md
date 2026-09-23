@@ -242,8 +242,11 @@ opposite of dangerous at range: their aim is about half as accurate as it
 originally was, and their sight is down from 58 m to 39 m. The route bot's flawless runs take
 about 131–135 s, including the waits at laser gates. Real runs with scouting, hiding
 and waiting for gaps in patrols take several minutes. There are no checkpoints, so most runs end in a fall — the results screen's
-**Run it again** puts the host straight into a fresh countdown rather than back
+**Run it again** (or `R`) puts the host straight into a fresh countdown rather than back
 round through the lobby, which is still there for changing who is in the room.
+The results screen says where your run ended and how far along the course that
+was, as a bar with this browser's best run marked on it. It flags a run that got
+further than ever, or a faster escape (kept in `localStorage`).
 
 ### What each route asks of you, measured
 
