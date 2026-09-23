@@ -116,9 +116,11 @@ export class Sky {
   private buildSkyWriting() {
     const mat = new THREE.MeshBasicMaterial({ map: cloudWriting('majo.majer'), transparent: true, opacity: 0.5, depthWrite: false, fog: false, color: 0xf4efe8 });
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(460, 115), mat);
-    sign.position.set(200, 330, 1300);
+    // off to the right of the course's end, so it drifts over the skyline rather than
+    // over the route (or over the title on the main menu)
+    sign.position.set(720, 330, 1300);
     // face back down the course, tipped toward runners below it
-    sign.rotation.set(0.3, Math.atan2(0 - 200, 450 - 1300), 0, 'YXZ');
+    sign.rotation.set(0.3, Math.atan2(0 - 720, 450 - 1300), 0, 'YXZ');
     sign.renderOrder = -5;
     this.group.add(sign);
   }

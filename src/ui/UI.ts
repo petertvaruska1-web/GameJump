@@ -69,8 +69,17 @@ export class UI {
   private bigTimer = 0;
   private objectiveTimer = 0;
   private lastLobby: LobbyView | null = null;
+  /** What Esc does on the current menu screen (back out of a sub-page), if anything. */
+  private escBack: (() => void) | null = null;
 
   constructor(private root: HTMLElement, private settings: Settings, private h: UIHandlers) {
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !this.escBack || !this.screen || this.overlay) return;
+      if ((e.target as HTMLElement | null)?.id === 'code') return; // the join box handles its own Esc
+      const back = this.escBack;
+      this.h.click();
+      back();
+    });
     this.hud = el(`<div id="hud" class="hidden">
       <div class="hud-players"></div>
       <div class="hud-objective"></div>
@@ -89,8 +98,9 @@ export class UI {
 
   // ------------------------------------------------------------------ helpers
 
-  private show(html: string, cls = 'screen left'): HTMLElement {
+  private show(html: string, cls = 'screen left', escBack: (() => void) | null = null): HTMLElement {
     this.screen?.remove();
+    this.escBack = escBack;
     const s = el(`<div class="${cls} interactive">${html}</div>`);
     this.root.appendChild(s);
     this.screen = s;
@@ -101,7 +111,7 @@ export class UI {
     return s;
   }
 
-  hideScreen() { this.screen?.remove(); this.screen = null; }
+  hideScreen() { this.screen?.remove(); this.screen = null; this.escBack = null; }
 
   private closeOverlay() { this.overlay?.remove(); this.overlay = null; }
 
@@ -119,6 +129,7 @@ export class UI {
       <h1 class="title">Skyfall<br/><span>Escape</span></h1>
       <p class="tagline">Keep moving. Don't fall. Don't get seen.</p>
       <div class="field name-row"><label>Runner name</label><input class="input" id="name" maxlength="16" placeholder="Enter a name" value="${esc(this.settings.name)}"/></div>
+      ${touchOnly() ? '<p class="notice">Skyfall Escape is played with a keyboard and mouse. You can look around here, but you will need a computer to run the course.</p>' : ''}
       <div class="menu">
         <button class="btn primary" data-a="play">Play — create game</button>
         <button class="btn" data-a="join">Join game</button>
@@ -143,7 +154,7 @@ export class UI {
       <div class="field"><label>Room code</label><input class="input code" id="code" maxlength="4" placeholder="ABCD" autocomplete="off" spellcheck="false"/></div>
       ${error ? `<p style="color:var(--danger)">${esc(error)}</p>` : '<p class="hint">Ask the host for the 4-letter code shown in their lobby.</p>'}
       <div class="row end"><button class="btn small" data-a="back">Back</button><button class="btn small primary" data-a="go">Join</button></div>
-    </div>`, 'screen center');
+    </div>`, 'screen center', () => this.mainMenu());
     const code = s.querySelector<HTMLInputElement>('#code')!;
     code.focus();
     code.addEventListener('input', () => { code.value = code.value.toUpperCase().replace(/[^A-Z]/g, ''); });
@@ -199,7 +210,7 @@ export class UI {
   }
 
   howTo(back: () => void) {
-    const s = this.show(`<div class="panel">${this.howToHtml()}<div class="row end" style="margin-top:18px"><button class="btn small primary" data-a="back">Back</button></div></div>`, 'screen center');
+    const s = this.show(`<div class="panel">${this.howToHtml()}<div class="row end panel-foot"><button class="btn small primary" data-a="back">Back <kbd>Esc</kbd></button></div></div>`, 'screen center', back);
     s.querySelector('[data-a=back]')!.addEventListener('click', back);
   }
 
@@ -236,7 +247,7 @@ export class UI {
   }
 
   settingsMenu(back: () => void) {
-    const s = this.show(`<div class="panel">${this.settingsHtml()}<div class="row end" style="margin-top:14px"><button class="btn small primary" data-a="back">Back</button></div></div>`, 'screen center');
+    const s = this.show(`<div class="panel">${this.settingsHtml()}<div class="row end panel-foot"><button class="btn small primary" data-a="back">Back <kbd>Esc</kbd></button></div></div>`, 'screen center', back);
     this.bindSettings(s);
     s.querySelector('[data-a=back]')!.addEventListener('click', back);
   }
@@ -408,12 +419,12 @@ export class UI {
     o.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button')) this.h.click(); });
     o.querySelector('[data-a=resume]')!.addEventListener('click', () => this.h.resume());
     o.querySelector('[data-a=settings]')!.addEventListener('click', () => {
-      panel.innerHTML = `${this.settingsHtml()}<div class="row end" style="margin-top:14px"><button class="btn small primary" data-a="back">Back</button></div>`;
+      panel.innerHTML = `${this.settingsHtml()}<div class="row end panel-foot"><button class="btn small primary" data-a="back">Back</button></div>`;
       this.bindSettings(panel as HTMLElement);
       panel.querySelector('[data-a=back]')!.addEventListener('click', back);
     });
     o.querySelector('[data-a=how]')!.addEventListener('click', () => {
-      panel.innerHTML = `${this.howToHtml()}<div class="row end" style="margin-top:14px"><button class="btn small primary" data-a="back">Back</button></div>`;
+      panel.innerHTML = `${this.howToHtml()}<div class="row end panel-foot"><button class="btn small primary" data-a="back">Back</button></div>`;
       panel.querySelector('[data-a=back]')!.addEventListener('click', back);
     });
     o.querySelector('[data-a=lobby]')?.addEventListener('click', () => this.h.toLobby());
@@ -526,6 +537,11 @@ export function fmtTime(sec: number) {
   const s = Math.max(0, sec);
   const m = Math.floor(s / 60);
   return `${m}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+}
+
+/** A phone or tablet with no mouse or trackpad: the game cannot be controlled there. */
+function touchOnly() {
+  try { return matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches; } catch { return false; }
 }
 
 function el(html: string): HTMLElement {

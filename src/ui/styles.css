@@ -45,7 +45,8 @@ button, input, select { font-family: inherit; }
   text-shadow: 0 6px 30px rgba(0, 0, 0, 0.45);
 }
 .title span { color: var(--accent); }
-.tagline { color: var(--dim); font-size: 15px; letter-spacing: 0.18em; text-transform: uppercase; margin: 0 0 36px; }
+.tagline { color: var(--dim); font-size: 15px; letter-spacing: 0.18em; text-transform: uppercase; margin: 0 0 36px; text-shadow: 0 1px 10px rgba(6, 12, 22, 0.9), 0 0 2px rgba(6, 12, 22, 0.8); }
+.notice { width: min(360px, 86vw); margin: -18px 0 22px; padding: 10px 14px; border-radius: 10px; font-size: 14px; line-height: 1.5; color: var(--text); background: rgba(22, 17, 6, 0.8); border: 1px solid rgba(255, 194, 51, 0.5); }
 
 .menu { display: flex; flex-direction: column; gap: 10px; width: min(360px, 86vw); }
 .btn {
@@ -66,6 +67,11 @@ button, input, select { font-family: inherit; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 28px;
   width: min(560px, 92vw); max-height: 88vh; overflow: auto; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
 }
+/* long panels keep their Back button in reach instead of 2,000 px down */
+.panel-foot { position: sticky; bottom: -28px; margin: 18px -28px -28px; padding: 14px 28px; background: linear-gradient(180deg, rgba(15, 28, 44, 0) 0%, var(--panel-solid) 38%); border-radius: 0 0 16px 16px; }
+.panel { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.22) transparent; }
+.panel::-webkit-scrollbar { width: 8px; }
+.panel::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
 .panel h2 { font-family: var(--display); text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 18px; font-size: 26px; }
 .panel h3 { margin: 18px 0 8px; font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
 .panel p, .panel li { color: var(--dim); line-height: 1.55; font-size: 15px; }
@@ -153,7 +159,7 @@ kbd {
 .results { width: 100%; border-collapse: collapse; margin: 6px 0 20px; }
 .results td { padding: 12px 10px; border-bottom: 1px solid var(--line); font-size: 15px; }
 .results td.r { text-align: right; font-variant-numeric: tabular-nums; }
-.results-panel .btn kbd { min-width: 0; padding: 1px 6px; margin-left: 8px; font-size: 11px; background: rgba(0, 0, 0, 0.18); border-color: rgba(0, 0, 0, 0.25); color: inherit; }
+.btn kbd { min-width: 0; padding: 1px 6px; margin-left: 8px; font-size: 11px; background: rgba(0, 0, 0, 0.18); border-color: rgba(0, 0, 0, 0.25); color: inherit; }
 /* How far the run got: a bar along the course with the personal best marked on it. */
 .run-card { margin: -4px 0 22px; }
 .run-where { font-size: 17px; color: var(--text); margin-bottom: 12px; }
