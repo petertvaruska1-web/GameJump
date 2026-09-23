@@ -141,15 +141,21 @@ export class AudioEngine {
     return { dest: pan, gain };
   }
 
-  private noiseHit(dest: Dest, o: { type: BiquadFilterType; freq: number; q?: number; gain: number; attack?: number; decay: number; delay?: number; freqEnd?: number; rate?: number }) {
+  /**
+   * `vary` detunes one play of a sound by up to that fraction either way: the
+   * same jump, landing or footstep at exactly the same pitch every time sounds
+   * like a machine; a few percent of spread makes a run of them sound played.
+   */
+  private noiseHit(dest: Dest, o: { type: BiquadFilterType; freq: number; q?: number; gain: number; attack?: number; decay: number; delay?: number; freqEnd?: number; rate?: number; vary?: number }) {
     const ctx = this.ctx!;
     const t = ctx.currentTime + (o.delay ?? 0);
+    const k = 1 + (Math.random() * 2 - 1) * (o.vary ?? 0);
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
-    src.playbackRate.value = o.rate ?? 1;
+    src.playbackRate.value = (o.rate ?? 1) * k;
     const f = ctx.createBiquadFilter();
-    f.type = o.type; f.frequency.setValueAtTime(o.freq, t); f.Q.value = o.q ?? 1;
-    if (o.freqEnd) f.frequency.exponentialRampToValueAtTime(o.freqEnd, t + (o.attack ?? 0.005) + o.decay);
+    f.type = o.type; f.frequency.setValueAtTime(o.freq * k, t); f.Q.value = o.q ?? 1;
+    if (o.freqEnd) f.frequency.exponentialRampToValueAtTime(o.freqEnd * k, t + (o.attack ?? 0.005) + o.decay);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(Math.max(0.0002, o.gain), t + (o.attack ?? 0.005));
@@ -159,13 +165,14 @@ export class AudioEngine {
     src.stop(t + (o.attack ?? 0.005) + o.decay + 0.05);
   }
 
-  private tone(dest: Dest, o: { type: OscillatorType; f0: number; f1?: number; gain: number; attack?: number; decay: number; delay?: number; lp?: number }) {
+  private tone(dest: Dest, o: { type: OscillatorType; f0: number; f1?: number; gain: number; attack?: number; decay: number; delay?: number; lp?: number; vary?: number }) {
     const ctx = this.ctx!;
     const t = ctx.currentTime + (o.delay ?? 0);
+    const k = 1 + (Math.random() * 2 - 1) * (o.vary ?? 0);
     const osc = ctx.createOscillator();
     osc.type = o.type;
-    osc.frequency.setValueAtTime(o.f0, t);
-    if (o.f1) osc.frequency.exponentialRampToValueAtTime(o.f1, t + (o.attack ?? 0.005) + o.decay);
+    osc.frequency.setValueAtTime(o.f0 * k, t);
+    if (o.f1) osc.frequency.exponentialRampToValueAtTime(o.f1 * k, t + (o.attack ?? 0.005) + o.decay);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(Math.max(0.0002, o.gain), t + (o.attack ?? 0.005));
@@ -184,27 +191,27 @@ export class AudioEngine {
     const k = Math.min(1, speed / 9);
     const metal = surface === 'metal' || surface === 'grate' || surface === 'steel' || surface === 'hazard' || surface === 'rust';
     this.noiseHit(this.sfx, { type: 'bandpass', freq: metal ? 2400 + Math.random() * 600 : 900 + Math.random() * 300, q: 1.1, gain: 0.07 + k * 0.08, decay: 0.07 });
-    this.tone(this.sfx, { type: 'sine', f0: 120, f1: 55, gain: 0.09 + k * 0.06, decay: 0.07 });
+    this.tone(this.sfx, { type: 'sine', f0: 120, f1: 55, gain: 0.09 + k * 0.06, decay: 0.07, vary: 0.08 });
     if (metal) this.tone(this.sfx, { type: 'triangle', f0: 620 + Math.random() * 120, gain: 0.018, decay: 0.12 });
   }
 
   jump() {
     if (!this.ready) return;
-    this.noiseHit(this.sfx, { type: 'highpass', freq: 700, gain: 0.08, attack: 0.03, decay: 0.16 });
-    this.tone(this.sfx, { type: 'sine', f0: 180, f1: 260, gain: 0.04, decay: 0.1 });
+    this.noiseHit(this.sfx, { type: 'highpass', freq: 700, gain: 0.08, attack: 0.03, decay: 0.16, vary: 0.1 });
+    this.tone(this.sfx, { type: 'sine', f0: 180, f1: 260, gain: 0.04, decay: 0.1, vary: 0.06 });
   }
 
   land(impact: number) {
     if (!this.ready) return;
     const k = Math.min(1, impact / 20);
-    this.tone(this.sfx, { type: 'sine', f0: 95, f1: 38, gain: 0.12 + k * 0.3, decay: 0.18 + k * 0.1 });
-    this.noiseHit(this.sfx, { type: 'lowpass', freq: 600 + k * 600, gain: 0.08 + k * 0.2, decay: 0.12 + k * 0.1 });
+    this.tone(this.sfx, { type: 'sine', f0: 95, f1: 38, gain: 0.12 + k * 0.3, decay: 0.18 + k * 0.1, vary: 0.07 });
+    this.noiseHit(this.sfx, { type: 'lowpass', freq: 600 + k * 600, gain: 0.08 + k * 0.2, decay: 0.12 + k * 0.1, vary: 0.1 });
   }
 
   mantle() {
     if (!this.ready) return;
-    this.noiseHit(this.sfx, { type: 'bandpass', freq: 1300, q: 2, gain: 0.08, attack: 0.02, decay: 0.12 });
-    this.tone(this.sfx, { type: 'sine', f0: 150, f1: 110, gain: 0.07, decay: 0.12 });
+    this.noiseHit(this.sfx, { type: 'bandpass', freq: 1300, q: 2, gain: 0.08, attack: 0.02, decay: 0.12, vary: 0.1 });
+    this.tone(this.sfx, { type: 'sine', f0: 150, f1: 110, gain: 0.07, decay: 0.12, vary: 0.06 });
   }
 
   spotted(pos: THREE.Vector3, local: boolean) {
@@ -281,13 +288,13 @@ export class AudioEngine {
 
   slide() {
     if (!this.ready) return;
-    this.noiseHit(this.sfx, { type: 'bandpass', freq: 900, freqEnd: 350, q: 0.9, gain: 0.2, attack: 0.02, decay: 0.7 });
+    this.noiseHit(this.sfx, { type: 'bandpass', freq: 900, freqEnd: 350, q: 0.9, gain: 0.2, attack: 0.02, decay: 0.7, vary: 0.08 });
     this.noiseHit(this.sfx, { type: 'highpass', freq: 2500, gain: 0.05, attack: 0.02, decay: 0.4 });
   }
 
   grappleFire() {
     if (!this.ready) return;
-    this.noiseHit(this.sfx, { type: 'bandpass', freq: 1800, freqEnd: 4200, q: 3, gain: 0.14, attack: 0.01, decay: 0.12 });
+    this.noiseHit(this.sfx, { type: 'bandpass', freq: 1800, freqEnd: 4200, q: 3, gain: 0.14, attack: 0.01, decay: 0.12, vary: 0.06 });
   }
 
   grappleHook() {
@@ -305,15 +312,15 @@ export class AudioEngine {
   /** Front flip: a quick whoosh with a rising tail. */
   flip() {
     if (!this.ready) return;
-    this.noiseHit(this.sfx, { type: 'bandpass', freq: 500, freqEnd: 2200, q: 0.8, gain: 0.16, attack: 0.02, decay: 0.42 });
-    this.tone(this.sfx, { type: 'sine', f0: 210, f1: 420, gain: 0.05, decay: 0.3, lp: 1800 });
+    this.noiseHit(this.sfx, { type: 'bandpass', freq: 500, freqEnd: 2200, q: 0.8, gain: 0.16, attack: 0.02, decay: 0.42, vary: 0.08 });
+    this.tone(this.sfx, { type: 'sine', f0: 210, f1: 420, gain: 0.05, decay: 0.3, lp: 1800, vary: 0.05 });
   }
 
   /** Dash: a short scuffed push off the floor. */
   dash() {
     if (!this.ready) return;
-    this.noiseHit(this.sfx, { type: 'bandpass', freq: 1500, freqEnd: 420, q: 1.2, gain: 0.2, attack: 0.008, decay: 0.26 });
-    this.tone(this.sfx, { type: 'triangle', f0: 160, f1: 70, gain: 0.07, decay: 0.16, lp: 900 });
+    this.noiseHit(this.sfx, { type: 'bandpass', freq: 1500, freqEnd: 420, q: 1.2, gain: 0.2, attack: 0.008, decay: 0.26, vary: 0.1 });
+    this.tone(this.sfx, { type: 'triangle', f0: 160, f1: 70, gain: 0.07, decay: 0.16, lp: 900, vary: 0.06 });
   }
 
   /** A boosted take-off: a rising whoosh under the normal jump. */

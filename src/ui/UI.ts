@@ -305,7 +305,9 @@ export class UI {
   }
 
   hudPlayers(list: HudPlayer[]) {
-    const box = this.hud.querySelector('.hud-players')!;
+    const box = this.hud.querySelector<HTMLElement>('.hud-players')!;
+    // on your own the roster is just your name saying you are alive: leave the corner clear
+    box.classList.toggle('hidden', list.length < 2);
     box.innerHTML = list.map((p) => {
       const st = !p.connected && p.status === Status.Alive ? ['lost', 'Reconnecting'] : p.status === Status.Alive ? ['alive', 'Alive'] : p.status === Status.Dead ? ['dead', 'Dead'] : p.status === Status.Finished ? ['finished', 'Escaped'] : ['left', 'Left'];
       return `<div class="hud-player ${p.me ? 'me' : ''}" style="border-left-color:${PLAYER_CSS[(p.id - 1) % 3]}"><span class="n">${esc(p.name)}</span><span class="s ${st[0]}">${st[1]}</span></div>`;
@@ -504,7 +506,7 @@ function runCard(r: RunSummary, solo: boolean) {
   // a solo title already names the cause; with a team it names the outcome, so the card says how you went
   const place = r.area ? `<b>${esc(r.area)}</b>` : 'the open air';
   const where = r.escaped
-    ? `Escaped in <b>${fmtTime(r.time)}</b>`
+    ? `Reached the Spire in <b>${fmtTime(r.time)}</b>`
     : solo ? `In ${place}, ${fmtTime(r.time)} into the run` : `${esc(causeText(r.cause))} in ${place} after ${fmtTime(r.time)}`;
   const best = r.prevBest;
   const bestPct = best ? Math.round(best.progress * 100) : null;

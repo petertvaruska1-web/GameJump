@@ -701,7 +701,7 @@ export class Game {
           this.endRun(true, undefined, e.time);
           this.audio.finish();
           const place = ['', '1st', '2nd', '3rd'][e.place] ?? `#${e.place}`;
-          this.ui.big('Escaped', 'cyan', `${fmtTime(e.time)} · ${place}`, 0);
+          this.ui.big('Escaped', 'cyan', this.lobbyPlayers.length > 1 ? `${fmtTime(e.time)} · ${place}` : fmtTime(e.time), 0);
           const p = this.local.pos;
           this.effects.particles.burst(p.x, p.y + 1.5, p.z, 90, 9, 1.6, 0.4, [0.5, 1, 1], 1, 3, 4);
         } else {
@@ -976,7 +976,8 @@ export class Game {
     for (const e of this.enemies) {
       e.update(renderT, dt, mt, this.r.camera.position);
       const hunting = e.state === EState.Chase || e.state === EState.Alert || e.state === EState.Attack;
-      if (hunting && e.target === this.meId && local && !local.dead) chasers++;
+      // nobody is hunting a runner who has already escaped (or died)
+      if (hunting && e.target === this.meId && local && !local.dead && !local.finished) chasers++;
       if (e.kind === 'flyer') { const d = e.pos.distanceTo(lp); if (d < droneD) { droneD = d; nearestDrone = e.pos; } }
       if (this.debug.cones) this.debug.updateCone(e.id, e.kind, e.pos, e.yaw, hunting);
     }
@@ -1070,7 +1071,7 @@ export class Game {
         this.ui.bottom(`Spectating ${target.name}${this.aliveRemotes() > 1 ? ' — Space: next' : ''}`);
         return;
       }
-      this.ui.bottom(local.finished ? 'Waiting for the others…' : '');
+      this.ui.bottom(local.finished && this.aliveRemotes() > 0 ? 'Waiting for the others…' : '');
     }
     const b = local.motor.body;
     this.cam.update(dt, { pos: local.renderPos, vel: local.renderVel, grounded: b.grounded, sprinting: local.motor.anim === Anim.Sprint, riding: !!local.motor.zip || !!local.motor.grapple, low: local.motor.sliding, dashing: this.dashKick > 0.05, boosted: local.motor.boost }, this.world, mt);
