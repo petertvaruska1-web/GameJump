@@ -13,11 +13,13 @@
 // forward, side-stepping and backpedalling depending on which way it is actually
 // travelling, instead of swinging the whole body round to face every input. A front flip turns the whole body about the hips (never the
 // feet) and always completes its rotation, even when a landing cuts it short,
-// so it can never snap back upright.
+// so it can never snap back upright. Flying (Viktor's gift) tips the whole body
+// about the same hip pivot: upright and floating when slow, stretched out flat
+// with a fist forward at speed, banking into sideways flight.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { DASH, FLIP } from '../../shared/constants';
+import { DASH, FLIP, FLY } from '../../shared/constants';
 import { Anim } from '../../shared/physics/character';
 import { clamp, damp, lerp } from '../../shared/math';
 
@@ -58,6 +60,24 @@ function box(w: number, h: number, d: number) {
   if (!g) { g = new THREE.BoxGeometry(w, h, d); geoCache.set(k, g); }
   return g;
 }
+let auraTex: THREE.Texture | null = null;
+/** A soft warm glow for the flying aura (one texture for every runner). */
+function auraTexture(): THREE.Texture {
+  if (auraTex) return auraTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,240,200,0.9)');
+  g.addColorStop(0.4, 'rgba(255,214,140,0.35)');
+  g.addColorStop(1, 'rgba(255,200,120,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  auraTex = new THREE.CanvasTexture(c);
+  auraTex.colorSpace = THREE.SRGBColorSpace;
+  return auraTex;
+}
+
 function sphere(r: number) {
   const k = `s${r}`;
   let g = geoCache.get(k);
@@ -142,6 +162,9 @@ export class CharacterModel {
   /** Every material of the runner (cloak fades them). */
   private allMats: THREE.MeshStandardMaterial[] = [];
   private bubble: THREE.Mesh;
+  /** A faint golden glow around a runner who is flying. */
+  private aura: THREE.Sprite;
+  private auraK = 0;
   private boots: THREE.MeshStandardMaterial;
   private cloakK = 0;
   private cloakTarget = 0;
@@ -272,6 +295,11 @@ export class CharacterModel {
     this.bubble.scale.set(0.8, 1.05, 0.8);
     this.bubble.visible = false;
     this.root.add(this.bubble);
+    this.aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: auraTexture(), color: 0xffe0a0, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+    this.aura.position.y = 0.95;
+    this.aura.scale.set(2.2, 2.6, 1);
+    this.aura.visible = false;
+    this.root.add(this.aura);
     // merge each joint's pieces per material: the detail above costs almost no extra draw calls
     for (const j of [this.hips, this.torso, this.head, ...this.sh, ...this.el, ...this.hip, ...this.kn, ...this.ak]) bakeJoint(j, shadows);
     this.root.traverse((o) => { o.frustumCulled = true; });
@@ -322,8 +350,16 @@ export class CharacterModel {
   update(a: AnimInput) {
     const dt = a.dt;
     const sp = a.speed;
+    const flying = a.anim === Anim.Fly;
     const air = a.anim === Anim.Jump || a.anim === Anim.Fall || a.anim === Anim.Launch || a.anim === Anim.Zip
-      || a.anim === Anim.Swing || a.anim === Anim.Flip;
+      || a.anim === Anim.Swing || a.anim === Anim.Flip || flying;
+    // the flying aura swells in and out
+    this.auraK += ((flying ? 1 : 0) - this.auraK) * damp(flying ? 4 : 2.5, dt);
+    this.aura.visible = this.auraK > 0.01;
+    if (this.aura.visible) {
+      (this.aura.material as THREE.SpriteMaterial).opacity = this.auraK * (0.3 + Math.sin(a.t * 3.1) * 0.06) * (1 - this.cloakK * 0.8);
+      this.aura.scale.set(2.2 + Math.sin(a.t * 2.3) * 0.12, 2.6 + Math.sin(a.t * 2.3) * 0.12, 1);
+    }
     this.handle.visible = a.anim === Anim.Zip;
     // cloak: fade the whole runner in and out
     this.cloakK += (this.cloakTarget - this.cloakK) * damp(6, a.dt);
@@ -363,6 +399,8 @@ export class CharacterModel {
     let lean = 0, bob = 0, twist = 0, headX = 0, headY = 0, bodyRoll = 0, bodyPitch = 0;
     let sway = 0, hipRoll = 0;
     let rate = 16;
+    /** Flying: how far the whole body tips forward about the hips. */
+    let flyPitch = 0;
 
     if (a.anim === Anim.Dead) {
       this.deadT += dt;
@@ -464,6 +502,30 @@ export class CharacterModel {
         thigh = [-0.4 + sw, -0.12 - sw]; knee = [0.55 + sw * 0.4, 0.3]; ankle = [-0.25, -0.2];
         lean = 0.08 + sw * 0.12; headX = -0.35;
         twist = sw * 0.25;
+      } else if (flying) {
+        // flight: stretched out and diving at speed (a fist forward, legs trailing
+        // together), upright and floating when slow (arms loose, one knee raised),
+        // banking into sideways flight and leaning back when flying backwards
+        rate = 10;
+        const fw = clamp(a.fwd ?? 1, -1, 1), sd = clamp(a.side ?? 0, -1, 1);
+        const along = a.speed * fw;
+        const dive = clamp(along / FLY.FAST, 0, 1);
+        const k = dive * dive * (3 - 2 * dive);
+        const climb = clamp(a.vy / FLY.VERTICAL, -1, 1);
+        const float = Math.sin(t * 2.1 + this.gait);
+        flyPitch = k * 1.2 - clamp(-along / FLY.SPEED, 0, 1) * 0.25 - climb * 0.18 * (1 - k);
+        shoulder = [lerp(-0.25 + float * 0.06, -2.85, k), lerp(-0.1 - float * 0.05, 0.25, k)];
+        shoulderZ = [lerp(0.42, 0.12, k), lerp(0.48, 0.1, k)];
+        elbow = [lerp(-0.5, -0.12, k), lerp(-0.4, -0.3, k)];
+        thigh = [lerp(-0.4 + float * 0.05, 0.08, k), lerp(0.02 - float * 0.04, 0.12, k)];
+        knee = [lerp(0.85, 0.18, k), lerp(0.28, 0.25, k)];
+        ankle = [lerp(0.45, 0.65, k), lerp(0.5, 0.7, k)];
+        if (climb > 0.3 && k < 0.5) { shoulder = [shoulder[0] - climb * 0.4, shoulder[1] - climb * 0.4]; shoulderZ = [shoulderZ[0] + climb * 0.2, shoulderZ[1] + climb * 0.2]; }
+        bodyRoll = -sd * 0.38 * clamp(a.speed / FLY.SPEED, 0.3, 1);
+        hipZ = [-sd * 0.12, -sd * 0.12];
+        bob = (1 - k) * float * 0.05;
+        headX = -k * 0.9 - 0.1;
+        lean = 0.05;
       } else if (a.anim === Anim.Launch) {
         // thrown by a pad: one arm reaching up, legs trailing
         shoulder = [-2.7, 0.5]; shoulderZ = [0.25, 0.7]; elbow = [-0.1, -0.5];
@@ -607,7 +669,11 @@ export class CharacterModel {
     } else if (this.flipRun) {
       const k = clamp(this.flipK, 0, 1);
       this.spin.rotation.x = TWO_PI * (k * k * (3 - 2 * k));
-    } else if (this.spin.rotation.x !== 0) this.spin.rotation.x = 0;
+    } else {
+      // flight tips the body about the hips, and eases back upright when it ends
+      const fp = this.j('flyPitch', flyPitch, flying ? 4 : 6, dt);
+      this.spin.rotation.x = Math.abs(fp) < 1e-4 ? 0 : fp;
+    }
 
     // scarf trails behind with speed and flutters
     const trail = clamp(sp / 8, 0, 1) + (air ? 0.4 : 0) + clamp(-a.vy / 20, 0, 0.5);

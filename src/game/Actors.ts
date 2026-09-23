@@ -68,7 +68,8 @@ export class RemotePlayer {
     if (anim === Anim.Land) this.landT = 0.6; else this.landT = Math.max(0, this.landT - dt * 3);
     this.model.root.position.copy(this.pos);
     this.model.root.rotation.y = this.yaw;
-    this.model.root.visible = this.status !== Status.Left;
+    // through the portal: not on the course at all until they come back
+    this.model.root.visible = this.status !== Status.Left && this.anim !== Anim.Away;
     this.model.setTagVisible(this.status === Status.Alive);
     const local = localDir(this.vel.x, this.vel.z, this.yaw);
     this.model.update({

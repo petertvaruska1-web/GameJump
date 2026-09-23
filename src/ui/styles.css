@@ -147,6 +147,7 @@ kbd {
 .big-msg { font-family: var(--display); font-weight: 800; font-size: clamp(48px, 8vw, 110px); letter-spacing: 0.08em; text-transform: uppercase; text-shadow: 0 8px 40px rgba(0, 0, 0, 0.6); animation: pop 0.35s ease-out; }
 .big-msg.danger { color: var(--danger); }
 .big-msg.cyan { color: var(--cyan); }
+.big-msg.gold { color: #ffd27a; text-shadow: 0 0 28px rgba(255, 196, 90, 0.55), 0 8px 40px rgba(0, 0, 0, 0.5); }
 .sub-msg { font-size: 16px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 255, 255, 0.92); margin-top: 6px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 2px 12px rgba(0, 0, 0, 0.75); }
 .hud-bottom { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); text-align: center; font-size: 14px; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.85); text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8); }
 /* Where you are and how far along, tucked under the timer: a flare on arrival, then a quiet label. */
@@ -208,3 +209,47 @@ kbd {
 /* Anchor off-screen: the marker is pinned to the border, so it reads as a pointer rather than a lock. */
 .hud-reticle.edge { width: 30px; height: 30px; border-style: dashed; opacity: 0.75; }
 .hud-reticle.edge span { transform: translateY(18px); font-size: 11px; }
+
+/* ------------------------------------------------------------ the portal and Viktor */
+#heaven-fade {
+  position: fixed; inset: 0; pointer-events: none; opacity: 0;
+  background: radial-gradient(ellipse at center, #ffffff 0%, #fffaf0 55%, #f7ecd4 100%);
+}
+#heaven-fade.warm { background: radial-gradient(ellipse at center, #ffffff 0%, #fff4d8 50%, #ffdc94 100%); }
+/* on the white of the room, the HUD's text goes dark */
+#hud.heaven .hud-timer, #hud.heaven .hud-objective, #hud.heaven .hud-area .area-name { color: rgba(74, 58, 30, 0.85); text-shadow: 0 1px 10px rgba(255, 250, 238, 0.9); }
+#hud.heaven .hud-area .area-bar { background: rgba(74, 58, 30, 0.18); }
+/* cinematic bars while Viktor speaks: the run's HUD steps back behind them */
+#hud .hud-timer, #hud .hud-area, #hud .hud-powers, #hud .capture-hint, #hud .hud-players { transition: opacity 0.6s; }
+#hud.cine .hud-timer, #hud.cine .hud-area, #hud.cine .hud-powers, #hud.cine .capture-hint, #hud.cine .hud-players, #hud.cine .hud-objective, #hud.cine .hud-tip { opacity: 0; }
+.hud-cine > i { position: absolute; left: 0; right: 0; height: 0; background: rgba(9, 13, 21, 0.9); transition: height 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.hud-cine > i:first-child { top: 0; }
+.hud-cine > i:last-child { bottom: 0; }
+.hud-cine.on > i { height: 7.5vh; }
+.hud-interact {
+  position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 10px; padding: 7px 14px 7px 8px; border-radius: 999px;
+  background: rgba(9, 13, 21, 0.72); border: 1px solid rgba(255, 214, 140, 0.55); box-shadow: 0 0 22px rgba(255, 210, 120, 0.35);
+  font-family: var(--display); font-size: 14px; letter-spacing: 0.16em; text-transform: uppercase; color: #fff3d6; white-space: nowrap;
+  animation: interact-in 0.35s ease-out;
+}
+.hud-interact kbd { min-width: 28px; padding: 3px 7px; background: #ffd27a; color: #2a1d05; border-color: #b8862c; }
+@keyframes interact-in { from { opacity: 0; margin-top: 8px; } to { opacity: 1; margin-top: 0; } }
+.hud-dialogue {
+  position: absolute; left: 50%; bottom: calc(7.5vh + 26px); transform: translateX(-50%); width: min(780px, 90vw);
+  padding: 18px 26px 14px; border-radius: 14px; background: linear-gradient(180deg, rgba(12, 17, 27, 0.86), rgba(9, 13, 21, 0.9));
+  border: 1px solid rgba(255, 214, 140, 0.45); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 18px 60px rgba(40, 28, 6, 0.35), 0 0 40px rgba(255, 214, 140, 0.18);
+}
+.hud-dialogue.in { animation: dlg-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes dlg-in { from { opacity: 0; transform: translate(-50%, 14px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.dlg-name { font-family: var(--display); font-size: 13px; font-weight: 800; letter-spacing: 0.32em; text-transform: uppercase; color: #ffd27a; margin-bottom: 8px; text-shadow: 0 0 12px rgba(255, 200, 100, 0.5); }
+.dlg-text { font-size: clamp(17px, 1.9vw, 21px); line-height: 1.55; color: #fdf8ee; min-height: 3.1em; }
+.dlg-text .dlg-rest { visibility: hidden; }
+.dlg-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.dlg-dots { display: flex; gap: 6px; }
+.dlg-dots i { width: 18px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); }
+.dlg-dots i.done { background: rgba(255, 210, 122, 0.55); }
+.dlg-dots i.now { background: #ffd27a; box-shadow: 0 0 8px rgba(255, 210, 122, 0.7); }
+.dlg-hint { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.5); transition: color 0.3s; }
+.dlg-hint kbd { min-width: 0; padding: 2px 7px; font-size: 11px; margin-right: 6px; }
+.hud-dialogue.waiting .dlg-hint { color: #ffe1a3; animation: dlg-wait 1.4s ease-in-out infinite; }
+@keyframes dlg-wait { 50% { opacity: 0.55; } }

@@ -7,6 +7,13 @@ export class Input {
   mouseDX = 0;
   mouseDY = 0;
   mouseClicked = false;
+  /** Left mouse button pressed this frame while the mouse is captured (flight: take off / land). */
+  mouseLeftPressed = false;
+  /**
+   * Hold Ctrl as a game key (flight descends with it): Ctrl shortcuts the page
+   * is allowed to stop (Ctrl+D, Ctrl+S, ...) are swallowed while this is on.
+   */
+  trapCtrl = false;
   /** Right mouse button pressed this frame (grapple). */
   mouseRightPressed = false;
   /** Right mouse button held down right now (the grapple hangs on while it is). */
@@ -28,7 +35,8 @@ export class Input {
   constructor(private readonly canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
       if (isTyping(e)) return;
-      if (['Space', 'ArrowUp', 'ArrowDown', 'Tab', 'F3', 'F4', 'F6', 'F7', 'F8'].includes(e.code)) e.preventDefault();
+      if (['Space', 'ArrowUp', 'ArrowDown', 'Tab', 'F3', 'F4', 'F6', 'F7', 'F8', 'F9'].includes(e.code)) e.preventDefault();
+      if (this.trapCtrl && (e.ctrlKey || e.code === 'ControlLeft' || e.code === 'ControlRight')) e.preventDefault();
       if (!this.down.has(e.code)) this.pressed.add(e.code);
       this.down.add(e.code);
       this.onKey?.(e.code);
@@ -44,7 +52,7 @@ export class Input {
       this.mouseDY += e.movementY;
     });
     canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) this.mouseClicked = true;
+      if (e.button === 0) { this.mouseClicked = true; if (this.locked) this.mouseLeftPressed = true; }
       if (e.button === 2) { this.mouseRightPressed = true; this.mouseRightDown = true; }
     });
     // on the window, so letting go over a menu or outside the page still counts
@@ -93,6 +101,7 @@ export class Input {
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.mouseClicked = false;
+    this.mouseLeftPressed = false;
     this.mouseRightPressed = false;
   }
 }

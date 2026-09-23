@@ -1,8 +1,10 @@
 // Procedural WebAudio sound: no asset files. Ambient high-altitude wind,
 // footsteps, jumps/landings, enemy stingers, projectile charge/fire, chase
 // pulse, drone buzz, thunder, death and finish cues. Simple stereo panning.
+// The portal's heavenly music lives in HeavenMusic; flight gets its own air.
 
 import * as THREE from 'three';
+import { HeavenMusic, type HeavenMix } from './HeavenMusic';
 
 type Dest = AudioNode;
 
@@ -22,6 +24,11 @@ export class AudioEngine {
   private zipGain!: GainNode;
   private zipFilter!: BiquadFilterNode;
   private beltGain!: GainNode;
+  private heaven: HeavenMusic | null = null;
+  /** Flight: rushing air that follows your speed, and a faint shimmer while you are up. */
+  private flyGain: GainNode | null = null;
+  private flyFilter: BiquadFilterNode | null = null;
+  private flyShimmer: GainNode | null = null;
   private listenerPos = new THREE.Vector3();
   private listenerRight = new THREE.Vector3(1, 0, 0);
   private beatT = 0;
@@ -409,23 +416,109 @@ export class AudioEngine {
     this.tone(this.sfx, { type: 'triangle', f0: 1400, f1: 900, gain: 0.04, decay: 0.05 });
   }
 
+  // ------------------------------------------------------------------ the portal and flight
+
+  /** The portal's music: where it sits in the mix this frame (see HeavenMusic). */
+  heavenly(dt: number, m: HeavenMix) {
+    if (!this.ready) return;
+    this.heaven ??= new HeavenMusic(this.ctx!, this.noise, this.music);
+    this.heaven.update(dt, m);
+  }
+
+  heavenStinger(kind: 'open' | 'enter' | 'arrive' | 'bless' | 'return', gain = 1) {
+    if (!this.ready) return;
+    this.heaven ??= new HeavenMusic(this.ctx!, this.noise, this.music);
+    this.heaven.stinger(kind, gain);
+  }
+
+  /** One syllable of Viktor's voice. */
+  viktorSyllable(pitch: number, dur: number) {
+    if (!this.ready || !this.heaven) return;
+    this.heaven.syllable(pitch, dur, 1.4);
+  }
+
+  /** Pressing E at Viktor: a soft glassy "ting". */
+  interact() {
+    if (!this.ready) return;
+    this.tone(this.sfx, { type: 'sine', f0: 1318.5, gain: 0.07, attack: 0.005, decay: 0.9 });
+    this.tone(this.sfx, { type: 'sine', f0: 1975.5, gain: 0.035, attack: 0.005, decay: 0.7, delay: 0.05 });
+  }
+
+  /** The dialogue moving on to Viktor's next line. */
+  dialogueNext() {
+    if (!this.ready) return;
+    this.tone(this.sfx, { type: 'triangle', f0: 880, f1: 1175, gain: 0.03, decay: 0.12 });
+  }
+
+  /** Taking off: a rising rush of air with a bright shimmer on top. */
+  flyOn() {
+    if (!this.ready) return;
+    this.noiseHit(this.sfx, { type: 'bandpass', freq: 300, freqEnd: 2600, q: 0.8, gain: 0.28, attack: 0.05, decay: 0.6, vary: 0.06 });
+    [1174.7, 1480, 1760].forEach((f, i) => this.tone(this.sfx, { type: 'sine', f0: f, gain: 0.035, attack: 0.02, decay: 0.8, delay: i * 0.05 }));
+    this.tone(this.sfx, { type: 'sine', f0: 90, f1: 180, gain: 0.12, decay: 0.3 });
+  }
+
+  /** Stopping flying (or touching down): the air falls away. */
+  flyOff() {
+    if (!this.ready) return;
+    this.noiseHit(this.sfx, { type: 'bandpass', freq: 1800, freqEnd: 400, q: 0.8, gain: 0.18, attack: 0.02, decay: 0.45, vary: 0.06 });
+    [1760, 1480, 1174.7].forEach((f, i) => this.tone(this.sfx, { type: 'sine', f0: f, gain: 0.025, decay: 0.5, delay: i * 0.04 }));
+  }
+
+  private ensureFlight() {
+    if (this.flyGain || !this.ctx) return;
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource(); src.buffer = this.noise; src.loop = true; src.playbackRate.value = 1.1;
+    this.flyFilter = ctx.createBiquadFilter(); this.flyFilter.type = 'bandpass'; this.flyFilter.frequency.value = 700; this.flyFilter.Q.value = 0.7;
+    this.flyGain = ctx.createGain(); this.flyGain.gain.value = 0;
+    src.connect(this.flyFilter).connect(this.flyGain).connect(this.sfx);
+    src.start();
+    // a faint, slowly shimmering fifth: the lightness of being up there on your own power
+    this.flyShimmer = ctx.createGain(); this.flyShimmer.gain.value = 0;
+    const sf = ctx.createBiquadFilter(); sf.type = 'lowpass'; sf.frequency.value = 3000;
+    for (const [f, lr] of [[587.3, 0.6], [880, 0.83], [1174.7, 0.47]] as const) {
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+      const g = ctx.createGain(); g.gain.value = 0.25;
+      const lfo = ctx.createOscillator(); lfo.frequency.value = lr;
+      const lg = ctx.createGain(); lg.gain.value = 0.18;
+      lfo.connect(lg).connect(g.gain);
+      o.connect(g).connect(sf);
+      o.start(); lfo.start();
+    }
+    sf.connect(this.flyShimmer).connect(this.music);
+  }
+
   // ------------------------------------------------------------------ continuous
 
-  update(dt: number, p: { exposure: number; speed: number; falling: number; chase: number; drone: THREE.Vector3 | null; inGame: boolean; zip?: number; belt?: boolean }) {
+  /**
+   * `heaven` (0..1): how far into the white room we are; the course's own
+   * soundscape (wind, pad, chase, machinery) fades out under it. `fly` (0..1):
+   * flying, scaled by speed.
+   */
+  update(dt: number, p: { exposure: number; speed: number; falling: number; chase: number; drone: THREE.Vector3 | null; inGame: boolean; zip?: number; belt?: boolean; heaven?: number; flying?: boolean; fly?: number }) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
+    const hv = Math.max(0, Math.min(1, p.heaven ?? 0));
+    const world = 1 - hv;
     const zip = p.inGame ? p.zip ?? 0 : 0;
-    this.zipGain.gain.setTargetAtTime(zip > 0 ? 0.05 + zip * 0.012 : 0, t, 0.08);
+    this.zipGain.gain.setTargetAtTime(zip > 0 ? (0.05 + zip * 0.012) * world : 0, t, 0.08);
     this.zipFilter.frequency.setTargetAtTime(900 + zip * 110, t, 0.1);
-    this.beltGain.gain.setTargetAtTime(p.inGame && p.belt ? 0.06 : 0, t, 0.15);
-    const wind = 0.05 + p.exposure * 0.1 + Math.min(0.25, p.speed * 0.012) + p.falling * 0.35;
+    this.beltGain.gain.setTargetAtTime(p.inGame && p.belt ? 0.06 * world : 0, t, 0.15);
+    const wind = (0.05 + p.exposure * 0.1 + Math.min(0.25, p.speed * 0.012) + p.falling * 0.35) * (1 - hv * 0.9);
     this.windGain.gain.setTargetAtTime(wind, t, 0.3);
     this.windFilter.frequency.setTargetAtTime(380 + p.speed * 40 + p.falling * 1400 + Math.sin(t * 0.3) * 120, t, 0.4);
-    this.whistleGain.gain.setTargetAtTime(p.falling * 0.12 + Math.max(0, p.speed - 7) * 0.006, t, 0.2);
+    this.whistleGain.gain.setTargetAtTime((p.falling * 0.12 + Math.max(0, p.speed - 7) * 0.006) * world, t, 0.2);
+    if (p.flying || this.flyGain) {
+      this.ensureFlight();
+      const f = p.flying && p.inGame ? Math.max(0, Math.min(1, p.fly ?? 0)) : 0;
+      this.flyGain!.gain.setTargetAtTime(p.flying && p.inGame ? 0.05 + f * 0.22 : 0, t, 0.2);
+      this.flyFilter!.frequency.setTargetAtTime(500 + f * 2200, t, 0.25);
+      this.flyShimmer!.gain.setTargetAtTime(p.flying && p.inGame ? 0.035 : 0, t, 0.6);
+    }
 
     this.chase += ((p.inGame ? p.chase : 0) - this.chase) * Math.min(1, dt * (p.chase > this.chase ? 3 : 0.6));
-    this.chaseGain.gain.setTargetAtTime(this.chase * 0.5, t, 0.15);
-    this.padGain.gain.setTargetAtTime((1 - this.chase) * 0.05, t, 1.0);
+    this.chaseGain.gain.setTargetAtTime(this.chase * 0.5 * world, t, 0.15);
+    this.padGain.gain.setTargetAtTime((1 - this.chase) * 0.05 * world, t, 1.0);
     if (this.chase > 0.05) {
       this.beatT -= dt;
       if (this.beatT <= 0) {
@@ -434,7 +527,7 @@ export class AudioEngine {
         this.tone(this.music, { type: 'sine', f0: 62, f1: 36, gain: 0.25 * this.chase, decay: 0.14, delay: 0.16 });
       }
     }
-    if (p.drone) {
+    if (p.drone && hv < 0.5) {
       const dx = p.drone.x - this.listenerPos.x, dy = p.drone.y - this.listenerPos.y, dz = p.drone.z - this.listenerPos.z;
       const d = Math.hypot(dx, dy, dz);
       const g = d < 45 ? 0.16 / (1 + (d / 8) ** 1.4) : 0;

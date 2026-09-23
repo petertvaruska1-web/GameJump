@@ -33,6 +33,18 @@ export interface LobbyView {
 
 export interface HudPlayer { id: number; name: string; status: Status; me: boolean; connected: boolean }
 
+/** A line of dialogue on screen: who speaks, the line so far, and where we are in the speech. */
+export interface DialogueView {
+  name: string;
+  text: string;
+  /** Characters typed out so far. */
+  shown: number;
+  line: number;
+  lines: number;
+  /** The whole line is out and it waits for you. */
+  waiting: boolean;
+}
+
 /** How the local runner's run went, for the results screen. */
 export interface RunSummary {
   /** 0..1 of the way from the start line to the Spire. */
@@ -46,6 +58,8 @@ export interface RunSummary {
   prevBest: PersonalBest | null;
   further: boolean;
   faster: boolean;
+  /** Flown with Viktor's gift: it does not count toward your records. */
+  assisted?: boolean;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -64,6 +78,9 @@ const CONTROLS = `
     <span><kbd>Esc</kbd></span><span>Pause menu / release the mouse</span>
   </div>`;
 
+/** Flight controls, shown once Viktor has granted it (the tip card and the how-to). */
+export const FLIGHT_TIP = 'Flight: left click takes off and lands. Space climbs, Ctrl (or C) sinks, Shift flies faster, and W flies wherever you look.';
+
 export class UI {
   private screen: HTMLElement | null = null;
   private hud: HTMLElement;
@@ -71,6 +88,8 @@ export class UI {
   private bigTimer = 0;
   private objectiveTimer = 0;
   private tipTimer = 0;
+  /** White light over the whole screen (the portal and the blessing). */
+  private readonly fade: HTMLElement;
   private lastLobby: LobbyView | null = null;
   /** What Esc does on the current menu screen (back out of a sub-page), if anything. */
   private escBack: (() => void) | null = null;
@@ -93,11 +112,16 @@ export class UI {
       <div class="hud-bottom"></div>
       <div class="hud-powers"></div>
       <div class="hud-reticle hidden"><span>RMB</span></div>
+      <div class="hud-cine"><i></i><i></i></div>
+      <div class="hud-interact hidden"><kbd>E</kbd><span></span></div>
+      <div class="hud-dialogue hidden"><div class="dlg-name"></div><div class="dlg-text"></div><div class="dlg-foot"><span class="dlg-dots"></span><span class="dlg-hint"><kbd>E</kbd> continue</span></div></div>
       <div class="toast-stack"></div>
       <div class="capture-hint hidden">Click to capture the mouse</div>
       <div id="debug" class="hidden"></div>
     </div>`);
     root.appendChild(this.hud);
+    this.fade = el('<div id="heaven-fade"></div>');
+    root.parentElement?.insertBefore(this.fade, root);
   }
 
   // ------------------------------------------------------------------ helpers
@@ -427,6 +451,57 @@ export class UI {
     r.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px) translate(-50%, -50%)`;
   }
 
+  // ------------------------------------------------------------------ the portal and Viktor
+
+  /**
+   * Fades the screen to (or from) white light. `to` is the target opacity, over
+   * `seconds`; the colour warms toward gold for the blessing.
+   */
+  whiteout(to: number, seconds: number, warm = false) {
+    const f = this.fade;
+    f.classList.toggle('warm', warm);
+    f.style.transition = `opacity ${seconds}s ${to > 0 ? 'ease-in' : 'ease-out'}`;
+    void f.offsetWidth;
+    f.style.opacity = String(to);
+  }
+
+  /** In the white room the HUD's light-on-dark text turns dark-on-light. */
+  heavenHud(on: boolean) { this.hud.classList.toggle('heaven', on); }
+
+  /** Cinematic bars in (true) or out; the run's HUD steps back while they are in. */
+  cinema(on: boolean) {
+    this.hud.querySelector('.hud-cine')!.classList.toggle('on', on);
+    this.hud.classList.toggle('cine', on);
+  }
+
+  /** "E  Talk to Viktor", pinned over his head at screen (x, y), or hidden. */
+  interact(x: number | null, y = 0, label = '') {
+    const b = this.hud.querySelector<HTMLElement>('.hud-interact')!;
+    if (x === null) { b.classList.add('hidden'); return; }
+    b.classList.remove('hidden');
+    const sp = b.querySelector('span')!;
+    if (sp.textContent !== label) sp.textContent = label;
+    b.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px) translate(-50%, -100%)`;
+  }
+
+  /** The dialogue panel (null hides it). */
+  dialogue(d: DialogueView | null) {
+    const box = this.hud.querySelector<HTMLElement>('.hud-dialogue')!;
+    if (!d) { box.classList.add('hidden'); box.dataset.key = ''; return; }
+    const key = `${d.line}|${d.shown}|${d.waiting}`;
+    if (box.dataset.key === key) return;
+    const wasHidden = box.classList.contains('hidden');
+    box.dataset.key = key;
+    box.classList.remove('hidden');
+    if (wasHidden) { box.classList.remove('in'); void box.offsetWidth; box.classList.add('in'); }
+    box.querySelector('.dlg-name')!.textContent = d.name;
+    const text = box.querySelector<HTMLElement>('.dlg-text')!;
+    // the rest of the line is laid out but invisible, so the text never reflows as it types
+    text.innerHTML = `${esc(d.text.slice(0, d.shown))}<span class="dlg-rest">${esc(d.text.slice(d.shown))}</span>`;
+    box.querySelector('.dlg-dots')!.innerHTML = Array.from({ length: d.lines }, (_, i) => `<i class="${i < d.line ? 'done' : i === d.line ? 'now' : ''}"></i>`).join('');
+    box.classList.toggle('waiting', d.waiting);
+  }
+
   captureHint(show: boolean) { this.hud.querySelector('.capture-hint')!.classList.toggle('hidden', !show); }
 
   toast(text: string, seconds = 4) {
@@ -563,7 +638,8 @@ function runCard(r: RunSummary, solo: boolean) {
   else if (best && !r.escaped && best.time !== undefined) meta += ` · your record ${fmtTime(best.time)}`;
   else if (best && !r.escaped) meta += ` · best ${bestPct}%${best.area ? ` (${esc(best.area)})` : ''}`;
   else if (best && r.escaped && best.time !== undefined) meta += ` · record ${fmtTime(best.time)}`;
-  const mark = best && !r.further && !r.escaped && best.progress < 1 ? `<em style="left:${bestPct}%"></em>` : '';
+  if (r.assisted) { meta = r.escaped ? 'Flown with Viktor\'s gift' : `${pct}% of the way, with Viktor's gift`; badge = '<span class="tag">Not counted toward records</span>'; }
+  const mark = best && !r.assisted && !r.further && !r.escaped && best.progress < 1 ? `<em style="left:${bestPct}%"></em>` : '';
   return `<div class="run-card">
     <div class="run-where">${where}</div>
     <div class="run-bar"><i style="width:${r.escaped ? 100 : pct}%"></i>${mark}</div>

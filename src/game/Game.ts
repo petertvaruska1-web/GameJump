@@ -2,7 +2,7 @@
 // connection and the UI flow (menu -> lobby -> match -> results).
 
 import * as THREE from 'three';
-import { GRAPPLE, NET, POWER } from '../../shared/constants';
+import { FLY, GRAPPLE, NET, POWER } from '../../shared/constants';
 import { getLevel } from '../../shared/level/map/index';
 import type { LevelData, PowerKind } from '../../shared/level/types';
 import { zoneAt } from '../../shared/hazards';
@@ -24,10 +24,11 @@ import { LevelView } from '../render/LevelView';
 import { Materials } from '../render/Materials';
 import { PropsView } from '../render/Props';
 import { FOG_DENSITY, Renderer } from '../render/Renderer';
-import { Sky } from '../render/Sky';
-import { loadSession, recordRun, saveSession, saveSettings, type Settings } from '../settings';
+import { cloudTexture, Sky } from '../render/Sky';
+import { loadBest, loadSession, recordRun, saveSession, saveSettings, type Settings } from '../settings';
 import { causeText, fmtTime, UI, type RunSummary } from '../ui/UI';
 import { EnemyProxy, RemotePlayer } from './Actors';
+import { Heaven } from './Heaven';
 
 type Mode = 'menu' | 'connecting' | 'lobby' | 'playing' | 'results';
 
@@ -50,6 +51,9 @@ const HUD_AREA_SETTLE = 0.35;
 
 /** Keeps an off-screen grapple marker fully inside the view when it is pinned to the border. */
 const RETICLE_MARGIN = 34;
+
+/** Viktor's gift on the HUD. */
+const FLIGHT_CSS = '#ffd27a';
 
 const tmpV = new THREE.Vector3();
 const tmpF = new THREE.Vector3();
@@ -117,6 +121,9 @@ export class Game {
   /** Furthest along the course the local runner got this run (0..1), and how the run ended. */
   private runProgress = 0;
   private runSummary: RunSummary | null = null;
+  /** The portal easter egg: the portal on the course, the white room, Viktor. */
+  private readonly heaven: Heaven;
+  private readonly listenerRight = new THREE.Vector3();
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, private settings: Settings) {
     this.level = getLevel();
@@ -180,6 +187,22 @@ export class Game {
     window.addEventListener('pointerdown', () => this.audio.init(), { once: true });
     window.addEventListener('keydown', () => this.audio.init(), { once: true });
 
+    this.heaven = new Heaven(this.mats.glowTex, cloudTexture(), this.r.scene.environment, this.r.shadows, this.r.camera, this.cam, this.ui, this.audio, {
+      send: (kind) => this.conn?.send({ t: kind }),
+      swapScene: (inRoom) => this.swapScene(inRoom),
+      burst: (p, big) => {
+        this.effects.particles.burst(p.x, p.y, p.z, big ? 90 : 50, big ? 7 : 5, 1.2, 0.45, [1, 0.88, 0.6], 1, -1, 1.5);
+        this.effects.particles.burst(p.x, p.y, p.z, big ? 40 : 20, 3, 1.6, 0.8, [1, 0.97, 0.9], 0.7, -0.5, 0.5);
+      },
+    });
+    this.r.scene.add(this.heaven.portal.group);
+    // Ctrl is a game key once you can fly, and Ctrl+W cannot be stopped by a page:
+    // while the gift is yours, closing the tab asks first
+    window.addEventListener('beforeunload', (e) => {
+      const l = this.local;
+      if (this.mode === 'playing' && l && l.motor.canFly && !l.dead && !l.finished) { e.preventDefault(); e.returnValue = ''; }
+    });
+
     this.cam.reset(new THREE.Vector3(0, 40, -8), 0);
     this.ui.mainMenu();
     this.tryResumeSession();
@@ -193,6 +216,17 @@ export class Game {
     this.cam.baseFov = s.fov;
     this.cam.shakeEnabled = s.cameraShake;
     this.audio.setVolumes(s.volume, s.music);
+  }
+
+  /** The local runner (and its ground shadow) moves between the course and the white room. */
+  private swapScene(inRoom: boolean) {
+    const view = this.heaven.view;
+    const target = inRoom && view ? view.scene : this.r.scene;
+    if (this.local) target.add(this.local.model.root);
+    target.add(this.dropShadow.mesh);
+    // the white room is lit to read as light itself, a touch brighter than the sky outside
+    this.r.renderer.toneMappingExposure = inRoom ? 0.98 : 1.05;
+    this.ui.heavenHud(inRoom);
   }
 
   // ------------------------------------------------------------------ connection flow
@@ -337,6 +371,9 @@ export class Game {
         this.beginMatch(m.goAt, m.spawns, !!m.resume, m.crumbles ?? []);
         for (const id of m.taken ?? []) { this.taken.add(id); this.pickups.take(id); }
         for (const [id, sh, cl, bt] of m.powers ?? []) { const ps = this.powerOf(id); ps.shield = !!sh; ps.cloakUntil = cl; ps.boostUntil = bt; }
+        if (m.portal) this.heaven.placePortal([m.portal[0], m.portal[1], m.portal[2]], m.portal[3], m.portal[4]);
+        // back from Viktor already (a reconnect): the gift carries on
+        if (this.local && m.fly?.includes(this.meId)) this.grantFlight();
         break;
       case 'snap':
         this.onSnapshot(m.ts, m.p, m.e);
@@ -444,6 +481,18 @@ export class Game {
         const p = this.local!.pos;
         this.effects.particles.burst(p.x, p.y + 0.9, p.z, 12, 3, 0.45, 0.25, [0.8, 0.85, 0.95], 0.35, 2, -1);
       },
+      flew: (dir) => {
+        const p = this.local!.pos;
+        if (dir > 0) {
+          this.audio.flyOn();
+          this.cam.addShake(0.12);
+          this.effects.particles.burst(p.x, p.y + 0.2, p.z, 36, 4, 0.8, 0.4, [1, 0.9, 0.62], 0.9, -2, 2);
+          this.effects.particles.dust(p.x, p.y, p.z, 0.5);
+        } else {
+          this.audio.flyOff();
+          this.effects.particles.burst(p.x, p.y + 0.9, p.z, 18, 2.5, 0.6, 0.3, [1, 0.9, 0.62], 0.7, 2, 0);
+        }
+      },
       dashed: (side) => {
         this.audio.dash();
         const p = this.local!.pos;
@@ -530,8 +579,9 @@ export class Game {
   /** Grapple, crates, powers and ropes for this frame. */
   private updateAbilities(mt: number) {
     const local = this.local;
+    const room = this.heaven.inRoom;
     // grapple: reticle + key
-    this.grappleTarget = this.pickAnchor();
+    this.grappleTarget = room ? -1 : this.pickAnchor();
     this.hazards.setTargeted(this.grappleTarget);
     const hooked = !!local?.motor.grapple;
     if (this.grappleTarget >= 0) {
@@ -549,8 +599,10 @@ export class Game {
       const cx = clamp(sx, m, w - m), cy = clamp(sy, m, h - m);
       this.ui.reticle(cx, cy, hooked, behind || cx !== sx || cy !== sy);
     } else this.ui.reticle(null);
-    const can = !this.paused && !this.debug.freeCam;
-    if (local && can && this.input.mouseRightPressed && !local.dead && !local.finished) {
+    const can = !this.paused && !this.debug.freeCam && !this.heaven.locksInput;
+    // left click: take off / land, once Viktor has given you flight
+    if (local && can && !room && this.input.mouseLeftPressed && local.motor.canFly && !local.dead && !local.finished && !local.frozen) local.requestFlyToggle();
+    if (local && can && !room && !local.motor.flying && this.input.mouseRightPressed && !local.dead && !local.finished) {
       if (hooked) local.requestRelease();
       else if (this.grappleTarget >= 0) { local.requestGrapple(this.grappleTarget); this.audio.grappleFire(); }
     }
@@ -571,7 +623,7 @@ export class Game {
     for (; rope < 3; rope++) this.hazards.setRope(rope, null);
 
     // crates: hide the one we walk through right away (the server decides who gets it)
-    if (local && !local.dead && !local.finished && !local.frozen) {
+    if (local && !local.dead && !local.finished && !local.frozen && !room) {
       for (const c of this.level.pickups) {
         if (this.taken.has(c.id) || this.predicted.has(c.id)) continue;
         const dy = local.pos.y - c.p[1];
@@ -599,6 +651,7 @@ export class Game {
       if (me.shield) hud.push({ name: POWER_NAME.shield, color: POWER_CSS.shield });
       if (timedPower(me.cloakUntil, mt)) hud.push({ name: POWER_NAME.cloak, color: POWER_CSS.cloak, remaining: me.cloakUntil - mt, total: POWER.CLOAK_TIME });
       if (timedPower(me.boostUntil, mt)) hud.push({ name: POWER_NAME.boost, color: POWER_CSS.boost, remaining: me.boostUntil - mt, total: POWER.BOOST_TIME });
+      if (local.motor.canFly) hud.push({ name: local.motor.flying ? 'Flying' : 'Flight · click', color: FLIGHT_CSS });
     }
     this.ui.powers(hud);
   }
@@ -606,6 +659,8 @@ export class Game {
   private hintAt = 0;
 
   private clearMatch() {
+    this.heaven.reset();
+    this.input.trapCtrl = false;
     this.localDeathShown = false;
     this.shownArea = this.pendingArea = null;
     this.pendingAreaFor = 0;
@@ -790,6 +845,21 @@ export class Game {
         } else this.audio.shieldBreak(false);
         break;
       }
+      case 'portal':
+        this.heaven.placePortal(e.p, e.yaw, e.at);
+        break;
+      case 'heaven':
+        if (e.id === this.meId && this.local) {
+          if (e.s === 'in') this.heaven.confirmEntry();
+          else if (e.p) { this.heaven.returned(this.local, e.p, this.level.spawnYaw); this.grantFlight(); }
+        } else if (e.s === 'in') {
+          this.heaven.swallowed();
+          this.ui.toast(`${this.playerName(e.id)} stepped into the light`);
+        } else {
+          this.ui.toast(`${this.playerName(e.id)} came back from the light, and can fly`);
+          if (e.p) this.effects.particles.burst(e.p[0], e.p[1] + 1, e.p[2], 60, 5, 1.2, 0.45, [1, 0.88, 0.6], 1, -1, 1.5);
+        }
+        break;
       case 'left':
         this.ui.toast(`${this.playerName(e.id)} left the game`);
         break;
@@ -806,8 +876,10 @@ export class Game {
   private endRun(escaped: boolean, cause: string | undefined, time: number) {
     if (this.runSummary) return;
     const area = escaped ? 'The Spire' : this.shownArea;
-    const rec = recordRun(this.runProgress, area ?? '', escaped ? time : null);
-    this.runSummary = { progress: this.runProgress, area, escaped, cause, time, prevBest: rec.prev, further: rec.further, faster: rec.faster };
+    // a run flown with Viktor's gift is its own thing: it never touches your records
+    const assisted = !!this.local?.motor.canFly;
+    const rec = assisted ? { prev: loadBest(), further: false, faster: false } : recordRun(this.runProgress, area ?? '', escaped ? time : null);
+    this.runSummary = { progress: this.runProgress, area, escaped, cause, time, prevBest: rec.prev, further: rec.further, faster: rec.faster, assisted };
   }
 
   // ------------------------------------------------------------------ input
@@ -821,6 +893,7 @@ export class Game {
       return;
     }
     if (code === 'F8' && this.debug.allowed && this.serverDebug) { this.conn?.send({ t: 'dbg', cmd: 'restart' }); return; }
+    if (code === 'F9' && this.debug.allowed && this.serverDebug && this.mode === 'playing') { this.conn?.send({ t: 'dbg', cmd: 'portal' }); this.ui.toast('Portal opened in front of you'); return; }
     if (code === 'F7' && this.debug.allowed && this.serverDebug) {
       this.conn?.send({ t: 'dbg', cmd: 'god' });
       this.godMode = !this.godMode;
@@ -868,7 +941,7 @@ export class Game {
   }
 
   private nextSpectate() {
-    const alive = [...this.remotes.values()].filter((r) => r.status === Status.Alive);
+    const alive = [...this.remotes.values()].filter((r) => r.status === Status.Alive && r.anim !== Anim.Away);
     if (!alive.length) { this.spectate = 0; return; }
     const i = alive.findIndex((r) => r.id === this.spectate);
     this.spectate = alive[(i + 1) % alive.length].id;
@@ -876,6 +949,7 @@ export class Game {
 
   /** Q / E: a dash across the way the camera is facing. */
   private readDash(can: boolean): { dashX: number; dashZ: number } {
+    if (this.heaven.inRoom || this.local?.motor.flying) return { dashX: 0, dashZ: 0 };
     const left = can && this.input.wasPressed('KeyQ');
     const right = can && this.input.wasPressed('KeyE');
     if (left === right) return { dashX: 0, dashZ: 0 };
@@ -886,7 +960,10 @@ export class Game {
 
   private readMove(): MoveInput {
     const inp = this.input;
-    const can = !this.paused && !this.debug.freeCam;
+    // Viktor's speech walks the runner onto its mark (the keys do nothing meanwhile)
+    const st = this.heaven.steer;
+    if (st && !this.paused) return { x: st.x * 0.45, z: st.z * 0.45, sprint: false, jumpHeld: false, jumpPressed: false, aimYaw: st.yaw };
+    const can = !this.paused && !this.debug.freeCam && !this.heaven.locksInput;
     let ix = 0, iz = 0;
     if (can) {
       if (inp.anyDown('KeyW', 'ArrowUp')) iz += 1;
@@ -899,6 +976,21 @@ export class Game {
     let mx = tmpF.x * iz + tmpR.x * ix, mz = tmpF.z * iz + tmpR.z * ix;
     const l = Math.hypot(mx, mz);
     if (l > 1) { mx /= l; mz /= l; }
+    if (this.local?.motor.flying) {
+      // flying: forward is wherever the camera looks, up and down included; Space climbs, Ctrl or C sinks
+      this.cam.forward3(tmpV);
+      let fx = tmpV.x * iz + tmpR.x * ix, fy = tmpV.y * iz, fz = tmpV.z * iz + tmpR.z * ix;
+      const fl = Math.hypot(fx, fy, fz);
+      if (fl > 1) { fx /= fl; fy /= fl; fz /= fl; }
+      return {
+        x: mx, z: mz, flyX: fx, flyY: fy, flyZ: fz,
+        sprint: can && inp.anyDown('ShiftLeft', 'ShiftRight'),
+        jumpHeld: can && inp.isDown('Space'),
+        jumpPressed: false,
+        descend: can && inp.anyDown('ControlLeft', 'ControlRight', 'KeyC'),
+        aimYaw: this.cam.yaw,
+      };
+    }
     return {
       x: mx, z: mz,
       sprint: can && inp.anyDown('ShiftLeft', 'ShiftRight'),
@@ -936,10 +1028,13 @@ export class Game {
     this.effects.update(dt, t, this.r.camera, this.world, lv);
     this.r.focusShadows(this.local ? this.local.renderPos : this.r.camera.position);
     const lr = this.local;
-    this.dropShadow.update(this.world, lr ? lr.renderPos : tmpV, !!lr && this.mode === 'playing' && !lr.dead && !lr.finished && lr.model.root.visible);
+    const shadowWorld = this.heaven.inRoom && this.heaven.view ? this.heaven.view.world : this.world;
+    this.dropShadow.update(shadowWorld, lr ? lr.renderPos : tmpV, !!lr && this.mode === 'playing' && !lr.dead && !lr.finished && lr.model.root.visible);
     this.audio.setListener(this.r.camera);
+    this.listenerRight.set(1, 0, 0).applyQuaternion(this.r.camera.quaternion);
     this.updateAudio(dt);
-    this.r.render();
+    if (this.heaven.inRoom && this.heaven.view) this.r.renderer.render(this.heaven.view.scene, this.r.camera);
+    else this.r.render();
 
     if (this.settings.showFps || this.debug.overlay) this.updateDebugText();
     else this.ui.debug(null);
@@ -980,7 +1075,18 @@ export class Game {
     }
 
     const move = this.readMove();
-    if (local) local.update(dt, move, this.world, mt);
+    const room = this.heaven.inRoom && this.heaven.view ? this.heaven.view : null;
+    if (local) local.update(dt, move, room ? room.world : this.world, mt);
+    if (room) {
+      const canTalk = !this.paused && !this.debug.freeCam;
+      this.heaven.update(dt, this.time, mt, local, {
+        interact: canTalk && this.input.wasPressed('KeyE'),
+        advance: canTalk && (this.input.wasPressed('Space') || this.input.mouseLeftPressed),
+      }, this.paused);
+    } else {
+      const canEnter = !!local && !local.dead && !local.finished && !local.frozen && !local.motor.canFly && this.phase === 'playing' && !this.paused;
+      this.heaven.updateCourse(dt, this.time, mt, local, canEnter, this.listenerRight);
+    }
 
     const renderT = mt - NET.INTERP_DELAY;
     for (const rp of this.remotes.values()) rp.update(renderT, dt, mt);
@@ -1001,7 +1107,7 @@ export class Game {
     this.nearestDrone = nearestDrone;
 
     // wind gust sounds near the player
-    if (local) {
+    if (local && !room) {
       for (const w of this.level.winds) {
         const cx = (w.min[0] + w.max[0]) / 2, cz = (w.min[2] + w.max[2]) / 2;
         const u = ((mt / w.period + w.phase) % 1 + 1) % 1;
@@ -1013,7 +1119,7 @@ export class Game {
       }
     }
 
-    if (local && !local.dead && !local.finished) {
+    if (local && !local.dead && !local.finished && !room) {
       const lp2 = local.pos;
       // first-time tips near each new kind of obstacle
       if (this.time - this.hintAt > 3) {
@@ -1033,14 +1139,41 @@ export class Game {
         const rp = local.renderPos;
         this.effects.particles.emit(rp.x, rp.y + 2.1, rp.z, (Math.random() - 0.5) * 2, 1 + Math.random() * 2, (Math.random() - 0.5) * 2, 0.35, 0.09, 1, 0.75, 0.3, 1, 9, 0);
       }
+      // a trail of golden motes off a runner in flight
+      if (m.flying) this.flightTrail(local.renderPos, local.renderVel, dt);
     }
+    for (const rp of this.remotes.values()) if (rp.anim === Anim.Fly && rp.status === Status.Alive) this.flightTrail(rp.pos, rp.vel, dt);
     for (const p of this.hazards.switchedOn) if (p.distanceTo(lp) < 24) this.audio.laserOn(p);
     this.updateAbilities(mt);
 
     this.updateCamera(dt, mt);
     this.sendState(dt);
-    this.updateArea(dt);
+    if (!room) this.updateArea(dt);
     this.updateHud(mt);
+  }
+
+  /** Golden motes shed by a flying runner, more of them the faster it goes. */
+  private flightTrail(p: THREE.Vector3, v: THREE.Vector3, dt: number) {
+    const sp = v.length();
+    const n = Math.floor(dt * (14 + sp * 3) + Math.random());
+    for (let i = 0; i < n; i++) {
+      this.effects.particles.emit(p.x + (Math.random() - 0.5) * 0.5, p.y + 0.2 + Math.random() * 1.4, p.z + (Math.random() - 0.5) * 0.5,
+        -v.x * 0.15 + (Math.random() - 0.5) * 0.6, -v.y * 0.15 + (Math.random() - 0.5) * 0.6, -v.z * 0.15 + (Math.random() - 0.5) * 0.6,
+        0.7 + Math.random() * 0.5, 0.07 + Math.random() * 0.07, 1, 0.86, 0.55, 0.85, -0.4, -0.05);
+    }
+  }
+
+  /** Viktor's gift: from now until the run ends you can fly. */
+  private grantFlight() {
+    if (!this.local) return;
+    const m = this.local.motor;
+    m.canFly = true;
+    const b = this.level.bounds;
+    m.flyLimits.minX = b.min[0] - FLY.MARGIN; m.flyLimits.maxX = b.max[0] + FLY.MARGIN;
+    m.flyLimits.minZ = b.min[1] - FLY.MARGIN; m.flyLimits.maxZ = b.max[1] + FLY.MARGIN;
+    m.flyLimits.minY = this.level.killY + FLY.FLOOR_ABOVE_KILL; m.flyLimits.maxY = FLY.CEILING;
+    this.input.trapCtrl = true;
+    this.heaven.closePortal();
   }
 
   private nearestDrone: THREE.Vector3 | null = null;
@@ -1064,6 +1197,9 @@ export class Game {
       return;
     }
     if (!local) return;
+    // Viktor's speech has its own camera set-ups
+    if (this.heaven.ownsCamera) return;
+    const camWorld = this.heaven.inRoom && this.heaven.view ? this.heaven.view.world : this.world;
     const ended = local.dead || local.finished;
     if (local.dead && local.doomed) {
       // watch the fall from the edge, then move on to spectating
@@ -1089,7 +1225,7 @@ export class Game {
       this.ui.bottom(local.finished && this.aliveRemotes() > 0 ? 'Waiting for the others…' : '');
     }
     const b = local.motor.body;
-    this.cam.update(dt, { pos: local.renderPos, vel: local.renderVel, grounded: b.grounded, sprinting: local.motor.anim === Anim.Sprint, riding: !!local.motor.zip || !!local.motor.grapple, low: local.motor.sliding, dashing: this.dashKick > 0.05, boosted: local.motor.boost }, this.world, mt);
+    this.cam.update(dt, { pos: local.renderPos, vel: local.renderVel, grounded: b.grounded, sprinting: local.motor.anim === Anim.Sprint, riding: !!local.motor.zip || !!local.motor.grapple, low: local.motor.sliding, dashing: this.dashKick > 0.05, boosted: local.motor.boost, flying: local.motor.flying, shoulder: this.heaven.inRoom ? this.heaven.shoulder : 0 }, camWorld, mt);
     this.dashKick = Math.max(0, this.dashKick - dt * 3);
   }
 
@@ -1097,8 +1233,8 @@ export class Game {
 
   private spectateTarget(): RemotePlayer | null {
     let t = this.remotes.get(this.spectate);
-    if (!t || t.status !== Status.Alive) {
-      t = [...this.remotes.values()].find((r) => r.status === Status.Alive);
+    if (!t || t.status !== Status.Alive || t.anim === Anim.Away) {
+      t = [...this.remotes.values()].find((r) => r.status === Status.Alive && r.anim !== Anim.Away);
       this.spectate = t?.id ?? 0;
     }
     return t ?? null;
@@ -1106,7 +1242,7 @@ export class Game {
 
   private sendState(dt: number) {
     const local = this.local;
-    if (!local || !this.conn || local.dead || local.finished) return;
+    if (!local || !this.conn || local.dead || local.finished || this.heaven.inRoom) return;
     this.sendAcc += dt;
     if (this.sendAcc < 1 / NET.CLIENT_SEND_HZ) return;
     this.sendAcc = 0;
@@ -1157,16 +1293,18 @@ export class Game {
   private updateAudio(dt: number) {
     const local = this.local;
     const inGame = this.mode === 'playing' && !!local;
-    let falling = 0, speed = 0, exposure = 0.5, zip = 0, belt = false;
+    let falling = 0, speed = 0, exposure = 0.5, zip = 0, belt = false, fly = 0;
+    const flying = !!local && inGame && local.motor.flying && !local.dead;
     if (local && inGame) {
       const b = local.motor.body;
       speed = Math.hypot(b.vel.x, b.vel.z);
-      falling = clamp((-b.vel.y - 8) / 25, 0, 1);
+      falling = flying ? 0 : clamp((-b.vel.y - 8) / 25, 0, 1);
+      if (flying) fly = clamp(Math.hypot(b.vel.x, b.vel.y, b.vel.z) / FLY.FAST, 0, 1);
       exposure = clamp((b.pos.y - 20) / 40, 0, 1);
       if (local.motor.zip && !local.dead) { zip = local.motor.zipSpeed; speed = zip; }
       belt = !local.dead && b.grounded && !!b.ground?.def.belt;
     }
-    this.audio.update(dt, { exposure, speed, falling, chase: this.danger, drone: inGame ? this.nearestDrone : null, inGame, zip, belt });
+    this.audio.update(dt, { exposure, speed, falling, chase: this.danger, drone: inGame ? this.nearestDrone : null, inGame, zip, belt, heaven: this.heaven.inRoom ? 1 : 0, flying, fly });
   }
 
   private updateDebugText() {

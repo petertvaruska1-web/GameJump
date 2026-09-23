@@ -218,7 +218,7 @@ export class Sky {
   get flashLevel() { return this.flash; }
 }
 
-function cloudTexture(): THREE.Texture {
+export function cloudTexture(): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 128;
   const ctx = c.getContext('2d')!;

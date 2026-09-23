@@ -29,6 +29,8 @@ export interface PlayerHooks {
   laser(): void;
   /** The dead body hit the ground. */
   bodyLanded(impact: number): void;
+  /** Took off (1) or stopped flying (-1). */
+  flew(dir: number): void;
 }
 
 const wind: [number, number] = [0, 0];
@@ -59,6 +61,16 @@ export class LocalPlayer {
   immune = false;
   /** No laser checks until this match time (right after a shield soaked one). */
   laserGraceUntil = 0;
+  /**
+   * With Viktor, in the white room: the course's lasers and gusts are measured
+   * against the course, so they must not be tested here at all.
+   */
+  sanctuary = false;
+  /** Shown instead of the motor's own animation (Viktor's blessing lifts you into a hover). */
+  poseOverride: number | null = null;
+  /** Drawn this far above the body (the blessing lifts you off the floor). */
+  lift = 0;
+  private flyReq = false;
   private grappleReq = -1;
   private releaseReq = false;
   private dashReqX = 0;
@@ -99,6 +111,7 @@ export class LocalPlayer {
   die(impulse?: [number, number, number]) {
     const b = this.motor.body;
     this.dead = true;
+    this.motor.flying = false;
     this.motor.zip = null;
     this.motor.grapple = null;
     this.motor.launched = false;
@@ -118,6 +131,8 @@ export class LocalPlayer {
   requestGrapple(id: number) { this.grappleReq = id; }
   /** Let go of the rope on the next physics step. */
   requestRelease() { this.releaseReq = true; }
+  /** Take off or land on the next physics step (only a runner who can fly). */
+  requestFlyToggle() { this.flyReq = true; }
 
   update(dt: number, input: MoveInput, world: CollisionWorld, matchTime: number) {
     const m = this.motor, b = m.body;
@@ -132,7 +147,7 @@ export class LocalPlayer {
     this.jumpQueued = false;
     inp.jumpPressed = false;
     inp.slidePressed = false;
-    if (!active) { this.grappleReq = -1; this.releaseReq = false; this.dashReqX = this.dashReqZ = 0; }
+    if (!active) { this.grappleReq = -1; this.releaseReq = false; this.dashReqX = this.dashReqZ = 0; this.flyReq = false; }
 
 
     this.acc = Math.min(this.acc + dt, 0.25);
@@ -155,9 +170,11 @@ export class LocalPlayer {
       // grapple requests go to the first physics step only
       inp.grapple = this.grappleReq; inp.grappleRelease = this.releaseReq;
       inp.dashX = this.dashReqX; inp.dashZ = this.dashReqZ;
+      inp.flyToggle = this.flyReq;
+      this.flyReq = false;
       this.grappleReq = -1; this.releaseReq = false;
       this.dashReqX = this.dashReqZ = 0;
-      windAt(this.level, b.pos.x, b.pos.y, b.pos.z, stepT, wind);
+      if (this.sanctuary) { wind[0] = 0; wind[1] = 0; } else windAt(this.level, b.pos.x, b.pos.y, b.pos.z, stepT, wind);
       const beforeY = b.pos.y;
       const wasGrounded = b.grounded;
       m.step(world, PHYS.STEP, stepInput, wind[0], wind[1]);
@@ -172,7 +189,8 @@ export class LocalPlayer {
       if (ev.unhooked) this.hooks.unhooked();
       if (ev.flipped) this.hooks.flipped();
       if (ev.dashed !== 0) this.hooks.dashed(ev.dashed);
-      if (!this.frozen && !this.dead && !this.immune && stepT >= this.laserGraceUntil && this.level.lasers.length
+      if (ev.flew !== 0) this.hooks.flew(ev.flew);
+      if (!this.frozen && !this.dead && !this.immune && !this.sanctuary && stepT >= this.laserGraceUntil && this.level.lasers.length
         && laserHit(this.level, b.pos.x, b.pos.y, b.pos.z, stepT, b.radius, b.height - 0.1)) {
         this.hooks.laser();
       }
@@ -210,9 +228,10 @@ export class LocalPlayer {
     this.renderYaw = yaw;
 
     // animation
-    this.anim = this.dead ? Anim.Dead : this.finished ? Anim.Finished : m.anim;
+    this.anim = this.dead ? Anim.Dead : this.finished ? Anim.Finished : this.poseOverride ?? m.anim;
     const hs = m.zip ? m.zipSpeed : Math.hypot(b.vel.x, b.vel.z);
     this.model.root.position.copy(this.renderPos);
+    this.model.root.position.y += this.lift;
     this.model.root.rotation.y = this.renderYaw;
     const local = localDir(b.vel.x, b.vel.z, this.renderYaw);
     this.model.update({
