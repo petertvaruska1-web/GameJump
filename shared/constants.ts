@@ -382,6 +382,8 @@ export const CRUMBLE = {
 export const PORTAL = {
   /** Share of runs that get a portal. */
   CHANCE: 0.1,
+  /** For testing: with a runner of this name in the room (any case), every run gets one. */
+  TEST_NAME: 'vk3',
   /** It opens a random moment this long after "Go!" (seconds). */
   OPEN_MIN: 3,
   OPEN_MAX: 9,

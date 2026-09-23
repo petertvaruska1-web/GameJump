@@ -429,6 +429,23 @@ const spots = level.portals ?? [];
   check('it opens a few seconds into the run', opens.every((a) => a >= 3 && a <= 9), `open times ${Math.min(...opens).toFixed(1)}..${Math.max(...opens).toFixed(1)} s`);
 }
 {
+  // testing: a runner called vk3 (any case) gets the portal on every run, and only that changes
+  for (const name of ['vk3', 'VK3']) {
+    now = 0;
+    const room = new Room('VK3', level, () => now, true, () => 0.99);
+    const p = room.join({ send() {}, close() {} }, name) as RoomPlayer;
+    room.handle(p, { t: 'start' });
+    let n = 0;
+    for (let k = 0; k < 200; k++) { room.handle(p, { t: 'restart' }); if (room.portal) n++; }
+    check(`a runner named ${name} gets the portal on every run`, n === 200, `${n}/200`);
+  }
+  now = 0;
+  const other = new Room('XYZ', level, () => now, true, () => 0.99);
+  const q = other.join({ send() {}, close() {} }, 'vk33') as RoomPlayer;
+  other.handle(q, { t: 'start' });
+  check('any other name still rolls the dice', other.portal === null);
+}
+{
   // no portal this run: nothing to step through
   const { room, p } = setupPortal([0.5]);
   const s = spots[0].p;
