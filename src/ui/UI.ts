@@ -227,13 +227,22 @@ export class UI {
       <label class="check"><input type="checkbox" id="inv" ${s.invertY ? 'checked' : ''}/> Invert mouse Y</label>
       <label class="check"><input type="checkbox" id="shake" ${s.cameraShake ? 'checked' : ''}/> Camera shake</label>
       <label class="check"><input type="checkbox" id="fps" ${s.showFps ? 'checked' : ''}/> Show FPS</label>
-      <p class="hint">Graphics quality applies after reloading the page.</p>`;
+      <p class="hint quality-note">Graphics quality applies after reloading the page.</p>`;
   }
 
-  private bindSettings(root: HTMLElement) {
+  /** `canReload`: outside a run, a changed quality preset can be applied on the spot. */
+  private bindSettings(root: HTMLElement, canReload = false) {
     const s = this.settings;
     const q = root.querySelector<HTMLSelectElement>('#q')!;
+    const running = s.quality;
     q.value = s.quality;
+    const note = root.querySelector<HTMLElement>('.quality-note')!;
+    const showReload = () => {
+      if (!canReload) return;
+      note.innerHTML = q.value === running ? 'Graphics quality applies after reloading the page.'
+        : 'The new graphics quality needs a reload. <button class="btn small" data-a="reload">Reload now</button>';
+      note.querySelector('[data-a=reload]')?.addEventListener('click', () => location.reload());
+    };
     const bind = (id: string, fn: (v: string, t: HTMLInputElement) => void) => {
       const i = root.querySelector<HTMLInputElement>('#' + id)!;
       i.addEventListener('input', () => { fn(i.value, i); this.h.settingsChanged(s); });
@@ -245,12 +254,12 @@ export class UI {
     bind('inv', (_v, t) => { s.invertY = t.checked; });
     bind('shake', (_v, t) => { s.cameraShake = t.checked; });
     bind('fps', (_v, t) => { s.showFps = t.checked; });
-    q.addEventListener('change', () => { s.quality = q.value as Settings['quality']; this.h.settingsChanged(s); });
+    q.addEventListener('change', () => { s.quality = q.value as Settings['quality']; this.h.settingsChanged(s); showReload(); });
   }
 
   settingsMenu(back: () => void) {
     const s = this.show(`<div class="panel">${this.settingsHtml()}<div class="row end panel-foot"><button class="btn small primary" data-a="back">Back <kbd>Esc</kbd></button></div></div>`, 'screen center', back);
-    this.bindSettings(s);
+    this.bindSettings(s, true);
     s.querySelector('[data-a=back]')!.addEventListener('click', back);
   }
 
