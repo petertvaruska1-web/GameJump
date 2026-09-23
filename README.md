@@ -97,6 +97,9 @@ What a static host can and cannot do:
 | Right mouse (hold) | Grapple the anchor marked by the green reticle and hang on while you hold it; let go of the button (or press `Space`) to drop off |
 | `Esc` | Pause menu / release the mouse (on your own, the pause menu can also restart the run) |
 | `Space` / `E` while dead or finished | Cycle the spectated teammate |
+| `E` near Viktor | Talk to him (see [The portal](#the-portal)) |
+| Left mouse | Take off / land, once Viktor has given you flight |
+| `Space` / `Ctrl` (or `C`) in flight | Climb / sink. `W` flies wherever the camera looks, `Shift` flies faster |
 
 The runner stays squared up to the camera and strafes, the way third-person
 action games handle it: stepping left or right with `A` / `D` no longer swings the
@@ -179,6 +182,83 @@ it first. Each route has two, and the Upper Works has two.
 | **Shield** (3 crates) | Soaks one hit from a stalker, drone, Sentinel shot or laser. You then get 2.2 s of grace, and the attacker is stunned for 3.5 s before it gives up the chase. It doesn't save you from falling. |
 | **Cloak** (3 crates) | For 15 s enemies can't see you, and any that were chasing you lose you. You turn ghostly. |
 | **Boost** (2 crates) | For 22 s you run 22% faster (a sprint of 10.9 m/s, which leaves any stalker behind) and take off 8% harder, so a sprint jump carries about a third further (5.9 m -> 7.8 m) while rising only a little higher. Your boots glow and the view widens at speed. |
+
+## The portal
+
+On one run in ten a portal opens somewhere on the course, a few seconds after
+"Go!". "A light has opened on the course" appears at the top of the screen, a
+column of light rises from the portal into the sky, and heavenly music carries
+from it across the ruins: faint and muffled from far away, fuller and brighter
+the closer you get, panned to where it is. The portal is an upright oval of
+gold with a sunburst of rays, a swirling opening, sparks spiralling into it and
+shards orbiting its rim.
+
+Where it opens is random: one of 54 spots in 22 areas. Every spot is floor the
+route bot has actually stood on (so a runner can reach it), set a couple of
+metres beside the path so the ring never blocks the way, on flat solid floor
+wide enough to walk round it, with headroom, and clear of lasers, zip-line
+cables, launch pads, crates, grapple anchors and enemy posts.
+`scripts/portal-spots.ts` finds them and writes `shared/level/map/portals.ts`;
+`npm run check:map` warns if a map edit breaks one.
+
+Walk into it and the music swells while the world turns white. You step out of
+a golden doorway into an endless white hall: a pale marble floor with gold
+rings radiating from a dais, two rings of columns dissolving into haze, shafts
+of warm light, mist over the floor and motes of gold rising through the air.
+Viktor waits on the dais, the first runner ever to stand on the beacon: a
+blonde man in a green polo. He waves when you come close. Press `E` next to him
+and he speaks. The camera moves through a set-up for each line, his hands
+follow what he says, and a soft, wordless voice runs under the text. `E`,
+`Space` or a click shows the rest of a line or moves on; the lines also move on
+by themselves.
+
+Viktor is built from primitives like everyone else in the game, finished to a
+higher standard than the runners: 107 modelled parts (the runner has about 45)
+in 20 material zones. He has a face (eyes that blink and follow you, brows that
+lift as he talks, a jaw that moves with his voice, a nose and ears), a sculpted
+blonde quiff, a piqué-knit polo with a ribbed collar, placket, buttons and a
+gold beacon logo, a watch, a belt with a buckle, chinos, boat shoes, and hands
+with fingers that point, open and rest on his heart. The parts are merged per
+joint and material, so he costs 59 draw calls.
+
+When he finishes, the light gathers into a pillar over him, golden sparks
+spiral round you as you rise off the floor, and you are back on the landing
+pad. For the rest of that run you can fly:
+
+| Input | In flight |
+|---|---|
+| Left mouse | Take off (a hop off the ground), or stop flying |
+| `W` `A` `S` `D` | Fly relative to the camera. Forward flies wherever you are looking, up and down included |
+| `Space` / `Ctrl` (or `C`) | Climb / sink at 7.5 m/s |
+| `Shift` | Fly at 19 m/s instead of 11 |
+
+You ease into speed and glide to a stop when you let go. You float just above
+whatever is below you and pull out of a dive in time rather than slam into the
+floor; hold `Ctrl` all the way down to land, which ends flight. Stopping in
+mid-air hands you back to gravity, so stopping over the void is a fall like
+any other. Walls and ceilings still stop you, enemies still see you and lasers
+still kill. A floor, a ceiling and the edges of the world keep you from flying
+away. The camera follows in all three dimensions and frames you a little below
+the middle of the screen, so the middle of the screen is exactly where forward
+takes you. The runner stretches out flat with a fist forward at speed, floats
+upright with a knee raised when slow, banks into sideways flight and trails
+golden motes. The gift lasts until the run ends, and a run flown with it never
+touches your records: the results say "Flown with Viktor's gift" and "Not
+counted toward records".
+
+A web page cannot stop `Ctrl`+`W` from closing the tab, so while you can fly,
+closing the tab asks first.
+
+In a team the server decides it all. It rolls the portal and tells everyone
+where it is. It only believes a runner who says they went through if its own
+copy of them is at the ring after it has opened. While someone is with Viktor
+they are off the course: nothing can see or kill them, their position reports
+are ignored and the others see them vanish into the light. It sends them back
+no sooner than 5 s later, and only then gives them a higher speed limit and
+stops treating their flying over the void as a fall. Anyone who has not been
+through yet can still go. Someone who reconnects mid-conversation comes back
+on the pad with the gift. With debug keys on, `F9` opens a portal in front of
+you.
 
 ## The level
 
@@ -410,7 +490,7 @@ shared/                 code used by both client and server
   math.ts, hazards.ts
   physics/world.ts      collision world: yaw-rotated boxes & ramps, grid broad-phase, raycasts, movers
   physics/character.ts  character controller (coyote, buffer, mantle, carry, wind)
-  level/                level schema, builder toolkit, map sections
+  level/                level schema, builder toolkit, map sections (map/portals.ts: where the portal can open)
   sim/room.ts           authoritative room: lobby, match flow, validation, deaths
   sim/enemy.ts          enemy FSM + perception
   sim/manager.ts        room registry and per-connection sessions
@@ -423,6 +503,9 @@ src/                    client
   net/                  connection (WebSocket or offline), interpolation buffers
   ui/                   DOM menus, lobby, HUD, pause, results
   audio/Audio.ts        procedural WebAudio (no asset files)
+  audio/HeavenMusic.ts  the portal's music: choir, strings, harp and bells in a long reverb, stingers, Viktor's voice
+  game/Heaven.ts        the portal easter egg: the portal on the course, the white room, Viktor's speech, flight's return
+  render/PortalView.ts, HeavenView.ts, ViktorModel.ts
   debug/Debug.ts        developer overlay
 scripts/                headless test and design tools
 ```
@@ -438,9 +521,14 @@ npm run sim:jumps      # measures jump distances for level-design rules
 npm run test:balance   # stalker pursuit vs sprint/jog + sentinel hit chances
 npm run balance        # route balance report: time, early / wandering / late / hesitant runs and
 #                        enemy replays per main route, at ten arrival times (a few minutes)
-npm run test:hazards   # server: lasers, zip/grapple not falls, launch arcs, crates, shield, cloak, slide hitbox, bodies
+npm run test:hazards   # server: lasers, zip/grapple not falls, launch arcs, crates, shield, cloak, slide hitbox, bodies,
+#                        and the portal: one run in ten, every spot used, shut until it opens, entry only at the ring,
+#                        untouchable while away, no instant return, back on the pad able to fly, flying over the
+#                        void is not a fall (stopping is), a flyer's speed accepted, the gift gone next run, reconnects
 npm run test:moves     # movement: climb reach/limit/cooldown, hooking from a standstill, swing release windows,
-#                        what a flip adds to a jump, and a dash beating a head-on stalker charge
+#                        what a flip adds to a jump, and a dash beating a head-on stalker charge; flight: take-off,
+#                        holding height, flying along the view, climb and sink, skimming the floor, landing, walls,
+#                        dropping when you stop, catching a fall, the ceiling
 #                        (it also prints slide length and tunnel clearance; SWEEP=1 adds more swing geometries)
 # clumsy-player check: the bot takes off 1.2 m before every edge
 SLOPPY=1.2 npx tsx scripts/bot-routes.ts
@@ -449,6 +537,7 @@ npm run test:server    # two headless clients against a server it starts itself:
 #                        rejected teleport, the end of a match and restarting from the results.
 #                        WS=ws://host/ws points it at a server that is already running instead.
 npm run typecheck
+npx tsx scripts/portal-spots.ts   # re-find the portal's spots after moving the course (DRY=1: report only)
 ```
 
 The route bot runs all three main routes (each continuing through the Upper Works to
@@ -503,6 +592,10 @@ The settings menu has an FPS counter for normal play.
 - Enemy vision runs at 10–12 Hz with staggered timers, and raycasts walk a uniform grid.
 - A height-fog shader patch fades everything below the course into haze, which
   sells the drop without extra geometry.
+- The portal is 11 draw calls, all animated in shaders (the swirl, the sparks, the
+  orbiting shards and the light column cost nothing on the CPU). The white room is
+  its own small scene: about 194 draw calls and 131k triangles with Viktor in view,
+  and the course is not drawn while you are in it.
 
 ## Failure handling
 
