@@ -70,6 +70,7 @@ export class UI {
   private overlay: HTMLElement | null = null;
   private bigTimer = 0;
   private objectiveTimer = 0;
+  private tipTimer = 0;
   private lastLobby: LobbyView | null = null;
   /** What Esc does on the current menu screen (back out of a sub-page), if anything. */
   private escBack: (() => void) | null = null;
@@ -85,6 +86,7 @@ export class UI {
     this.hud = el(`<div id="hud" class="hidden">
       <div class="hud-players"></div>
       <div class="hud-objective"></div>
+      <div class="hud-tip hidden"></div>
       <div class="hud-timer"></div>
       <div class="hud-area"><span class="area-name"></span><i class="area-bar"><b></b></i></div>
       <div class="hud-center"></div>
@@ -344,6 +346,28 @@ export class UI {
     o.style.opacity = '1';
     window.clearTimeout(this.objectiveTimer);
     this.objectiveTimer = window.setTimeout(() => { o.style.opacity = '0'; }, seconds * 1000);
+  }
+
+  /**
+   * A first-time tip next to a new kind of obstacle. The objective line is a
+   * short uppercase banner; tips are full sentences, so they get their own
+   * sentence-case card with a dark backing that reads over bright sky, and the
+   * lead-in before a colon ("Grapple:") as its label.
+   */
+  tip(text: string, seconds = 8) {
+    const box = this.hud.querySelector<HTMLElement>('.hud-tip')!;
+    const m = /^([^:]{2,24}):\s*(.*)$/.exec(text);
+    box.innerHTML = m ? `<b>${esc(m[1])}</b>${esc(m[2].charAt(0).toUpperCase() + m[2].slice(1))}` : esc(text);
+    box.classList.remove('hidden', 'out');
+    void box.offsetWidth;
+    box.classList.add('in');
+    window.clearTimeout(this.tipTimer);
+    this.tipTimer = window.setTimeout(() => { box.classList.remove('in'); box.classList.add('out'); }, seconds * 1000);
+  }
+
+  clearTip() {
+    window.clearTimeout(this.tipTimer);
+    this.hud.querySelector<HTMLElement>('.hud-tip')!.classList.add('hidden');
   }
 
   /**

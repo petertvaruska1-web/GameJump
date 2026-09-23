@@ -618,6 +618,7 @@ export class Game {
     this.effects.clearProjectiles();
     this.vignette.style.opacity = '0';
     this.ui.clearBig();
+    this.ui.clearTip();
     this.ui.closePause();
   }
 
@@ -1021,7 +1022,7 @@ export class Game {
           if (Math.hypot(lp2.x - h.p[0], lp2.z - h.p[2]) < h.r && Math.abs(lp2.y - h.p[1]) < 4) {
             this.hintsShown.add(h.key);
             this.hintAt = this.time;
-            this.ui.objective(h.text, 8);
+            this.ui.tip(h.text, 9);
             break;
           }
         }
