@@ -373,3 +373,48 @@ export const CRUMBLE = {
   SHAKE_TIME: 0.85,
   RESPAWN_TIME: 7,
 };
+
+/**
+ * The portal: on one run in ten a doorway of light opens at a random spot on the
+ * course. Stepping through it takes you to Viktor, who sends you back to the
+ * landing pad able to fly for the rest of that run.
+ */
+export const PORTAL = {
+  /** Share of runs that get a portal. */
+  CHANCE: 0.1,
+  /** It opens a random moment this long after "Go!" (seconds). */
+  OPEN_MIN: 3,
+  OPEN_MAX: 9,
+  /** Height of the ring's centre above the ground it stands on, and its inner radius. */
+  HEIGHT: 1.75,
+  RADIUS: 1.25,
+  /** You are through once your chest is this close to the centre of the ring. */
+  ENTER_RADIUS: 1.1,
+  /** The server allows this much more (its copy of your position is a message old). */
+  SERVER_SLACK: 2.5,
+  /** The shortest visit the server believes: the conversation cannot be skipped outright. */
+  MIN_STAY: 5,
+};
+
+/** Flight, Viktor's gift: left click takes off and lands, the camera steers. */
+export const FLY = {
+  /** Cruising speed, and with Shift held. */
+  SPEED: 11,
+  FAST: 19,
+  /** Climb (Space) and descent (Ctrl) speed on top of the way you are looking. */
+  VERTICAL: 7.5,
+  /** Speeding up toward what the keys ask for, and gliding to a stop when they let go. */
+  ACCEL: 26,
+  DECEL: 11,
+  /** Upward kick when taking off from the ground. */
+  TAKEOFF_VY: 6,
+  /** While flying you float this far above whatever is below you, unless you hold descend. */
+  HOVER: 0.45,
+  /** Lowest altitude (above the level's kill height) and highest you can fly. */
+  FLOOR_ABOVE_KILL: 16,
+  CEILING: 190,
+  /** How far past the level's bounds you can wander before the air pushes you back. */
+  MARGIN: 150,
+  /** Server's horizontal speed limit for a runner who can fly (m/s, with slack). */
+  MAX_CLIENT_SPEED: 25,
+};

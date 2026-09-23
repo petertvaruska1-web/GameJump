@@ -2,9 +2,10 @@
 // coyote time, jump buffering, jump cut, air control, auto-mantle/vault,
 // ledge climbing, sliding, front flips, sideways dashes, grapple swinging,
 // boosted running and jumping, moving-platform and conveyor carry, launch pads, zip
-// lines and external pushes (wind, sweepers).
+// lines and external pushes (wind, sweepers). And, for a runner Viktor has
+// blessed, free flight.
 
-import { CLIMB, CORPSE, DASH, FLIP, GRAPPLE, LAUNCH, PHYS, PLAYER, POWER, SLIDE, ZIP } from '../constants';
+import { CLIMB, CORPSE, DASH, FLIP, FLY, GRAPPLE, LAUNCH, PHYS, PLAYER, POWER, SLIDE, ZIP } from '../constants';
 import { zipGrab, zipLength } from '../hazards';
 import type { GrappleDef, LaunchDef, ZiplineDef } from '../level/types';
 import { approachAngle, clamp, damp, lerp, v3, wrapAngle, type Vec3 } from '../math';
@@ -187,6 +188,18 @@ export interface MoveInput {
    * still gives a short swing). Tools that leave it out release on request only.
    */
   grappleHeld?: boolean;
+  /** Take off, or land, this step (only does anything for a runner who can fly). */
+  flyToggle?: boolean;
+  /**
+   * While flying: the world-space direction the move keys ask for, including the
+   * camera's pitch, so forward flies wherever you are looking (magnitude 0..1).
+   * Left out, flight uses the flat `x` / `z` move.
+   */
+  flyX?: number;
+  flyY?: number;
+  flyZ?: number;
+  /** While flying: hold to sink (holding jump climbs). */
+  descend?: boolean;
 }
 
 export const Anim = {
@@ -206,6 +219,10 @@ export const Anim = {
   Flip: 13,
   DashL: 14,
   DashR: 15,
+  /** Flying (Viktor's gift). */
+  Fly: 16,
+  /** Gone through the portal: not on the course at all until they come back. */
+  Away: 17,
 } as const;
 export type Anim = (typeof Anim)[keyof typeof Anim];
 
@@ -231,6 +248,8 @@ export interface MotorEvents {
   flipped: boolean;
   /** Started a dash this step (-1 left, 1 right, 0 none). */
   dashed: number;
+  /** Took off (1) or stopped flying (-1) this step. */
+  flew: number;
 }
 
 export class PlayerMotor {
@@ -252,7 +271,7 @@ export class PlayerMotor {
   readonly platVel = v3();
   readonly events: MotorEvents = {
     jumped: false, landed: false, impact: 0, mantled: false, surface: '', launched: -1, zipOn: -1, zipOff: -1,
-    slid: false, hooked: -1, unhooked: false, flipped: false, dashed: 0,
+    slid: false, hooked: -1, unhooked: false, flipped: false, dashed: 0, flew: 0,
   };
 
   /** Sliding: low body, locked direction, decaying speed. */
@@ -294,6 +313,11 @@ export class PlayerMotor {
   private airDashUsed = false;
   /** Boost power: faster running and longer jumps while true. */
   boost = false;
+  /** Viktor's gift: this runner may fly, and whether it is flying right now. */
+  canFly = false;
+  flying = false;
+  /** Where flight is allowed (the level's bounds plus a margin, a floor and a ceiling). */
+  readonly flyLimits = { minX: -Infinity, maxX: Infinity, minZ: -Infinity, maxZ: Infinity, minY: -Infinity, maxY: Infinity };
 
   /** In flight after a launch pad: no air drag, reduced air control. */
   launched = false;
@@ -361,6 +385,7 @@ export class PlayerMotor {
     this.dashing = false;
     this.dashSide = 0;
     this.airDashUsed = false;
+    this.flying = false;
   }
 
   step(world: CollisionWorld, dt: number, inp: MoveInput, windX = 0, windZ = 0) {
@@ -369,7 +394,7 @@ export class PlayerMotor {
     ev.jumped = false; ev.landed = false; ev.impact = 0; ev.mantled = false;
     ev.launched = -1; ev.zipOn = -1; ev.zipOff = -1;
     ev.slid = false; ev.hooked = -1; ev.unhooked = false;
-    ev.flipped = false; ev.dashed = 0;
+    ev.flipped = false; ev.dashed = 0; ev.flew = 0;
     if (this.flipping) { this.flipT += dt; if (this.flipT >= FLIP.TIME) this.flipping = false; }
     if (this.zipCooldown > 0) this.zipCooldown -= dt;
     if (this.slideCooldown > 0) this.slideCooldown -= dt;
@@ -391,6 +416,9 @@ export class PlayerMotor {
     } else if (b.grounded) {
       this.platVel.x = this.platVel.y = this.platVel.z = 0;
     }
+
+    if (inp.flyToggle && this.canFly) this.toggleFly();
+    if (this.flying) { this.stepFly(world, dt, inp, windX, windZ); return; }
 
     if (this.mantleActive) { this.stepMantle(world, dt); return; }
     if (this.zip) { this.stepZip(dt, inp); return; }
@@ -661,6 +689,109 @@ export class PlayerMotor {
 
     this.landAnim = Math.max(0, this.landAnim - dt * 4);
     this.updateAnim(hs, inp.sprint);
+  }
+
+  /**
+   * Take off, or stop flying. Taking off drops whatever else you were doing (a
+   * cable, a rope, a slide) and hops you off the ground; catching yourself in a
+   * fall takes most of the speed out of it. Stopping hands you back to gravity
+   * with the speed you had, like stepping off a ledge.
+   */
+  private toggleFly() {
+    const b = this.body;
+    if (this.flying) { this.stopFlying(); return; }
+    if (this.mantleActive) return;
+    if (this.zip) { this.lastZip = this.zip.id; this.zipCooldown = ZIP.REGRAB; this.zip = null; this.events.zipOff = this.lastZip; }
+    if (this.grapple) this.unhook(false);
+    if (this.sliding) this.endSlide();
+    this.dashing = false;
+    this.flipping = false;
+    this.launched = false;
+    this.flying = true;
+    b.height = PLAYER.HEIGHT;
+    if (b.grounded) { b.vel.y = Math.max(b.vel.y, FLY.TAKEOFF_VY); b.grounded = false; b.ground = null; }
+    else b.vel.y = Math.max(b.vel.y, -6);
+    this.jumpBuffer = 0;
+    this.coyote = 0;
+    this.events.flew = 1;
+    this.anim = Anim.Fly;
+  }
+
+  private stopFlying() {
+    this.flying = false;
+    this.coyote = 0;
+    this.jumpBuffer = 0;
+    this.jumpedThisAir = true;
+    this.flippedThisAir = false;
+    this.airDashUsed = false;
+    this.lastGroundY = this.body.pos.y;
+    this.events.flew = -1;
+  }
+
+  /**
+   * Flight: no gravity. The move keys fly you along the camera's view (pitch
+   * included), jump climbs and descend sinks, Shift goes faster. Velocity eases
+   * toward what the keys ask for and glides to a stop when they let go. You float
+   * a little above whatever is below you; holding descend all the way down lands
+   * you, and flight ends there. Walls and ceilings still stop you.
+   */
+  private stepFly(world: CollisionWorld, dt: number, inp: MoveInput, windX: number, windZ: number) {
+    const b = this.body, v = b.vel, ev = this.events;
+    let fx = inp.flyX ?? inp.x, fy = inp.flyY ?? 0, fz = inp.flyZ ?? inp.z;
+    let mag = Math.hypot(fx, fy, fz);
+    if (mag > 1) { fx /= mag; fy /= mag; fz /= mag; mag = 1; }
+    const speed = inp.sprint ? FLY.FAST : FLY.SPEED;
+    const climb = (inp.jumpHeld ? 1 : 0) - (inp.descend ? 1 : 0);
+    let tx = fx * speed, ty = fy * speed + climb * FLY.VERTICAL, tz = fz * speed;
+    // float a little above the ground unless you are deliberately sinking onto it, and
+    // pull out of a dive in time to skim the floor rather than slam into it
+    let floorGap = Infinity;
+    if (!inp.descend) {
+      floorGap = world.groundBelow(b.pos.x, b.pos.y + 0.2, b.pos.z, 16) - 0.2;
+      if (floorGap < FLY.HOVER) ty = Math.max(ty, (FLY.HOVER - floorGap) * 9);
+    }
+    // the air thickens at the edges of the world: a floor, a ceiling and walls you glide back from
+    const L = this.flyLimits;
+    if (b.pos.y < L.minY) ty = Math.max(ty, (L.minY - b.pos.y) * 2 + 2);
+    else if (b.pos.y > L.maxY) ty = Math.min(ty, -(b.pos.y - L.maxY) * 2 - 2);
+    if (b.pos.x < L.minX) tx = Math.max(tx, (L.minX - b.pos.x) * 0.5 + 2);
+    else if (b.pos.x > L.maxX) tx = Math.min(tx, -(b.pos.x - L.maxX) * 0.5 - 2);
+    if (b.pos.z < L.minZ) tz = Math.max(tz, (L.minZ - b.pos.z) * 0.5 + 2);
+    else if (b.pos.z > L.maxZ) tz = Math.min(tz, -(b.pos.z - L.maxZ) * 0.5 - 2);
+    const asking = mag > 0.05 || climb !== 0;
+    approach3(v, tx, ty, tz, (asking ? FLY.ACCEL : FLY.DECEL) * dt);
+    if (v.y < 0 && isFinite(floorGap)) {
+      const safe = Math.sqrt(2 * FLY.ACCEL * Math.max(0, floorGap - FLY.HOVER));
+      if (v.y < -safe) v.y = -safe;
+    }
+
+    // gusts and knockback push a flyer about too
+    const e = b.ext;
+    e.x += windX * dt; e.z += windZ * dt;
+    const ed = damp(1.1, dt);
+    e.x -= e.x * ed; e.z -= e.z * ed; e.y -= e.y * damp(3, dt);
+
+    const info = stepBody(world, b, dt, false, this.info);
+    if (info.landed) { ev.landed = true; ev.impact = info.impact; ev.surface = b.ground?.def.mat ?? ''; }
+    this.airTime = 0;
+    this.lastGroundY = b.pos.y;
+    this.platVel.x = this.platVel.y = this.platVel.z = 0;
+    if (b.grounded && inp.descend) {
+      // sank all the way down: you have landed
+      this.stopFlying();
+      this.anim = Anim.Land;
+      this.landAnim = Math.min(1, info.impact / 20);
+      return;
+    }
+
+    // face the way the camera looks (or the way you are going, for tools that do not say)
+    const hs = Math.hypot(v.x, v.z);
+    const want = inp.aimYaw ?? (hs > 0.6 ? Math.atan2(v.x, v.z) : this.yaw);
+    const target = clamp(wrapAngle(want - this.yaw) * 9, -PLAYER.TURN_RATE, PLAYER.TURN_RATE);
+    this.yawVel += clamp(target - this.yawVel, -PLAYER.TURN_ACCEL * dt, PLAYER.TURN_ACCEL * dt);
+    this.yaw += this.yawVel * dt;
+    this.landAnim = Math.max(0, this.landAnim - dt * 4);
+    this.anim = Anim.Fly;
   }
 
   /** Room to stand up (or to jump, with `extra`) above the sliding body. */
@@ -1030,6 +1161,14 @@ export class PlayerMotor {
       this.anim = Anim.Run;
     }
   }
+}
+
+function approach3(v: Vec3, tx: number, ty: number, tz: number, maxDelta: number) {
+  const dx = tx - v.x, dy = ty - v.y, dz = tz - v.z;
+  const d = Math.hypot(dx, dy, dz);
+  if (d <= maxDelta || d < 1e-6) { v.x = tx; v.y = ty; v.z = tz; return; }
+  const k = maxDelta / d;
+  v.x += dx * k; v.y += dy * k; v.z += dz * k;
 }
 
 function approach2(v: Vec3, tx: number, tz: number, maxDelta: number) {

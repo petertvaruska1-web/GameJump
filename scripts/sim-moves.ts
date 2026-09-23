@@ -4,11 +4,12 @@
 // ledge climb's reach, height limit and cooldown, hooking a grapple from a
 // standstill, the automatic ledge climb, what a front flip adds to a jump, and
 // that a dash takes you out of a stalker's charge without ever becoming a
-// longer jump.
+// longer jump. And Viktor's gift: flight takes off, holds its height, flies
+// along the view, climbs, sinks, lands, stops at walls and falls when you let go.
 // Usage: npx tsx scripts/sim-moves.ts
-import { CLIMB, DASH, GRAPPLE, PHYS, PLAYER } from '../shared/constants';
+import { CLIMB, DASH, FLY, GRAPPLE, PHYS, PLAYER } from '../shared/constants';
 import type { BoxDef, LevelData, V3 } from '../shared/level/types';
-import { PlayerMotor, type MoveInput } from '../shared/physics/character';
+import { Anim, PlayerMotor, type MoveInput } from '../shared/physics/character';
 import { CollisionWorld } from '../shared/physics/world';
 import { Enemy, type EnemyHost, type Target } from '../shared/sim/enemy';
 
@@ -447,5 +448,84 @@ function headOn(dashAt: number, repeat = false): string {
   check('an air dash moves you aside', mid.drift > 1.6, `sideways drift ${mid.drift.toFixed(2)} m`);
   check('an air dash does not carry the jump any further', mid.range <= plain.range + 0.1,
     `range ${plain.range.toFixed(2)} m -> ${mid.range.toFixed(2)} m`);
+}
+// ---- flight (Viktor's gift)
+{
+  const world = new CollisionWorld(lvl([[[0, -0.5, 30], [30, 1, 100]], [[0, 5, 60], [30, 10, 1]]]));
+  const still = (o: Partial<MoveInput> = {}) => inp({ x: 0, z: 0, sprint: false, ...o });
+  // `o` gets the step number: a toggle on step 0 is one click
+  const run = (m: PlayerMotor, secs: number, o: (i: number) => Partial<MoveInput>) => {
+    for (let i = 0; i < secs * 120; i++) { world.update(0); m.step(world, PHYS.STEP, still(o(i))); }
+  };
+  // without the gift the toggle does nothing at all
+  const a = new PlayerMotor(), b = new PlayerMotor();
+  a.spawn(0, 0, 0, 0); b.spawn(0, 0, 0, 0);
+  run(a, 2, (i) => ({ z: 1, jumpPressed: i === 0, flyToggle: i === 0 }));
+  run(b, 2, (i) => ({ z: 1, jumpPressed: i === 0 }));
+  check('without the gift a left click changes nothing', !a.flying && a.body.pos.z === b.body.pos.z && a.body.pos.y === b.body.pos.y);
+  // take off from a standstill and hold the height with no keys down
+  const m = new PlayerMotor();
+  m.spawn(0, 0, 0, 0);
+  m.canFly = true;
+  run(m, 0.2, () => ({}));
+  run(m, 2, (i) => ({ flyToggle: i === 0 }));
+  const y2 = m.body.pos.y;
+  run(m, 2, () => ({}));
+  check('taking off lifts you off the ground', m.flying && m.anim === Anim.Fly && y2 > 1.2, `height ${y2.toFixed(2)} m`);
+  check('with no keys down you hold your height', Math.abs(m.body.pos.y - y2) < 0.05 && Math.hypot(m.body.vel.x, m.body.vel.y, m.body.vel.z) < 0.05,
+    `${y2.toFixed(2)} -> ${m.body.pos.y.toFixed(2)} m`);
+  // forward flies along the view: level, then pitched up 30 degrees
+  run(m, 1, () => ({ flyZ: 1 }));
+  check('forward flight reaches cruising speed within a second', Math.abs(m.body.vel.z - FLY.SPEED) < 0.01 && Math.abs(m.body.vel.y) < 0.01, `vz=${m.body.vel.z.toFixed(2)} vy=${m.body.vel.y.toFixed(2)}`);
+  const up0 = m.body.pos.y;
+  run(m, 1, () => ({ flyZ: Math.cos(0.52), flyY: Math.sin(0.52), sprint: true }));
+  check('looking up while flying forward climbs, Shift flies faster', Math.abs(Math.hypot(m.body.vel.y, m.body.vel.z) - FLY.FAST) < 0.05 && m.body.pos.y > up0 + 5,
+    `speed ${Math.hypot(m.body.vel.y, m.body.vel.z).toFixed(2)} climbed ${(m.body.pos.y - up0).toFixed(1)} m`);
+  // Space climbs, descend sinks
+  const c0 = m.body.pos.y;
+  run(m, 1, () => ({ jumpHeld: true }));
+  const climbed = m.body.pos.y - c0;
+  run(m, 0.5, () => ({}));
+  const d0 = m.body.pos.y;
+  run(m, 1, () => ({ descend: true }));
+  check('Space climbs and Ctrl sinks at the climb speed', Math.abs(m.body.vel.y + FLY.VERTICAL) < 0.01 && climbed > FLY.VERTICAL * 0.6 && d0 - m.body.pos.y > FLY.VERTICAL * 0.6,
+    `climbed ${climbed.toFixed(1)} m, sank ${(d0 - m.body.pos.y).toFixed(1)} m`);
+  // diving at the floor without holding descend: you skim it at the hover height instead of hitting it
+  for (let i = 0; i < 120 * 10 && m.body.pos.y > 2; i++) { world.update(0); m.step(world, PHYS.STEP, still({ descend: true })); }
+  let lowest = Infinity;
+  for (let i = 0; i < 120 * 3; i++) { world.update(0); m.step(world, PHYS.STEP, still({ flyZ: 0.95, flyY: -0.3 })); lowest = Math.min(lowest, m.body.pos.y); }
+  const hover = m.body.pos.y;
+  check('diving at the floor skims it instead of landing', m.flying && !m.body.grounded && Math.abs(hover - FLY.HOVER) < 0.1 && lowest > 0.2,
+    `settled at ${hover.toFixed(2)} m, lowest ${lowest.toFixed(2)} m`);
+  let landed = false;
+  for (let i = 0; i < 120 * 3 && m.flying; i++) { world.update(0); m.step(world, PHYS.STEP, still({ descend: true })); if (m.events.flew < 0) landed = true; }
+  check('holding descend onto the floor lands you and ends flight', landed && !m.flying && m.body.grounded && Math.abs(m.body.pos.y) < 0.01, `grounded=${m.body.grounded} y=${m.body.pos.y.toFixed(2)}`);
+  // walls stop a flyer
+  const w = new PlayerMotor();
+  w.spawn(0, 0, 50, 0);
+  w.canFly = true;
+  run(w, 0.2, () => ({}));
+  run(w, 4, (i) => ({ flyToggle: i === 0, flyZ: 1, sprint: true }));
+  check('a wall stops a flyer', w.flying && w.body.pos.z < 59.5 - PLAYER.RADIUS + 0.01, `z=${w.body.pos.z.toFixed(2)} (wall face at 59.5)`);
+  // letting go in the air: gravity takes over
+  const g = new PlayerMotor();
+  g.spawn(0, 20, 0, 0);
+  g.canFly = true;
+  run(g, 0.5, (i) => ({ flyToggle: i === 0 }));
+  const gy = g.body.pos.y;
+  run(g, 0.5, (i) => ({ flyToggle: i === 0 }));
+  check('stopping in mid-air drops you', !g.flying && g.body.pos.y < gy - 2 && g.anim === Anim.Fall, `${gy.toFixed(1)} -> ${g.body.pos.y.toFixed(1)} m`);
+  // taking off mid-fall catches you
+  run(g, 0.3, () => ({}));
+  const fall = g.body.vel.y;
+  run(g, 1.5, (i) => ({ flyToggle: i === 0 }));
+  check('taking off mid-fall catches you', fall < -10 && g.flying && Math.abs(g.body.vel.y) < 0.05, `falling at ${fall.toFixed(1)} m/s, now ${g.body.vel.y.toFixed(2)} m/s`);
+  // the sky has a ceiling
+  const h = new PlayerMotor();
+  h.spawn(0, 10, 0, 0);
+  h.canFly = true;
+  h.flyLimits.maxY = 30;
+  run(h, 12, (i) => ({ flyToggle: i === 0, jumpHeld: true }));
+  check('you cannot fly above the ceiling', h.body.pos.y < 33, `y=${h.body.pos.y.toFixed(1)} (ceiling 30)`);
 }
 process.exit(fails ? 1 : 0);
