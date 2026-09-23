@@ -20,18 +20,25 @@ export class LevelView {
   onCrumbleDust?: (x: number, y: number, z: number, big: boolean) => void;
 
   constructor(level: LevelData, private mats: Materials, shadows: boolean) {
-    const buckets = new Map<string, { mat: MatKey; b: GeoBuilder }>();
+    const buckets = new Map<string, { mat: MatKey | 'concreteDarkTop'; b: GeoBuilder }>();
+    const bucket = (mat: MatKey | 'concreteDarkTop', cx: number, cz: number, tall: string) => {
+      const key = `${mat}|${cx}|${cz}|${tall}`;
+      let bk = buckets.get(key);
+      if (!bk) { bk = { mat, b: new GeoBuilder() }; buckets.set(key, bk); }
+      return bk.b;
+    };
     for (const box of level.boxes) {
       if (!box.visible || box.mat === 'invisible') continue;
       if (box.kind !== 'static') { this.addDynamic(box, shadows); continue; }
       const cx = Math.floor(box.p[0] / CHUNK), cz = Math.floor(box.p[2] / CHUNK);
       const tall = box.s[1] > 30 ? 't' : '';
-      const key = `${box.mat}|${cx}|${cz}|${tall}`;
-      let bucket = buckets.get(key);
-      if (!bucket) { bucket = { mat: box.mat, b: new GeoBuilder() }; buckets.set(key, bucket); }
-      bucket.b.addBox(box, TEX_SCALE[box.mat] ?? 3);
+      // dark concrete is painted with rain streaks for walls: its tops (roofs, steps,
+      // cover blocks) get a streak-free version instead of long stretched stripes
+      const top = box.mat === 'concreteDark' ? bucket('concreteDarkTop', cx, cz, tall) : undefined;
+      bucket(box.mat, cx, cz, tall).addBox(box, TEX_SCALE[box.mat] ?? 3, {}, top);
     }
     for (const [key, { mat, b }] of buckets) {
+      if (b.empty) continue;
       const mesh = new THREE.Mesh(b.build(), mats.get(mat));
       const emissive = mat === 'lightCyan' || mat === 'lightRed' || mat === 'lightWarm' || mat === 'finish' || mat === 'glass';
       const tall = key.endsWith('t');

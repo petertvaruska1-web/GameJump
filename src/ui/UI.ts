@@ -514,9 +514,11 @@ function runCard(r: RunSummary, solo: boolean) {
   let badge = '';
   if (best && r.faster && r.escaped) badge = best.time !== undefined ? `<span class="tag ok">New record · was ${fmtTime(best.time)}</span>` : '<span class="tag ok">First escape</span>';
   else if (best && r.further && !r.escaped) badge = `<span class="tag ok">Furthest yet · was ${bestPct}%</span>`;
+  // once you have escaped, the thing to beat is the time, not the distance
+  else if (best && !r.escaped && best.time !== undefined) meta += ` · your record ${fmtTime(best.time)}`;
   else if (best && !r.escaped) meta += ` · best ${bestPct}%${best.area ? ` (${esc(best.area)})` : ''}`;
   else if (best && r.escaped && best.time !== undefined) meta += ` · record ${fmtTime(best.time)}`;
-  const mark = best && !r.further && !r.escaped ? `<em style="left:${bestPct}%"></em>` : '';
+  const mark = best && !r.further && !r.escaped && best.progress < 1 ? `<em style="left:${bestPct}%"></em>` : '';
   return `<div class="run-card">
     <div class="run-where">${where}</div>
     <div class="run-bar"><i style="width:${r.escaped ? 100 : pct}%"></i>${mark}</div>

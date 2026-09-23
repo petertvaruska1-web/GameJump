@@ -39,7 +39,7 @@ export class GeoBuilder {
    * Adds a box. With `local` = true the box is emitted around the origin
    * (for dynamic meshes that get their transform per frame).
    */
-  addBox(b: BoxSpec, texScale: number, opts: { local?: boolean; ao?: boolean; shadeY?: boolean } = {}) {
+  addBox(b: BoxSpec, texScale: number, opts: { local?: boolean; ao?: boolean; shadeY?: boolean } = {}, top?: GeoBuilder) {
     const [w, h, d] = b.s;
     const hx = w / 2, hy = h / 2, hz = d / 2;
     const rise = b.rise ?? 0;
@@ -60,7 +60,9 @@ export class GeoBuilder {
     const uOff = (b.p[0] * 0.37 + b.p[2] * 0.23) % texScale;
     const vOff = (b.p[1] * 0.31) % texScale;
     for (const f of FACES) {
-      const base = this.pos.length / 3;
+      // an upward face can go to a separate builder (a material without wall streaks)
+      const out = top && f.n[1] === 1 ? top : this;
+      const base = out.pos.length / 3;
       let nx = f.n[0], ny = f.n[1], nz = f.n[2];
       if (rise && f.n[1] === 1) {
         const l = Math.hypot(d, rise);
@@ -72,19 +74,19 @@ export class GeoBuilder {
         const wx = cx + lx * cs + lz * sn;
         const wy = cy + ly;
         const wz = cz - lx * sn + lz * cs;
-        this.pos.push(wx, wy, wz);
-        this.nor.push(wnx, ny, wnz);
+        out.pos.push(wx, wy, wz);
+        out.nor.push(wnx, ny, wnz);
         let u: number, v: number;
         if (f.n[1] !== 0) { u = lx; v = lz; }
         else if (f.n[0] !== 0) { u = lz; v = ly; }
         else { u = lx; v = ly; }
-        this.uv.push((u + uOff) / texScale, (v + vOff) / texScale);
+        out.uv.push((u + uOff) / texScale, (v + vOff) / texScale);
         let shade = tint * (shadeY ? heightShade(wy) : 1);
         if (ao && f.n[1] === 0 && ly < 0) shade *= 0.72;
         if (f.n[1] === -1) shade *= 0.8;
-        this.col.push(shade, shade, shade);
+        out.col.push(shade, shade, shade);
       }
-      this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      out.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
   }
 

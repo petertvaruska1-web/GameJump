@@ -69,6 +69,16 @@ const TEX: Record<string, Draw> = {
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.fillRect(0, s / 2 - 1, s, 2);
   },
+  // the same weathered dark concrete seen from above: speckle, stains and a seam, no rain streaks
+  concreteDarkTop(ctx, s, r) {
+    ctx.fillStyle = '#6f727a'; ctx.fillRect(0, 0, s, s);
+    stains(ctx, s, r, 12, 'rgba(20,24,30,0.14)');
+    stains(ctx, s, r, 6, 'rgba(210,215,225,0.07)');
+    speckle(ctx, s, r, 2400, 0.18);
+    speckle(ctx, s, r, 600, 0.08, true);
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, s - 2, s - 2);
+  },
   metal(ctx, s, r) {
     ctx.fillStyle = '#7f8c9b'; ctx.fillRect(0, 0, s, s);
     speckle(ctx, s, r, 1400, 0.12);
@@ -201,7 +211,7 @@ export class Materials {
     return t;
   }
 
-  get(key: MatKey | 'crate'): THREE.Material {
+  get(key: MatKey | 'crate' | 'concreteDarkTop'): THREE.Material {
     let m = this.cache.get(key);
     if (m) return m;
     m = this.create(key);
@@ -215,10 +225,11 @@ export class Materials {
     });
   }
 
-  private create(key: MatKey | 'crate'): THREE.Material {
+  private create(key: MatKey | 'crate' | 'concreteDarkTop'): THREE.Material {
     switch (key) {
       case 'concrete': return this.std('concrete', 0xffffff, 0.92, 0.02);
       case 'concreteDark': return this.std('concreteDark', 0xffffff, 0.95, 0.02);
+      case 'concreteDarkTop': return this.std('concreteDarkTop', 0xffffff, 0.95, 0.02);
       case 'metal': return this.std('metal', 0xffffff, 0.62, 0.45);
       case 'steel': return this.std('steel', 0xffffff, 0.55, 0.55);
       case 'trim': return this.std('steel', 0x8a96a6, 0.6, 0.5);
