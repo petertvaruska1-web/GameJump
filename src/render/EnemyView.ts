@@ -100,54 +100,130 @@ export class EnemyView {
     this.root.add(this.icon);
   }
 
+  /**
+   * Merges the plain parts hanging directly off one joint into one mesh per
+   * material, so authored detail (plates, fins, claws, bolts) costs no more
+   * draw calls than the bare capsules it replaced.
+   */
+  private bake(parent: THREE.Object3D, shadows: boolean) {
+    const by = new Map<THREE.Material, THREE.Mesh[]>();
+    for (const c of parent.children) {
+      const m = c as THREE.Mesh;
+      if (!m.isMesh || m === this.cone || m === this.orb || this.rotors.includes(m)) continue;
+      const mat = m.material as THREE.Material;
+      if (mat.transparent || (mat as THREE.ShaderMaterial).isShaderMaterial) continue;
+      const list = by.get(mat) ?? [];
+      list.push(m);
+      by.set(mat, list);
+    }
+    for (const [mat, list] of by) {
+      if (list.length < 2) continue;
+      const geos = list.map((m) => {
+        m.updateMatrix();
+        const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+        for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+        g.applyMatrix4(m.matrix);
+        return g;
+      });
+      const merged = new THREE.Mesh(mergeGeometries(geos, false)!, mat);
+      geos.forEach((g) => g.dispose());
+      merged.castShadow = shadows;
+      for (const m of list) parent.remove(m);
+      parent.add(merged);
+    }
+  }
+
+  /** A mesh placed at `p`, optionally rotated and scaled, added to `parent`. */
+  private part(g: THREE.BufferGeometry, mat: THREE.Material, parent: THREE.Object3D, p: [number, number, number], r?: [number, number, number], s?: [number, number, number]) {
+    const o = new THREE.Mesh(g, mat);
+    o.position.set(...p);
+    if (r) o.rotation.set(...r);
+    if (s) o.scale.set(...s);
+    parent.add(o);
+    return o;
+  }
+
   private buildStalker(shadows: boolean) {
+    // tall, thin, hunched: dark armour over a skeletal frame, a narrow angular
+    // helmet with one burning slit, plates on the shoulders and a ridge of fins
+    // down the spine that makes the hunch read even as a silhouette
     const body = new THREE.MeshStandardMaterial({ color: 0x22252c, roughness: 0.55, metalness: 0.5 });
     const plate = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 0.5, metalness: 0.6 });
-    const m = (g: THREE.BufferGeometry, mat: THREE.Material, p: [number, number, number], parent: THREE.Object3D) => {
-      const o = new THREE.Mesh(g, mat); o.position.set(...p); o.castShadow = shadows; parent.add(o); return o;
-    };
+    const P = this.part.bind(this);
     const hips = new THREE.Group(); hips.position.y = 1.1; this.model.add(hips);
+    P(new THREE.BoxGeometry(0.34, 0.16, 0.22), plate, hips, [0, 0.02, 0]);
     const torso = new THREE.Group(); hips.add(torso); torso.rotation.x = 0.35;
-    m(new THREE.CapsuleGeometry(0.2, 0.5, 3, 8), body, [0, 0.45, 0], torso).scale.set(1.2, 1, 0.7);
-    m(new THREE.BoxGeometry(0.46, 0.16, 0.3), plate, [0, 0.7, 0], torso);
+    P(new THREE.CapsuleGeometry(0.2, 0.5, 3, 8), body, torso, [0, 0.45, 0], undefined, [1.2, 1, 0.7]);
+    P(new THREE.CylinderGeometry(0.05, 0.07, 0.18, 6), body, torso, [0, 0.88, 0.04]);
+    P(new THREE.BoxGeometry(0.46, 0.16, 0.3), plate, torso, [0, 0.7, 0]);
+    P(new THREE.BoxGeometry(0.3, 0.3, 0.07), plate, torso, [0, 0.46, 0.13], [-0.12, 0, 0]);
+    for (const s of [1, -1]) P(new THREE.BoxGeometry(0.2, 0.1, 0.28), plate, torso, [0.29 * s, 0.8, 0], [0, 0, -0.42 * s]);
+    for (let i = 0; i < 3; i++) P(new THREE.BoxGeometry(0.035, 0.13 - i * 0.02, 0.15), plate, torso, [0, 0.36 + i * 0.17, -0.17], [0.55, 0, 0]);
     const head = new THREE.Group(); head.position.set(0, 0.95, 0.08); torso.add(head);
-    m(new THREE.BoxGeometry(0.22, 0.26, 0.28), body, [0, 0.1, 0], head);
-    const eye = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.045, 0.02), this.eyeMat); eye.position.set(0, 0.13, 0.145); head.add(eye);
+    // hexagonal helmet, flat face forward, pinched at the crown
+    P(new THREE.CylinderGeometry(0.1, 0.13, 0.26, 6, 1, false, Math.PI / 6), body, head, [0, 0.1, 0], undefined, [1, 1, 1.18]);
+    P(new THREE.BoxGeometry(0.2, 0.045, 0.08), plate, head, [0, 0.17, 0.1], [0.25, 0, 0]);
+    P(new THREE.BoxGeometry(0.12, 0.06, 0.09), plate, head, [0, 0.0, 0.09], [0.35, 0, 0]);
+    const eye = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.04, 0.02), this.eyeMat); eye.position.set(0, 0.125, 0.122); head.add(eye);
     this.head = head;
     const limbs: THREE.Object3D[] = [];
     for (const s of [1, -1]) {
       const sh = new THREE.Group(); sh.position.set(0.28 * s, 0.75, 0); torso.add(sh);
-      m(new THREE.CapsuleGeometry(0.06, 0.45, 2, 6), body, [0, -0.3, 0], sh);
+      P(new THREE.CapsuleGeometry(0.06, 0.45, 2, 6), body, sh, [0, -0.3, 0]);
+      P(new THREE.IcosahedronGeometry(0.068, 0), body, sh, [0, -0.58, 0]);
       const fore = new THREE.Group(); fore.position.y = -0.58; sh.add(fore);
-      m(new THREE.CapsuleGeometry(0.05, 0.45, 2, 6), plate, [0, -0.28, 0], fore);
-      m(new THREE.ConeGeometry(0.07, 0.22, 4), plate, [0, -0.62, 0.02], fore).rotation.x = Math.PI;
+      P(new THREE.CapsuleGeometry(0.05, 0.45, 2, 6), plate, fore, [0, -0.28, 0]);
+      P(new THREE.BoxGeometry(0.1, 0.2, 0.1), plate, fore, [0, -0.2, 0.01]);
+      // three hooked claws instead of one spike
+      for (const cx of [-0.035, 0, 0.035]) P(new THREE.ConeGeometry(0.022, 0.2, 4), plate, fore, [cx, -0.6, 0.03], [Math.PI - 0.25, 0, cx * 4]);
       const hip = new THREE.Group(); hip.position.set(0.13 * s, 0, 0); hips.add(hip);
-      m(new THREE.CapsuleGeometry(0.075, 0.42, 2, 6), body, [0, -0.28, 0], hip);
+      P(new THREE.CapsuleGeometry(0.075, 0.42, 2, 6), body, hip, [0, -0.28, 0]);
+      P(new THREE.BoxGeometry(0.1, 0.13, 0.07), body, hip, [0, -0.54, 0.07], [0.2, 0, 0]);
       const knee = new THREE.Group(); knee.position.y = -0.55; hip.add(knee);
-      m(new THREE.CapsuleGeometry(0.06, 0.42, 2, 6), plate, [0, -0.27, 0], knee);
+      P(new THREE.CapsuleGeometry(0.06, 0.42, 2, 6), plate, knee, [0, -0.27, 0]);
+      // clawed foot: a narrow wedge sole reaching forward
+      P(new THREE.BoxGeometry(0.1, 0.06, 0.26), plate, knee, [0, -0.54, 0.06]);
+      P(new THREE.ConeGeometry(0.04, 0.12, 4), plate, knee, [0, -0.55, 0.22], [Math.PI / 2, 0, 0]);
       limbs.push(sh, fore, hip, knee);
     }
     this.limbs = limbs;
+    for (const g of [hips, torso, head, ...limbs]) this.bake(g, shadows);
   }
 
   private buildSentinel(shadows: boolean, glowTex: THREE.Texture) {
+    // a surveillance turret on a splayed tripod: feet planted wide, a collar
+    // where the legs meet, a turret ring, and a boxy camera head with a hooded
+    // lens, twin barrels, cooling fins and an aerial whose tip glows with its mood
     const metal = new THREE.MeshStandardMaterial({ color: 0xcfd3d6, roughness: 0.45, metalness: 0.5 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x252a31, roughness: 0.5, metalness: 0.6 });
-    const add = (g: THREE.BufferGeometry, mat: THREE.Material, p: [number, number, number], parent: THREE.Object3D) => {
-      const o = new THREE.Mesh(g, mat); o.position.set(...p); o.castShadow = shadows; parent.add(o); return o;
-    };
+    const P = this.part.bind(this);
+    const up = new THREE.Vector3(0, 1, 0);
     for (let i = 0; i < 3; i++) {
-      const a = (i / 3) * Math.PI * 2;
-      const leg = add(new THREE.CylinderGeometry(0.05, 0.08, 1.7, 5), dark, [Math.sin(a) * 0.45, 0.8, Math.cos(a) * 0.45], this.model);
-      leg.rotation.set(Math.cos(a) * 0.35, 0, -Math.sin(a) * 0.35);
+      const a = (i / 3) * Math.PI * 2 + Math.PI / 3;
+      const top = new THREE.Vector3(Math.sin(a) * 0.16, 1.45, Math.cos(a) * 0.16);
+      const foot = new THREE.Vector3(Math.sin(a) * 0.72, 0.04, Math.cos(a) * 0.72);
+      const dir = foot.clone().sub(top);
+      const len = dir.length();
+      const leg = P(new THREE.CylinderGeometry(0.05, 0.075, len, 6), dark, this.model, [(top.x + foot.x) / 2, (top.y + foot.y) / 2, (top.z + foot.z) / 2]);
+      // the cylinder's +Y end is the thin one: point it up the leg, toward the collar
+      leg.quaternion.setFromUnitVectors(up, dir.normalize().negate());
+      P(new THREE.CylinderGeometry(0.11, 0.13, 0.06, 8), dark, this.model, [foot.x, 0.03, foot.z]);
     }
-    add(new THREE.CylinderGeometry(0.25, 0.32, 0.5, 8), dark, [0, 1.65, 0], this.model);
+    P(new THREE.CylinderGeometry(0.2, 0.24, 0.22, 8), dark, this.model, [0, 1.45, 0]);
+    P(new THREE.CylinderGeometry(0.15, 0.2, 0.42, 8), dark, this.model, [0, 1.74, 0]);
+    P(new THREE.CylinderGeometry(0.3, 0.3, 0.07, 14), metal, this.model, [0, 1.96, 0]);
     const head = new THREE.Group(); head.position.y = 2.2; this.model.add(head);
-    add(new THREE.BoxGeometry(0.75, 0.55, 0.9), metal, [0, 0.05, 0], head);
-    add(new THREE.BoxGeometry(0.8, 0.12, 0.95), dark, [0, 0.36, 0], head);
-    const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.12, 12), this.eyeMat);
+    P(new THREE.BoxGeometry(0.75, 0.55, 0.9), metal, head, [0, 0.05, 0]);
+    P(new THREE.BoxGeometry(0.8, 0.12, 0.95), dark, head, [0, 0.36, 0]);
+    for (const s of [1, -1]) P(new THREE.BoxGeometry(0.06, 0.42, 0.62), dark, head, [0.4 * s, 0.02, -0.05]);
+    for (let i = 0; i < 3; i++) P(new THREE.BoxGeometry(0.6, 0.05, 0.1), dark, head, [0, -0.12 + i * 0.13, -0.49]);
+    P(new THREE.TorusGeometry(0.25, 0.045, 6, 18), dark, head, [0, 0.08, 0.47]);
+    for (const s of [1, -1]) P(new THREE.CylinderGeometry(0.045, 0.045, 0.46, 6), dark, head, [0.2 * s, -0.19, 0.58], [Math.PI / 2, 0, 0]);
+    P(new THREE.CylinderGeometry(0.012, 0.016, 0.55, 4), dark, head, [-0.27, 0.66, -0.3]);
+    const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.12, 14), this.eyeMat);
     lens.rotation.x = Math.PI / 2; lens.position.set(0, 0.08, 0.48); head.add(lens);
-    add(new THREE.CylinderGeometry(0.07, 0.07, 0.5, 6), dark, [0.28, -0.1, 0.55], head).rotation.x = Math.PI / 2;
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), this.eyeMat);
+    tip.position.set(-0.27, 0.95, -0.3); head.add(tip);
     // searchlight cone showing where it is looking
     const len = ENEMY.ranged.viewDist * 0.5;
     const half = (ENEMY.ranged.fovDeg * Math.PI) / 360;
@@ -167,28 +243,36 @@ export class EnemyView {
     glow.scale.setScalar(1.6);
     this.orb.add(glow);
     this.head = head;
+    this.bake(this.model, shadows);
+    this.bake(head, shadows);
   }
 
   private buildDrone(shadows: boolean) {
+    // a four-rotor hunter: armoured hull with a sensor dome, a ringed eye up
+    // front, motor pods under guarded rotors and a tail light
     const shell = new THREE.MeshStandardMaterial({ color: 0x2e343d, roughness: 0.4, metalness: 0.7 });
     const trim = new THREE.MeshStandardMaterial({ color: 0xb8bec6, roughness: 0.5, metalness: 0.5 });
-    const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), shell);
-    core.scale.set(1.2, 0.55, 1.2); core.castShadow = shadows;
-    this.model.add(core);
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), this.eyeMat);
-    eye.position.set(0, -0.08, 0.55);
-    this.model.add(eye);
+    const P = this.part.bind(this);
+    P(new THREE.OctahedronGeometry(0.55, 0), shell, this.model, [0, 0, 0], undefined, [1.2, 0.55, 1.2]);
+    P(new THREE.SphereGeometry(0.3, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), trim, this.model, [0, 0.1, -0.05], undefined, [1, 0.7, 1.1]);
+    P(new THREE.CylinderGeometry(0.17, 0.11, 0.16, 8), shell, this.model, [0, -0.27, 0]);
+    P(new THREE.TorusGeometry(0.17, 0.035, 6, 14), trim, this.model, [0, -0.08, 0.53]);
     for (let i = 0; i < 4; i++) {
       const a = Math.PI / 4 + (i * Math.PI) / 2;
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.8), trim);
-      arm.position.set(Math.sin(a) * 0.55, 0.05, Math.cos(a) * 0.55);
-      arm.rotation.y = a;
-      this.model.add(arm);
+      P(new THREE.BoxGeometry(0.08, 0.06, 0.8), trim, this.model, [Math.sin(a) * 0.55, 0.05, Math.cos(a) * 0.55], [0, a, 0]);
+      P(new THREE.CylinderGeometry(0.07, 0.09, 0.16, 8), shell, this.model, [Math.sin(a) * 0.95, 0.05, Math.cos(a) * 0.95]);
+      P(new THREE.TorusGeometry(0.37, 0.022, 4, 20), trim, this.model, [Math.sin(a) * 0.95, 0.14, Math.cos(a) * 0.95], [Math.PI / 2, 0, 0]);
       const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.02, 10), new THREE.MeshBasicMaterial({ color: 0x9aa4b0, transparent: true, opacity: 0.45 }));
       rotor.position.set(Math.sin(a) * 0.95, 0.14, Math.cos(a) * 0.95);
       this.model.add(rotor);
       this.rotors.push(rotor);
     }
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), this.eyeMat);
+    eye.position.set(0, -0.08, 0.55);
+    this.model.add(eye);
+    const tail = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), this.eyeMat);
+    tail.position.set(0, 0.02, -0.66);
+    this.model.add(tail);
     const len = 9;
     const cg = new THREE.ConeGeometry(2.6, len, 16, 1, true);
     cg.translate(0, -len / 2, 0);
@@ -197,6 +281,7 @@ export class EnemyView {
     this.cone.rotation.x = -0.75;
     this.cone.position.set(0, -0.1, 0.3);
     this.model.add(this.cone);
+    this.bake(this.model, shadows);
   }
 
   /** Merges the opaque parts, as posed at rest, into one vertex-coloured mesh (shared per kind). */

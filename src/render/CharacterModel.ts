@@ -16,6 +16,7 @@
 // so it can never snap back upright.
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DASH, FLIP } from '../../shared/constants';
 import { Anim } from '../../shared/physics/character';
 import { clamp, damp, lerp } from '../../shared/math';
@@ -62,6 +63,33 @@ function sphere(r: number) {
 }
 
 const TWO_PI = Math.PI * 2;
+
+/** Merges the meshes hanging directly off one joint into one mesh per material. */
+function bakeJoint(parent: THREE.Object3D, shadows: boolean) {
+  const by = new Map<THREE.Material, THREE.Mesh[]>();
+  for (const c of parent.children) {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh) continue;
+    const list = by.get(m.material as THREE.Material) ?? [];
+    list.push(m);
+    by.set(m.material as THREE.Material, list);
+  }
+  for (const [mat, list] of by) {
+    if (list.length < 2) continue;
+    const geos = list.map((m) => {
+      m.updateMatrix();
+      const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+      g.applyMatrix4(m.matrix);
+      return g;
+    });
+    const merged = new THREE.Mesh(mergeGeometries(geos, false)!, mat);
+    geos.forEach((g) => g.dispose());
+    merged.castShadow = shadows;
+    for (const m of list) parent.remove(m);
+    parent.add(merged);
+  }
+}
 
 export class CharacterModel {
   readonly root = new THREE.Group();
@@ -117,7 +145,8 @@ export class CharacterModel {
     const accent = new THREE.MeshStandardMaterial({ color: ACCENTS[colorIndex % 3], roughness: 0.6, emissive: new THREE.Color(color), emissiveIntensity: 0.25 });
     const visor = new THREE.MeshStandardMaterial({ color: 0x0c1016, roughness: 0.2, metalness: 0.6, emissive: new THREE.Color(color), emissiveIntensity: 0.6 });
     this.boots = dark.clone();
-    this.allMats.push(jacket, pants, skin, dark, accent, visor, this.boots);
+    const sole = new THREE.MeshStandardMaterial({ color: 0x7c8591, roughness: 0.85 });
+    this.allMats.push(jacket, pants, skin, dark, accent, visor, this.boots, sole);
 
     const mesh = (g: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0) => {
       const o = new THREE.Mesh(g, m);
@@ -133,12 +162,24 @@ export class CharacterModel {
     this.body.add(this.hips);
     this.hips.position.y = 0.95;
     this.hips.add(mesh(box(0.34, 0.2, 0.22), pants, 0, 0.02, 0));
+    this.hips.add(mesh(box(0.35, 0.05, 0.23), dark, 0, 0.1, 0)); // belt
     this.hips.add(this.torso);
-    // torso
+    // torso: jacket with a raised collar and a zip, a backpack on two straps
     const chest = mesh(capsule(0.19, 0.26), jacket, 0, 0.34, 0);
     chest.scale.set(1.12, 1, 0.74);
     this.torso.add(chest);
+    const collar = mesh(new THREE.CylinderGeometry(0.1, 0.13, 0.09, 10, 1, true), jacket, 0, 0.56, 0);
+    this.torso.add(collar);
+    this.torso.add(mesh(box(0.2, 0.06, 0.2), jacket, 0, 0.12, 0.01)); // hem, a touch wider than the waist
+    this.torso.add(mesh(box(0.02, 0.36, 0.02), accent, 0, 0.33, 0.145)); // zip
     this.torso.add(mesh(box(0.3, 0.34, 0.14), dark, 0, 0.36, -0.17));
+    this.torso.add(mesh(box(0.26, 0.08, 0.1), dark, 0, 0.56, -0.16)); // pack lid
+    for (const sx of [-0.1, 0.1]) {
+      const strap = mesh(box(0.045, 0.34, 0.02), dark, sx, 0.4, 0.142);
+      strap.rotation.x = -0.08;
+      this.torso.add(strap);
+      this.torso.add(mesh(box(0.045, 0.03, 0.2), dark, sx, 0.55, -0.02));
+    }
     this.torso.add(mesh(box(0.31, 0.05, 0.15), accent, 0, 0.3, -0.175));
     // head
     this.head.position.set(0, 0.62, 0);
@@ -160,7 +201,11 @@ export class CharacterModel {
       elbow.position.y = -0.27;
       shoulder.add(elbow);
       elbow.add(mesh(capsule(0.05, 0.16), jacket, 0, -0.11, 0));
-      elbow.add(mesh(sphere(0.055), skin, 0, -0.26, 0));
+      // grip gloves with a cuff: the hands are what catch ledges and ropes
+      elbow.add(mesh(new THREE.CylinderGeometry(0.058, 0.055, 0.06, 8), dark, 0, -0.21, 0));
+      const glove = mesh(sphere(0.058), dark, 0, -0.27, 0.005);
+      glove.scale.set(0.95, 1.12, 0.8);
+      elbow.add(glove);
       // legs
       const hip = this.hip[i];
       hip.position.set(0.1 * s, 0, 0);
@@ -170,10 +215,16 @@ export class CharacterModel {
       knee.position.y = -0.45;
       hip.add(knee);
       knee.add(mesh(capsule(0.066, 0.28), pants, 0, -0.21, 0));
+      // knee pad over the joint (it also hides the seam between the two capsules)
+      const pad = mesh(box(0.12, 0.13, 0.07), dark, 0, -0.02, 0.055);
+      pad.rotation.x = 0.12;
+      knee.add(pad);
       const ankle = this.ak[i];
       ankle.position.y = -0.44;
       knee.add(ankle);
-      ankle.add(mesh(box(0.11, 0.08, 0.25), this.boots, 0, 0, 0.05));
+      // trainers: an upper that glows when boosted, on a grey rubber sole
+      ankle.add(mesh(box(0.12, 0.09, 0.26), this.boots, 0, 0.01, 0.05));
+      ankle.add(mesh(box(0.125, 0.028, 0.275), sole, 0, -0.045, 0.055));
     }
     // scarf (3 trailing segments)
     let parent: THREE.Object3D = this.torso;
@@ -207,6 +258,8 @@ export class CharacterModel {
     this.bubble.scale.set(0.8, 1.05, 0.8);
     this.bubble.visible = false;
     this.root.add(this.bubble);
+    // merge each joint's pieces per material: the detail above costs almost no extra draw calls
+    for (const j of [this.hips, this.torso, this.head, ...this.sh, ...this.el, ...this.hip, ...this.kn, ...this.ak]) bakeJoint(j, shadows);
     this.root.traverse((o) => { o.frustumCulled = true; });
   }
 
@@ -544,9 +597,13 @@ export class CharacterModel {
   }
 
   dispose() {
+    const shared = new Set(geoCache.values());
     this.root.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.material) (Array.isArray(m.material) ? m.material : [m.material]).forEach((x) => x.dispose());
+      // merged joints and one-off parts belong to this runner; the cached primitives are shared
+      if (m.geometry && !shared.has(m.geometry)) m.geometry.dispose();
     });
+    (this.tag?.material as THREE.SpriteMaterial | undefined)?.map?.dispose();
   }
 }

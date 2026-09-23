@@ -87,6 +87,12 @@ export class Game {
   private local: LocalPlayer | null = null;
   private remotes = new Map<number, RemotePlayer>();
   private enemies: EnemyProxy[] = [];
+  /**
+   * Enemy proxies are built once and reused by every run: the level never
+   * changes, and rebuilding all 42 models each time leaked their GPU geometry
+   * on every "Run it again".
+   */
+  private enemyPool: EnemyProxy[] = [];
   private paused = false;
   private sendAcc = 0;
   private seq = 0;
@@ -333,6 +339,7 @@ export class Game {
         this.mode = 'results';
         this.endAt = this.time;
         this.input.exitLock();
+        this.ui.captureHint(false);
         this.ui.closePause();
         this.paused = false;
         window.setTimeout(() => {
@@ -448,11 +455,14 @@ export class Game {
       this.r.scene.add(rp.model.root);
     }
     // enemies
-    this.enemies = this.level.enemies.map((d) => {
-      const e = new EnemyProxy(d.id, d.kind, this.r.shadows, this.mats.glowTex, d.p, d.yaw);
+    if (!this.enemyPool.length) this.enemyPool = this.level.enemies.map((d) => new EnemyProxy(d.id, d.kind, this.r.shadows, this.mats.glowTex, d.p, d.yaw));
+    this.enemies = this.enemyPool;
+    for (const e of this.enemies) {
+      const d = this.level.enemies[e.id];
+      e.reset(d.p, d.yaw);
+      e.view.root.position.set(d.p[0], d.p[1], d.p[2]);
       this.r.scene.add(e.view.root);
-      return e;
-    });
+    }
     this.ui.showHud();
     this.ui.objective(resume ? 'Rejoined — keep going' : 'Reach the beacon on the Spire', 7);
     this.ui.bottom('');
