@@ -4,7 +4,7 @@
 import { MAX_PLAYERS } from '../../shared/constants';
 import { Status, type LobbyPlayer, type MatchResult, type Phase } from '../../shared/protocol';
 import { PLAYER_CSS } from '../render/CharacterModel';
-import type { PersonalBest, Settings } from '../settings';
+import { loadBest, type PersonalBest, type Settings } from '../settings';
 import './styles.css';
 
 export interface UIHandlers {
@@ -268,15 +268,20 @@ export class UI {
     for (let i = 1; i <= (v.offline ? 1 : MAX_PLAYERS); i++) {
       const p = v.players.find((q) => q.id === i);
       if (!p) { slots.push(`<div class="slot empty"><span class="dot" style="background:${PLAYER_CSS[i - 1]}"></span><div><div class="name">PLAYER ${i}</div><div class="meta">Open slot</div></div><span class="tag">Waiting</span></div>`); continue; }
-      const tag = !p.connected ? '<span class="tag bad">Disconnected</span>' : p.host ? '<span class="tag warn">Host</span>' : p.ready ? '<span class="tag ok">Ready</span>' : '<span class="tag">Not ready</span>';
-      slots.push(`<div class="slot"><span class="dot" style="background:${PLAYER_CSS[(p.id - 1) % 3]}"></span><div><div class="name">${esc(p.name)}${p.id === v.meId ? ' <span class="hint">(you)</span>' : ''}</div><div class="meta">Player ${p.id} · ${p.connected ? 'Connected' : 'Connection lost'}</div></div>${tag}</div>`);
+      const tag = v.offline ? '' : !p.connected ? '<span class="tag bad">Disconnected</span>' : p.host ? '<span class="tag warn">Host</span>' : p.ready ? '<span class="tag ok">Ready</span>' : '<span class="tag">Not ready</span>';
+      const meta = v.offline ? 'Solo run' : `Player ${p.id} · ${p.connected ? 'Connected' : 'Connection lost'}`;
+      slots.push(`<div class="slot"><span class="dot" style="background:${PLAYER_CSS[(p.id - 1) % 3]}"></span><div><div class="name">${esc(p.name)}${p.id === v.meId ? ' <span class="hint">(you)</span>' : ''}</div><div class="meta">${meta}</div></div>${tag}</div>`);
     }
-    const hint = v.offline ? 'Offline solo run: the whole game runs in your browser. Use Play to host an online game for friends.' : isHost
+    const best = loadBest();
+    const bestLine = !best ? 'No runs yet. Reach the beacon on the Spire.'
+      : best.time !== undefined ? `Your record: ${fmtTime(best.time)} to the Spire.`
+        : `Your best: ${Math.round(best.progress * 100)}% of the way${best.area ? `, to ${esc(best.area)}` : ''}.`;
+    const hint = v.offline ? `${bestLine} Use Play on the main menu to host an online game for friends.` : isHost
       ? (others.length === 0 ? 'You can start solo, or share the code so friends can join (up to 3 players).' : allReady ? 'Everyone is ready.' : 'Waiting for players to ready up…')
       : 'Waiting for the host to start the run.';
     const s = this.show(`<div class="panel">
       <h2>Lobby</h2>
-      ${v.offline ? '<p class="hint">Offline solo run — no server needed.</p>' : `<div class="code-box"><div><small>Room code</small><div class="code">${esc(v.code)}</div></div><button class="btn small" data-a="copy">Copy</button></div>`}
+      ${v.offline ? '<p class="hint">Offline solo run: the whole course runs in your browser.</p>' : `<div class="code-box"><div><small>Room code</small><div class="code">${esc(v.code)}</div></div><button class="btn small" data-a="copy">Copy</button></div>`}
       <div class="slots">${slots.join('')}</div>
       <p class="hint">${hint}</p>
       <div class="row between" style="margin-top:12px">
@@ -291,6 +296,9 @@ export class UI {
     s.querySelector('[data-a=leave]')!.addEventListener('click', () => this.h.leave());
     s.querySelector('[data-a=ready]')?.addEventListener('click', () => this.h.ready(!me?.ready));
     s.querySelector('[data-a=start]')?.addEventListener('click', () => this.h.start());
+    // Enter or Space starts the run straight away
+    const startBtn = s.querySelector<HTMLButtonElement>('[data-a=start]:not([disabled])');
+    if (startBtn && (document.activeElement === document.body || !document.activeElement)) startBtn.focus();
     s.querySelector('[data-a=copy]')?.addEventListener('click', (e) => {
       const b = e.currentTarget as HTMLButtonElement;
       navigator.clipboard?.writeText(v.code).then(() => { b.textContent = 'Copied'; }).catch(() => { b.textContent = v.code; });

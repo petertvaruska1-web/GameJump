@@ -57,6 +57,7 @@ button, input, select { font-family: inherit; }
 .btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.13); border-color: rgba(255, 255, 255, 0.3); transform: translateX(4px); }
 .btn:active:not(:disabled) { transform: translateX(2px) scale(0.99); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .btn.primary:hover:not(:disabled) { background: #ffd35f; }
 .btn.small { padding: 9px 14px; font-size: 13px; }
