@@ -108,7 +108,9 @@ from it, so a strafe is not slowly dragged back into a forward run.
 Movement: running, sprinting and jumping, with coyote time, jump buffering,
 consistent full-height jumps, air control, automatic step-up, vaulting over
 waist-high obstacles, and a ledge grab when a jump lands just short of a chest-high
-ledge. On top of that come two movement skills:
+ledge. A soft shadow on the ground straight below you shows where a jump will come
+down. The sun's own shadow falls well off to the side, and the Low preset has none.
+On top of that come two movement skills:
 
 | Skill | How it works | Where it's useful |
 |---|---|---|
