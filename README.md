@@ -2,10 +2,12 @@
 
 A 1–3 player co-op 3D parkour escape game for desktop browsers. Runners start on a
 landing pad high above a sea of clouds and have to reach the beacon on the Spire at
-the far side of an abandoned sky-industrial complex. There's no combat. You get
-there by running, sliding, grapple-swinging, riding zip lines and launch pads,
-timing laser gates, fighting conveyor belts, picking a route and staying out of
-sight, with the odd power crate to help.
+the far side of an abandoned sky-industrial complex. There's no combat on the way.
+You get there by running, sliding, grapple-swinging, riding zip lines and launch
+pads, timing laser gates, fighting conveyor belts, picking a route and staying out
+of sight, with the odd power crate to help. The beacon itself is a door: it pulls
+the whole team into a storm, where each runner picks one superpower and the team
+fights [the Warden](#the-warden), a four-legged war machine that guards the way on.
 
 > Keep moving. Don't fall. Don't get seen. And if you do get seen, **run**.
 
@@ -98,6 +100,9 @@ What a static host can and cannot do:
 | `Esc` | Pause menu / release the mouse (on your own, the pause menu can also restart the run) |
 | `Space` / `E` while dead or finished | Cycle the spectated teammate |
 | `E` near Viktor | Talk to him (see [The portal](#the-portal)) |
+| `1`–`6` (the Warden's arena) | Choose your power: on arrival, and again whenever you are down |
+| Left mouse (the Warden's arena) | Use your power (lightning: hold) |
+| Mouse wheel + left mouse (the arena, choosing) | Run along the power cards and pick one |
 | Left mouse | Take off / land, once Viktor has given you flight |
 | `Space` / `Ctrl` (or `C`) in flight | Climb / sink. `W` flies wherever the camera looks, `Shift` flies faster |
 
@@ -264,6 +269,109 @@ To try it without waiting for the one run in ten: enter **vk3** as your runner
 name (any capitals) and every run gets a portal, standing on the landing pad
 straight ahead of you and opening a second after "Go!". In a team it is enough
 for one player to be called that.
+
+## The Warden
+
+Reaching the beacon on the Spire no longer ends the run. The beacon tears open
+into a storm portal three times the portal's size, the sky turns, fog rolls in and
+lightning walks toward it; two and a half seconds later the light takes the whole
+team, including anyone who fell on the way, and they stand at the arena's own
+beacon: a storm door with a column of light over it, at the edge of the Anvil.
+Solo offline plays exactly the same fight (the same server code runs in the page).
+
+### The arena
+
+The Anvil is a round arena 90 m across floating in the storm, built for moving
+through, not for decoration:
+
+- **The floor** (r 30), a hexagonal forge plate whose seams glow with the machine's
+  heat, with low cover walls.
+- **Four conductor pillars** (r 17, 13 m tall): cover from the beam, launch pads and
+  anchors to their tops, and a charge that runs into one crashes and staggers.
+- **The moat**, a 3 m drop between the floor and the rampart. Falling in is death.
+- **The rampart** (r 33–44, 5 m up) with three gaps to jump or grapple across and
+  four ramps down to the floor.
+- **Four perches** at 14 m, reached by launch pads from the rampart, each with a zip
+  line back across the whole arena.
+- **The crown**, a halo over the middle with four grapple anchors for swinging over
+  the machine, chains and cables hanging from it.
+- **Explosive canisters** on stands (they come back 22 s after they go off), and the
+  Warden's own armour plates, which it sheds as it breaks.
+
+Everything the course taught still works: sprint, slide, dash, flip, climb,
+grapple, zip lines and pads. The Warden's hull and head are solid, so you can
+climb onto its back and ride it.
+
+### The powers
+
+Each runner picks one of six, with `1`–`6`, and uses it with the left mouse
+button. Before the Warden wakes you can change your mind as often as you like;
+after that, only while you are down. There are no roles or combos: every power
+can win the fight alone, and any mix works in a team.
+
+| Power | The button | Also |
+|---|---|---|
+| **Kinetic Force** | A lunging punch that throws bots, canisters and plates; in the air, a meteor slam whose shockwave grows with the fall | Batting orbs back at the machine |
+| **Telekinesis** | Grab the bot, canister, plate or mortar shell under the crosshair, then throw it; with nothing to grab, a push that turns orbs round | A held bot is crushed while you hold it |
+| **Lightning** | Hold for rapid bolts that chain to bots and set off canisters | Heat builds (overheat: a pause); every 25 bolts into the Warden the storm answers with a thunderbolt |
+| **Gravity** | Throw a well that drags bots and loose things in, crushes them, grinds the Warden and bursts | Higher jumps; hold `Space` to float down |
+| **Super Speed** | A flash strike through everything on a line; a hit chains into the next strike almost at once | You run faster |
+| **Teleport** | Blink to the crosshair (three charges), ripping space at both ends | Coming out behind it or on its back hurts most |
+
+Aim is the centre of the screen with a gentle lock: whatever is nearest the
+crosshair, in range and in sight is bracketed, and the power goes for it.
+Everything you do happens on your own screen at once (the lunge, the blink, the
+bolt, the sound); the server decides what it hit, rewinding the Warden to where
+you saw it.
+
+### The machine
+
+The Warden is 12 m tall: a hull on four legs that plant and step, a head with one
+eye, two cannons, a hive on its back that launches bots, and its core, the weak
+point, on top. It is never scripted. After each attack it scores what it could do
+next from what the runners are doing (who is close, who is high up, who is out of
+sight, who is riding it, how many bots are out, what it did last), with a little
+chance, so no two fights open the same way:
+
+| Ability | Tell | What to do |
+|---|---|---|
+| Stomp | Legs glow, a ring of light on the floor | Jump the shockwave as it rolls out |
+| Beam | The eye charges white, a thin aiming line | Slide under it, jump it, or put a pillar between you; hitting the eye while it charges makes it flinch |
+| Mortar | Cannons rise, markers fill on the ground | Move; telekinesis can catch a shell and send it back |
+| Deploy | The hive opens with a siren | Skitters (ground, pounce) and wasps (fly, shoot orbs) join the fight, never more than the cap for the team's size |
+| Charge | A lane of chevrons | Get out of the lane, or bait it into a pillar |
+| Swipe | Its arm draws an arc | Stay out of mid-height near it, or get above it |
+| Shock | The hull crackles blue | Jump off its back |
+
+Damage fills its poise; when poise breaks it **staggers**, sinks low, and its core
+opens (the core takes 2.5× then, the eye and head more too). At half health it goes
+into **overdrive**: plates blow off, it moves and attacks faster, and more bots come.
+Its health bar sits across the top of the screen with the poise under it.
+
+### Down, not out
+
+Runners have 100 health that comes back after four seconds without a hit. At zero
+you go down: the camera circles your body while you can change your power, and four
+seconds later you are back at the arena's beacon with two seconds of protection.
+The fight ends when the Warden falls; the results show the fight time (against
+this browser's best), everyone's damage, bots destroyed and times down, with
+**Fight again** (`R`) straight back into the arena. Once a browser has been
+through the beacon, the lobby offers **Straight to the Warden** as well.
+
+### How it is built
+
+`shared/sim/fight.ts` runs the fight on the server (and in the page offline):
+`warden.ts` is the machine's body, hit spheres and utility AI, and its hazards are
+pure functions of the numbers in each ability's event, so every client draws exactly
+what the server tests runners against. `bots.ts` has the bots, the loose things,
+orbs and wells. The arena is its own level and collision world
+(`shared/level/arena.ts`); the Warden's hull and head are "puppet" colliders the
+fight moves each tick. On the client, `src/game/Arena.ts` follows the stages, draws
+the fight from snapshots and events and turns clicks into powers
+(`src/game/Powers.ts`); the machine, the bots, the arena and every effect are built
+from primitives and shaders like the rest of the game (`src/render/WardenModel.ts`,
+`BotViews.ts`, `ArenaView.ts`, `ArenaFx.ts`), and all of its sound and its battle
+music are made on the spot (`src/audio/ArenaSounds.ts`, `BattleMusic.ts`).
 
 ## The level
 
@@ -518,7 +626,7 @@ scripts/                headless test and design tools
 ## Tests & tools
 
 ```bash
-npm test               # map validation + route bot + enemy AI scenarios + obstacle authority checks + multiplayer
+npm test               # map validation + route bot + enemy AI scenarios + obstacle authority checks + the Warden + multiplayer
 npm run check:map      # validates gaps against measured jump limits, renders dist/map.svg
 npm run test:routes    # a bot drives the real controller along every route start -> finish
 npm run test:ai        # detect / chase / kill / lose-target scenarios for each enemy type
@@ -537,9 +645,16 @@ npm run test:moves     # movement: climb reach/limit/cooldown, hooking from a st
 #                        (it also prints slide length and tunnel clearance; SWEEP=1 adds more swing geometries)
 # clumsy-player check: the bot takes off 1.2 m before every edge
 SLOPPY=1.2 npx tsx scripts/bot-routes.ts
+npm run test:boss      # the Warden against the real Room: the beacon pulling the team through (the dead too),
+#                        choosing and waking, dying and coming back at the beacon, each power against the Warden,
+#                        bots and loose things, every ability and stagger, overdrive, the bot cap, victory; then
+#                        whole fights by headless fighters: every power wins solo, teams of 2 and 3 win, and no
+#                        two fights open the same way (QUICK=1 skips the whole fights)
 npm run test:server    # two headless clients against a server it starts itself: room codes, the
 #                        ready gate, a synchronised countdown, snapshots, a server-judged fall, a
-#                        rejected teleport, the end of a match and restarting from the results.
+#                        rejected teleport, the end of a match and restarting from the results; then
+#                        through the beacon together: powers chosen, a power hurting the Warden over
+#                        the wire, a death in the arena and the respawn at its beacon.
 #                        WS=ws://host/ws points it at a server that is already running instead.
 npm run typecheck
 npx tsx scripts/portal-spots.ts   # re-find the portal's spots after moving the course (DRY=1: report only)
@@ -570,6 +685,7 @@ debug commands, which is the default in dev.
 | `F6` | Enemy vision cones (range, FOV, close-range sense radius) |
 | `F7` | God mode (enemies and lasers can't kill you; falling still does) |
 | `F8` | Restart the match (host) |
+| `F10` | On the course: open the beacon now. In the arena: the Warden to 51% (`Shift`: 3%) |
 | `1`–`0` | With the overlay open: teleport to section waypoints (`Shift` adds 10) |
 
 The settings menu has an FPS counter for normal play.
@@ -597,6 +713,11 @@ The settings menu has an FPS counter for normal play.
 - Enemy vision runs at 10–12 Hz with staggered timers, and raycasts walk a uniform grid.
 - A height-fog shader patch fades everything below the course into haze, which
   sells the drop without extra geometry.
+- The Warden's arena is its own level, drawn instead of the course: about 320 draw calls
+  and 52k triangles in a busy view, with the Warden (77 of them), bots, loose things and
+  effects. The fight's client update takes about 0.2 ms a frame; its effects are pooled
+  (rings, fireballs, rifts, afterimages, markers) and every bolt, beam, tether and streak
+  is one camera-facing ribbon mesh.
 - The portal is 11 draw calls, all animated in shaders (the swirl, the sparks, the
   orbiting shards and the light column cost nothing on the CPU). The white room is
   its own small scene: about 194 draw calls and 131k triangles with Viktor in view,
