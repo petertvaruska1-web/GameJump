@@ -9,7 +9,7 @@ import { zoneAt } from '../../shared/hazards';
 import { clamp, damp } from '../../shared/math';
 import { Anim, type MoveInput } from '../../shared/physics/character';
 import { CollisionWorld, type RayHit } from '../../shared/physics/world';
-import { EState, PROTOCOL_VERSION, Status, type GameEvent, type LobbyPlayer, type Phase, type S2C } from '../../shared/protocol';
+import { EState, PROTOCOL_VERSION, Status, type EnemySnap, type GameEvent, type LobbyPlayer, type Phase, type PlayerSnap, type S2C } from '../../shared/protocol';
 import { AudioEngine } from '../audio/Audio';
 import { Debug } from '../debug/Debug';
 import { Input } from '../input/Input';
@@ -677,7 +677,7 @@ export class Game {
     this.ui.closePause();
   }
 
-  private onSnapshot(ts: number, ps: [number, number, number, number, number, number, number][], es: [number, number, number, number, number, number, number, number][]) {
+  private onSnapshot(ts: number, ps: PlayerSnap[], es: EnemySnap[]) {
     for (const s of ps) {
       if (s[0] === this.meId) continue;
       let rp = this.remotes.get(s[0]);

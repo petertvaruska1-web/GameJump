@@ -26,7 +26,11 @@ export type MatKey =
   | 'launch'
   | 'invisible';
 
-export type BoxKind = 'static' | 'mover' | 'crumble' | 'sweeper';
+/**
+ * 'puppet': a solid that something else moves (the Warden's hull): its
+ * transform is set from outside every update rather than from `move`.
+ */
+export type BoxKind = 'static' | 'mover' | 'crumble' | 'sweeper' | 'puppet';
 
 export interface MoveDef {
   /** Mover: position = base + offset * wave(t). */

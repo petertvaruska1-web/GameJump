@@ -5,11 +5,11 @@
 // lines and external pushes (wind, sweepers). And, for a runner Viktor has
 // blessed, free flight.
 
-import { CLIMB, CORPSE, DASH, FLIP, FLY, GRAPPLE, LAUNCH, PHYS, PLAYER, POWER, SLIDE, ZIP } from '../constants';
+import { CLIMB, CORPSE, DASH, FLIP, FLY, GRAPPLE, LAUNCH, PHYS, PLAYER, POW, POWER, SLIDE, ZIP } from '../constants';
 import { zipGrab, zipLength } from '../hazards';
 import type { GrappleDef, LaunchDef, ZiplineDef } from '../level/types';
 import { approachAngle, clamp, damp, lerp, v3, wrapAngle, type Vec3 } from '../math';
-import type { Collider, CollisionWorld, GroundHit, RayHit } from './world';
+import { puppetDelta, type Collider, type CollisionWorld, type GroundHit, type RayHit } from './world';
 
 export interface CharBody {
   pos: Vec3;
@@ -40,6 +40,7 @@ const rayTmp: RayHit = { dist: 0, c: null };
 
 /** Displacement of a point carried by a kinematic collider since its last update. */
 export function carryDelta(c: Collider, x: number, z: number, out: Vec3): Vec3 {
+  if (c.kind === 'puppet') return puppetDelta(c, x, z, out);
   if (c.kind === 'sweeper') {
     const d = c.ry - c.pry;
     const px = c.def.p[0], pz = c.def.p[2];
@@ -223,6 +224,12 @@ export const Anim = {
   Fly: 16,
   /** Gone through the portal: not on the course at all until they come back. */
   Away: 17,
+  /** A punch's lunge (kinetic force). */
+  Lunge: 18,
+  /** Diving fist-first at the ground (kinetic force in the air). */
+  Slam: 19,
+  /** A flash strike's streak (super speed). */
+  Flash: 20,
 } as const;
 export type Anim = (typeof Anim)[keyof typeof Anim];
 
@@ -250,6 +257,10 @@ export interface MotorEvents {
   dashed: number;
   /** Took off (1) or stopped flying (-1) this step. */
   flew: number;
+  /** A slam hit the ground this step, this fast (m/s; 0 none). */
+  slammed: number;
+  /** A flash strike ended this step (from flashFrom to where the body is now). */
+  flashed: boolean;
 }
 
 export class PlayerMotor {
@@ -271,8 +282,36 @@ export class PlayerMotor {
   readonly platVel = v3();
   readonly events: MotorEvents = {
     jumped: false, landed: false, impact: 0, mantled: false, surface: '', launched: -1, zipOn: -1, zipOff: -1,
-    slid: false, hooked: -1, unhooked: false, flipped: false, dashed: 0, flew: 0,
+    slid: false, hooked: -1, unhooked: false, flipped: false, dashed: 0, flew: 0, slammed: 0, flashed: false,
   };
+
+  // ---------------------------------------------------------------- superpowers (the arena)
+  /** Passives: run / sprint speed, acceleration and take-off multipliers (1 = a plain runner). */
+  runScale = 1;
+  sprintScale = 1;
+  accelScale = 1;
+  jumpScale = 1;
+  /** Gravity power: holding jump on the way down floats you. */
+  floaty = false;
+  /** Kinetic punch: a short lunge along the aim that owns your horizontal velocity. */
+  lunging = false;
+  private lungeT = 0;
+  private lungeTime = 0;
+  private lungeX = 0;
+  private lungeZ = 0;
+  private lungeSpeed = 0;
+  /** Kinetic slam: a dive at the ground. */
+  slamming = false;
+  private slamSpeed = 0;
+  /** Flash strike: a straight streak at a speed no runner can reach. */
+  flashing = false;
+  private flashT = 0;
+  private flashDur = 0;
+  private flashSpeed = 0;
+  private readonly flashDir = v3();
+  private flashKeep = 0;
+  /** Where the last flash strike started. */
+  readonly flashFrom = v3();
 
   /** Sliding: low body, locked direction, decaying speed. */
   sliding = false;
@@ -386,6 +425,9 @@ export class PlayerMotor {
     this.dashSide = 0;
     this.airDashUsed = false;
     this.flying = false;
+    this.lunging = false;
+    this.slamming = false;
+    this.flashing = false;
   }
 
   step(world: CollisionWorld, dt: number, inp: MoveInput, windX = 0, windZ = 0) {
@@ -394,7 +436,7 @@ export class PlayerMotor {
     ev.jumped = false; ev.landed = false; ev.impact = 0; ev.mantled = false;
     ev.launched = -1; ev.zipOn = -1; ev.zipOff = -1;
     ev.slid = false; ev.hooked = -1; ev.unhooked = false;
-    ev.flipped = false; ev.dashed = 0; ev.flew = 0;
+    ev.flipped = false; ev.dashed = 0; ev.flew = 0; ev.slammed = 0; ev.flashed = false;
     if (this.flipping) { this.flipT += dt; if (this.flipT >= FLIP.TIME) this.flipping = false; }
     if (this.zipCooldown > 0) this.zipCooldown -= dt;
     if (this.slideCooldown > 0) this.slideCooldown -= dt;
@@ -408,7 +450,7 @@ export class PlayerMotor {
       carryDelta(b.ground, b.pos.x, b.pos.z, this.carry);
       b.pos.x += this.carry.x; b.pos.y += this.carry.y; b.pos.z += this.carry.z;
       this.platVel.x = this.carry.x / dt; this.platVel.y = this.carry.y / dt; this.platVel.z = this.carry.z / dt;
-      if (b.ground.kind === 'sweeper') this.yaw += b.ground.ry - b.ground.pry;
+      if (b.ground.kind === 'sweeper' || b.ground.kind === 'puppet') this.yaw += b.ground.ry - b.ground.pry;
     } else if (b.grounded && b.ground && b.ground.def.belt) {
       const bs = b.ground.def.belt;
       this.platVel.x = b.ground.sin * bs; this.platVel.y = 0; this.platVel.z = b.ground.cos * bs;
@@ -419,6 +461,7 @@ export class PlayerMotor {
 
     if (inp.flyToggle && this.canFly) this.toggleFly();
     if (this.flying) { this.stepFly(world, dt, inp, windX, windZ); return; }
+    if (this.flashing) { this.stepFlash(world, dt); return; }
 
     if (this.mantleActive) { this.stepMantle(world, dt); return; }
     if (this.zip) { this.stepZip(dt, inp); return; }
@@ -439,8 +482,15 @@ export class PlayerMotor {
     if (this.landSlow > 0) this.landSlow -= dt;
 
     const boostK = this.boost ? POWER.BOOST_SPEED : 1;
-    const baseSpeed = (inp.sprint ? PLAYER.SPRINT_SPEED : PLAYER.RUN_SPEED) * boostK;
+    const baseSpeed = (inp.sprint ? PLAYER.SPRINT_SPEED * this.sprintScale : PLAYER.RUN_SPEED * this.runScale) * boostK;
     const v = b.vel;
+
+    // A punch's lunge: like a dash, but forward, and over the moment it is thrown
+    if (this.lunging) {
+      this.lungeT += dt;
+      if (this.lungeT >= this.lungeTime || !b.grounded) this.endLunge();
+      else { v.x = this.lungeX * this.lungeSpeed; v.z = this.lungeZ * this.lungeSpeed; }
+    }
 
     // Dash: a short sidestep that owns your horizontal velocity while it runs.
     // No cooldown on the ground; in the air you get one per jump.
@@ -449,7 +499,8 @@ export class PlayerMotor {
       if (this.dashT >= DASH.TIME || b.grounded === this.dashAir) this.endDash();
       else { v.x = this.dashDirX * DASH.SPEED + this.dashKeepX; v.z = this.dashDirZ * DASH.SPEED + this.dashKeepZ; }
     } else if ((inp.dashX || inp.dashZ) && (b.grounded || !this.airDashUsed)
-      && !this.sliding && !this.grapple && !this.zip && !this.flipping && !this.mantleActive) {
+      && !this.sliding && !this.grapple && !this.zip && !this.flipping && !this.mantleActive && !this.slamming) {
+      if (this.lunging) this.endLunge();
       this.startDash(inp.dashX ?? 0, inp.dashZ ?? 0);
     }
 
@@ -486,8 +537,11 @@ export class PlayerMotor {
       this.endSlide(); // ran off an edge
     }
 
-    if (this.dashing || this.sliding) {
-      // velocity already set by the dash / slide
+    if (this.dashing || this.sliding || this.lunging) {
+      // velocity already set by the dash / slide / lunge
+    } else if (this.slamming) {
+      // diving: straight down, most of the sideways speed bled off
+      v.x -= v.x * damp(4, dt); v.z -= v.z * damp(4, dt);
     } else if (b.grounded) {
       let speed = baseSpeed * mag;
       if (this.landSlow > 0) speed *= 0.8;
@@ -495,7 +549,7 @@ export class PlayerMotor {
       let accel = PLAYER.GROUND_ACCEL;
       if (mag < 1e-3) accel = PLAYER.GROUND_DECEL;
       else if (v.x * tx + v.z * tz < 0) accel = PLAYER.GROUND_TURN_ACCEL;
-      approach2(v, tx, tz, accel * dt);
+      approach2(v, tx, tz, accel * this.accelScale * dt);
     } else if (this.grapple) {
       // swinging: the move keys push along the arc (the part of the input across
       // the rope), so pumping builds the swing instead of fighting the rope
@@ -521,7 +575,7 @@ export class PlayerMotor {
     } else if (mag > 1e-3) {
       const cur = Math.hypot(v.x, v.z);
       const speed = Math.max(baseSpeed, cur) * mag;
-      approach2(v, dirX * speed, dirZ * speed, PLAYER.AIR_ACCEL * dt);
+      approach2(v, dirX * speed, dirZ * speed, PLAYER.AIR_ACCEL * this.accelScale * dt);
     } else {
       const k = 1 - PLAYER.AIR_DRAG * dt;
       v.x *= k; v.z *= k;
@@ -534,19 +588,20 @@ export class PlayerMotor {
     // take-off and landing. On the way down with the ground close the press is
     // left alone, so it still buffers into a jump the moment you land.
     if (this.jumpBuffer > 0 && !b.grounded && this.coyote <= 0 && !this.flipping && !this.flippedThisAir
-      && !this.zip && !this.grapple && !this.sliding && !this.dashing
+      && !this.zip && !this.grapple && !this.sliding && !this.dashing && !this.slamming
       && !(v.y < -2 && world.groundBelow(b.pos.x, b.pos.y, b.pos.z, FLIP.NEAR_GROUND) < FLIP.NEAR_GROUND)) {
       this.startFlip();
     }
     const slideJumpOk = !this.sliding || this.headroom(world, 0.35);
-    if (this.jumpBuffer > 0 && !this.dashing && (b.grounded || this.coyote > 0) && slideJumpOk) {
+    if (this.jumpBuffer > 0 && !this.dashing && !this.slamming && (b.grounded || this.coyote > 0) && slideJumpOk) {
+      if (this.lunging) this.endLunge();
       if (this.sliding) {
         // jumping out of a slide keeps its speed, up to a little more than a sprint
         const sp = Math.min(this.slideSpeed, SLIDE.JUMP_MAX * boostK);
         v.x = this.slideDirX * sp; v.z = this.slideDirZ * sp;
         this.endSlide();
       }
-      v.y = PLAYER.JUMP_VELOCITY * (this.boost ? POWER.BOOST_JUMP : 1);
+      v.y = PLAYER.JUMP_VELOCITY * (this.boost ? POWER.BOOST_JUMP : 1) * this.jumpScale;
       // Inherit platform motion
       v.x += this.platVel.x; v.z += this.platVel.z;
       if (this.platVel.y > 0) v.y += this.platVel.y;
@@ -558,9 +613,14 @@ export class PlayerMotor {
     if (this.jumpCutReady && !inp.jumpHeld && v.y > 0) { v.y *= PLAYER.JUMP_CUT; this.jumpCutReady = false; }
     if (v.y <= 0) this.jumpCutReady = false;
 
-    // Gravity
-    const g = PHYS.GRAVITY * (v.y < 0 ? PHYS.FALL_GRAVITY_MULT : 1);
-    v.y = Math.max(v.y - g * dt, -PHYS.MAX_FALL_SPEED);
+    // Gravity (a slam dives at a steady speed; the gravity power floats you down while jump is held)
+    if (this.slamming) v.y = -this.slamSpeed;
+    else {
+      const float = this.floaty && v.y < 0 && inp.jumpHeld && !this.grapple;
+      const g = PHYS.GRAVITY * (v.y < 0 ? PHYS.FALL_GRAVITY_MULT : 1) * (float ? POW.gravity.FLOAT : 1);
+      v.y = Math.max(v.y - g * dt, -PHYS.MAX_FALL_SPEED);
+      if (float && v.y < -POW.gravity.FLOAT_MAX_FALL) v.y += (-POW.gravity.FLOAT_MAX_FALL - v.y) * damp(7, dt);
+    }
 
     // External (wind / knockback)
     const e = b.ext;
@@ -625,7 +685,12 @@ export class PlayerMotor {
 
     if (info.landed) {
       ev.landed = true; ev.impact = info.impact;
-      if (info.impact > PLAYER.HARD_LANDING_SPEED) this.landSlow = PLAYER.HARD_LANDING_SLOW;
+      if (this.slamming) {
+        // a slam lands on purpose: the shockwave is the point, not a stumble
+        this.slamming = false;
+        ev.slammed = info.impact;
+        v.x = v.z = 0;
+      } else if (info.impact > PLAYER.HARD_LANDING_SPEED) this.landSlow = PLAYER.HARD_LANDING_SLOW;
       this.landAnim = Math.min(1, info.impact / 20);
     }
     if (b.grounded) {
@@ -641,7 +706,7 @@ export class PlayerMotor {
       if (pad && !jumped) { this.launch(pad, b.ground!.id); return; }
     } else {
       this.airTime += dt;
-      if (!this.grapple) this.tryZip(world);
+      if (!this.grapple && !this.slamming) this.tryZip(world);
       if (this.zip) return;
     }
 
@@ -649,7 +714,7 @@ export class PlayerMotor {
     // for anything up to waist height, and the slower climb above that (in the air
     // this is what catches you when a jump comes up short).
     let pushing = false;
-    if (mag > 0.3 && !this.sliding && !this.grapple && !this.flipping && !this.dashing) {
+    if (mag > 0.3 && !this.sliding && !this.grapple && !this.flipping && !this.dashing && !this.slamming && !this.lunging) {
       const toward = v.x * dirX + v.z * dirZ;
       if (!b.grounded && v.y < 2.5 && toward > -0.5) {
         // in the air there is no wait: a jump that comes up short grabs the lip
@@ -794,6 +859,128 @@ export class PlayerMotor {
     this.anim = Anim.Fly;
   }
 
+  // ---------------------------------------------------------------- superpower moves
+
+  /** Can a power move start now (not mid-climb, not in flight, alive)? */
+  get free() { return !this.mantleActive && !this.flying && !this.flashing; }
+
+  /**
+   * A punch's lunge: `speed` along (dx, dz) for `time`, owning your horizontal
+   * speed like a dash does, then easing out at no more than a sprint.
+   */
+  startLunge(dx: number, dz: number, speed: number, time: number) {
+    const l = Math.hypot(dx, dz);
+    if (l < 1e-3 || !this.free) return;
+    if (this.sliding) this.endSlide();
+    this.dashing = false;
+    this.lunging = true;
+    this.lungeT = 0; this.lungeTime = time; this.lungeSpeed = speed;
+    this.lungeX = dx / l; this.lungeZ = dz / l;
+    this.yaw = Math.atan2(this.lungeX, this.lungeZ);
+    this.yawVel = 0;
+    this.anim = Anim.Lunge;
+  }
+
+  private endLunge() {
+    this.lunging = false;
+    const v = this.body.vel, hs = Math.hypot(v.x, v.z), cap = PLAYER.SPRINT_SPEED * this.sprintScale;
+    if (hs > cap) { const k = cap / hs; v.x *= k; v.z *= k; }
+  }
+
+  /** Meteor slam: from the air, dive straight at the ground at `speed`. */
+  startSlam(speed: number) {
+    const b = this.body;
+    if (b.grounded || !this.free) return;
+    if (this.zip) { this.lastZip = this.zip.id; this.zipCooldown = ZIP.REGRAB; this.zip = null; this.events.zipOff = this.lastZip; }
+    if (this.grapple) this.unhook(false);
+    this.dashing = false; this.flipping = false; this.launched = false; this.lunging = false;
+    this.slamming = true;
+    this.slamSpeed = speed;
+    b.vel.y = -speed;
+    this.jumpBuffer = 0;
+    this.anim = Anim.Slam;
+  }
+
+  /**
+   * Flash strike: a straight streak along (dx, dy, dz) for `dist` metres at
+   * `speed`, stopped by walls and floors. You come out of it running the way it
+   * went, as fast as you were going before (a sprint at least).
+   */
+  startFlash(dx: number, dy: number, dz: number, dist: number, speed: number) {
+    const b = this.body, v = b.vel;
+    const l = Math.hypot(dx, dy, dz);
+    if (l < 1e-3 || !this.free) return;
+    if (this.zip) { this.lastZip = this.zip.id; this.zipCooldown = ZIP.REGRAB; this.zip = null; }
+    if (this.grapple) this.unhook(false);
+    if (this.sliding) this.endSlide();
+    this.dashing = false; this.flipping = false; this.lunging = false; this.slamming = false; this.launched = false;
+    this.flashing = true;
+    this.flashT = 0;
+    this.flashSpeed = speed;
+    this.flashDur = dist / speed;
+    this.flashDir.x = dx / l; this.flashDir.y = dy / l; this.flashDir.z = dz / l;
+    this.flashKeep = Math.max(Math.hypot(v.x, v.z), PLAYER.SPRINT_SPEED);
+    this.flashFrom.x = b.pos.x; this.flashFrom.y = b.pos.y; this.flashFrom.z = b.pos.z;
+    b.ext.x = b.ext.y = b.ext.z = 0;
+    this.yaw = Math.atan2(this.flashDir.x, this.flashDir.z);
+    this.yawVel = 0;
+    this.anim = Anim.Flash;
+  }
+
+  private stepFlash(world: CollisionWorld, dt: number) {
+    const b = this.body, v = b.vel, d = this.flashDir;
+    this.flashT += dt;
+    // four sub-steps: at this speed a single step would carry the body clean through a railing
+    const sub = 4, h = dt / sub;
+    let blocked = false;
+    for (let i = 0; i < sub; i++) {
+      v.x = d.x * this.flashSpeed; v.y = d.y * this.flashSpeed; v.z = d.z * this.flashSpeed;
+      const x0 = b.pos.x, z0 = b.pos.z;
+      const info = stepBody(world, b, h, d.y > 0.05, this.info);
+      const want = Math.hypot(d.x, d.z) * this.flashSpeed * h;
+      if (want > 0.05 && info.wall && Math.hypot(b.pos.x - x0, b.pos.z - z0) < want * 0.4) { blocked = true; break; }
+      if (d.y > 0.05 && b.vel.y <= 0) { blocked = true; break; } // a ceiling
+    }
+    this.airTime = 0;
+    this.lastGroundY = b.grounded ? b.pos.y : Math.max(this.lastGroundY, b.pos.y);
+    this.anim = Anim.Flash;
+    if (blocked || this.flashT >= this.flashDur) this.endFlash();
+  }
+
+  private endFlash() {
+    const b = this.body, v = b.vel, d = this.flashDir;
+    this.flashing = false;
+    const hl = Math.hypot(d.x, d.z) || 1;
+    v.x = (d.x / hl) * this.flashKeep; v.z = (d.z / hl) * this.flashKeep;
+    // an air streak leaves you hanging for a beat before gravity takes over again
+    v.y = b.grounded ? 0 : Math.max(0, d.y * 4);
+    this.coyote = 0;
+    this.flippedThisAir = false;
+    this.airDashUsed = false;
+    this.events.flashed = true;
+  }
+
+  /**
+   * Blink: straight to (x, y, z), keeping your speed along the way you were
+   * going, as if space had folded under you. A fast fall is caught, so a blink
+   * out of the void is a rescue.
+   */
+  blink(x: number, y: number, z: number) {
+    const b = this.body;
+    if (this.zip) { this.lastZip = this.zip.id; this.zipCooldown = ZIP.REGRAB; this.zip = null; }
+    if (this.grapple) this.unhook(false);
+    if (this.sliding) this.endSlide();
+    this.mantleActive = false; this.dashing = false; this.lunging = false; this.slamming = false; this.flashing = false;
+    this.launched = false;
+    b.pos.x = x; b.pos.y = y; b.pos.z = z;
+    b.vel.y = Math.max(b.vel.y, -4);
+    b.grounded = false; b.ground = null;
+    this.lastGroundY = y;
+    this.coyote = 0;
+    this.flippedThisAir = false;
+    this.airDashUsed = false;
+  }
+
   /** Room to stand up (or to jump, with `extra`) above the sliding body. */
   private headroom(world: CollisionWorld, extra = 0): boolean {
     const b = this.body;
@@ -893,8 +1080,8 @@ export class PlayerMotor {
       v.x = this.dashKeepX + this.dashDirX * DASH.SPEED * DASH.AIR_RESIDUAL;
       v.z = this.dashKeepZ + this.dashDirZ * DASH.SPEED * DASH.AIR_RESIDUAL;
     } else {
-      const hs = Math.hypot(v.x, v.z);
-      if (hs > PLAYER.SPRINT_SPEED) { const k = PLAYER.SPRINT_SPEED / hs; v.x *= k; v.z *= k; }
+      const hs = Math.hypot(v.x, v.z), cap = PLAYER.SPRINT_SPEED * this.sprintScale;
+      if (hs > cap) { const k = cap / hs; v.x *= k; v.z *= k; }
     }
   }
 
@@ -914,6 +1101,7 @@ export class PlayerMotor {
     world.raycast(hx, hy, hz, dx / d, dy / d, dz / d, d - 0.5, false, rayTmp);
     if (rayTmp.c) return;
     if (this.sliding) this.endSlide();
+    this.slamming = false;
     this.grapple = g;
     this.ropeLen = Math.max(GRAPPLE.MIN_ROPE, d);
     this.hookLen = this.ropeLen;
@@ -1047,6 +1235,8 @@ export class PlayerMotor {
   private updateAnim(hs: number, sprint: boolean) {
     const b = this.body;
     if (this.mantleActive) this.anim = Anim.Mantle;
+    else if (this.slamming) this.anim = Anim.Slam;
+    else if (this.lunging) this.anim = Anim.Lunge;
     else if (this.dashing) this.anim = this.dashSide < 0 ? Anim.DashL : Anim.DashR;
     else if (this.flipping) this.anim = Anim.Flip;
     else if (this.zip) this.anim = Anim.Zip;

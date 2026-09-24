@@ -403,6 +403,169 @@ export const PORTAL = {
   MIN_STAY: 5,
 };
 
+// ======================================================================= stage 2
+// Reaching the beacon opens it into a portal: the whole team goes through into
+// the Warden's arena, each runner picks one superpower, and the fight is on.
+
+/** The arena: its own little world, far beyond the Spire and high above the clouds. */
+export const ARENA = {
+  /** Centre of the arena floor (the floor's top is at y). */
+  x: 0, y: 140, z: 1500,
+  /** Someone touched the beacon: everyone is pulled through this many seconds later. */
+  GATE_TIME: 2.6,
+  /** The Warden wakes once everyone has a power, or this long after the team arrives. */
+  WAKE_AFTER: 25,
+  /** Seconds between going down and standing at the arena's beacon again. */
+  RESPAWN: 4,
+  /** Nothing can hurt you for this long after you respawn. */
+  PROTECT: 2,
+  /** Falling this far below the arena floor is falling off the world. */
+  KILL_DROP: 45,
+  /** Server's horizontal speed limit in the arena (super speed and knockback, with slack). */
+  MAX_CLIENT_SPEED: 22,
+};
+
+/** A runner's health in the arena (the course itself stays one hit, one death). */
+export const PHP = {
+  MAX: 100,
+  /** Health back per second, once you have not been hurt for REGEN_DELAY seconds. */
+  REGEN: 9,
+  REGEN_DELAY: 4,
+};
+
+export type SuperPower = 'kinetic' | 'telekinesis' | 'lightning' | 'gravity' | 'speed' | 'teleport';
+/** Snapshot order (index + 1 on the wire, 0 = none chosen yet). */
+export const SUPERS: SuperPower[] = ['kinetic', 'telekinesis', 'lightning', 'gravity', 'speed', 'teleport'];
+
+/**
+ * The six powers. Each is one ability on the left mouse button whose behaviour
+ * follows what you are doing (on the ground or in the air, holding something or
+ * not), never a kit of separate moves. Server and client read the same numbers:
+ * the client to play it at once, the server to decide what it hit.
+ */
+export const POW = {
+  kinetic: {
+    /** Punch: a short lunge along the aim, then a cone that hits everything in front of you. */
+    COOLDOWN: 0.5, LUNGE_SPEED: 17, LUNGE_TIME: 0.13, REACH: 4.6, CONE: 0.85,
+    DAMAGE: 26, BOT_DAMAGE: 55, POISE: 13, KNOCK: 17, LIFT: 6,
+    /** Meteor slam (press in the air): a dive whose landing is a shockwave that grows with the drop. */
+    SLAM_SPEED: 30, SLAM_RADIUS: 5.8, SLAM_BASE: 22, SLAM_PER_SPEED: 2.1, SLAM_MAX: 95, SLAM_POISE: 26, SLAM_COOLDOWN: 1.0,
+    /** Objects (scrap, canisters) punched away fly off at this speed. */
+    BAT_SPEED: 30,
+  },
+  telekinesis: {
+    /** Between grabs, and after a throw (a throw needs a moment to wind up the next). */
+    COOLDOWN: 0.3, THROW_COOLDOWN: 0.6, RANGE: 28, LOCK: 0.2,
+    /** A held bot is crushed this fast; a held thing drops by itself after HOLD seconds. */
+    CRUSH: 12, HOLD: 5,
+    THROW_SPEED: 40,
+    /** Thrown things hitting the Warden or a bot: damage by what it is. */
+    BOT_HIT: 55, SCRAP_HIT: 55, SCRAP_POISE: 24,
+    /** Push (nothing to grab): a cone that shoves bots and turns shots around. */
+    PUSH_COOLDOWN: 0.75, PUSH_RANGE: 12, PUSH_CONE: 0.62, PUSH_KNOCK: 17, PUSH_DAMAGE: 10, PUSH_BOSS: 7, PUSH_POISE: 8,
+  },
+  lightning: {
+    /** Hold to fire: a bolt every INTERVAL, chaining on to JUMPS more targets within CHAIN metres. */
+    INTERVAL: 0.14, RANGE: 32, LOCK: 0.22, DAMAGE: 6, BOT_DAMAGE: 13, CHAIN: 8, JUMPS: 3, CHAIN_FALLOFF: 0.72,
+    STUN: 0.28, POISE: 1.6,
+    /** Heat: each bolt adds HEAT_PER, it cools at COOL a second; full heat locks you out for OVERHEAT. */
+    HEAT_PER: 9, COOL: 24, OVERHEAT: 1.3,
+    /** Every THUNDER bolts on the Warden, the storm answers with a strike of its own. */
+    THUNDER: 25, THUNDER_DAMAGE: 70, THUNDER_POISE: 32,
+  },
+  gravity: {
+    /** Gravity well: thrown along the aim, it opens where it hits (or at RANGE) and pulls things in. */
+    COOLDOWN: 3.0, SPEED: 30, RANGE: 30, RADIUS: 9.5, LIFE: 2.6, PULL: 13,
+    CRUSH: 16, BOSS_DPS: 24, BOSS_POISE: 9, SLOW: 0.45,
+    /** When it closes it implodes: a burst that throws everything outward and up. */
+    BURST: 45, BURST_RADIUS: 5, BURST_BOSS: 55, BURST_KNOCK: 15,
+    /** Passive: jumps carry higher, and holding jump on the way down floats you. */
+    JUMP: 1.3, FLOAT: 0.3, FLOAT_MAX_FALL: 5,
+  },
+  speed: {
+    /** Passive: faster running and sprinting, snappier acceleration. */
+    RUN: 1.25, SPRINT: 1.5, ACCEL: 1.5,
+    /**
+     * Flash strike: a straight streak along the aim that hits everything it passes.
+     * Aimed at something, it stops OVERSHOOT metres past it (at most DIST away);
+     * aimed at nothing, it runs the whole DIST.
+     */
+    COOLDOWN: 0.85, CHAIN_COOLDOWN: 0.22, CHAIN_MAX: 4, CHAIN_REST: 1.25,
+    DIST: 14, OVERSHOOT: 2.5, FLASH_SPEED: 110, WIDTH: 1.7, PITCH: 0.7,
+    /** Damage grows with how fast you were going when you struck. */
+    BASE: 18, PER_SPEED: 2.2, BOSS_SHARE: 0.75, POISE: 9, KNOCK: 11,
+  },
+  teleport: {
+    /** Blink: three charges, each back RECHARGE seconds after it is spent. */
+    CHARGES: 3, RECHARGE: 1.7, RANGE: 20,
+    /** Nothing hurts you for a moment as you arrive. */
+    PHASE: 0.25,
+    /** Rift burst where you arrive, a smaller implosion where you left, bots cut on the line between. */
+    BURST_RADIUS: 4.2, BURST: 38, BOSS_BURST: 32, POISE: 12, KNOCK: 12,
+    ORIGIN_RADIUS: 5, ORIGIN_DAMAGE: 15, ORIGIN_PULL: 9, LINE_DAMAGE: 45, LINE_WIDTH: 1.3,
+    /** Arriving behind the Warden rips harder. */
+    BACKSTAB: 1.6,
+  },
+};
+
+/** The Warden: a four-legged war machine as tall as a building. */
+export const BOSS = {
+  NAME: 'The Warden',
+  /** Health for one runner; each extra runner adds this share. */
+  HP: 5000, HP_PER_PLAYER: 0.7,
+  /** Poise: damage fills it, and when it is full the Warden staggers. */
+  POISE: 100, POISE_REGEN: 9, POISE_DELAY: 2.2, STAGGER: 4.2, STAGGER_IMMUNE: 3,
+  /** Taking this much damage to the eye while it charges the beam makes it flinch (a short stagger). */
+  EYE_FLINCH: 60, FLINCH: 1.6,
+  /** Overdrive below this share of health: faster, shorter cool-downs, more of everything. */
+  OVERDRIVE: 0.5, OD_SPEED: 1.35, OD_COOLDOWN: 0.72, OD_TELL: 0.85,
+  /** Body: hull height above the floor when standing, rearing, staggered and dead. */
+  LIFT: 7.6, LIFT_REAR: 8.8, LIFT_STAGGER: 3.9, LIFT_DEAD: 2.2,
+  HULL: [7, 3.4, 9] as [number, number, number],
+  /** Walking. It stays on the inner floor, clear of the conductor pillars. */
+  WALK: 3.3, TURN: 1.3, ROAM: 21, PILLAR_CLEAR: 6.2,
+  /** Seconds it takes to get over one attack before starting the next. */
+  RECOVER: [0.7, 1.4] as [number, number],
+  // --- abilities
+  STOMP: { COOLDOWN: 7, TELL: 0.85, RANGE: 12, SPEED: 16, R0: 3, R1: 27, BAND: 1.7, HEIGHT: 1.15, DAMAGE: 28, KNOCK: 12, LIFT: 8 },
+  BEAM: { COOLDOWN: 9, TELL: 1.1, SWEEP: 2.2, ARC: 1.0, MIN: 8, MAX: 52, HEIGHT: 1.25, DAMAGE: 22, GRACE: 0.6, KNOCK: 5 },
+  MORTAR: { COOLDOWN: 8, TELL: 0.6, SHELLS: 5, PER_PLAYER: 2, SPREAD: 1.2, FLIGHT: [1.35, 1.9] as [number, number], RADIUS: 3.8, DAMAGE: 30, KNOCK: 10, SCATTER: 5 },
+  DEPLOY: { COOLDOWN: 13, TELL: 0.9, COUNT: [2, 3, 4] as [number, number, number], FIRST: 5 },
+  CHARGE: { COOLDOWN: 12, TELL: 1.0, SPEED: 17, TIME: 2.2, MIN: 16, WIDTH: 3.8, DAMAGE: 40, KNOCK: 16, LIFT: 9, CRASH: 4.8 },
+  SWIPE: { COOLDOWN: 5, TELL: 0.6, TIME: 0.45, R0: 3.5, R1: 11.5, Y0: 2.2, Y1: 10, DAMAGE: 25, KNOCK: 15 },
+  SHOCK: { COOLDOWN: 5, TELL: 0.8, RIDE: 0.8, DAMAGE: 20, KNOCK: 10, LIFT: 14 },
+  /** It is dying for this long after its health runs out, then it is over. */
+  DYING: 3.6, VICTORY: 5.5,
+};
+
+/** The bots the Warden launches from the hive on its back. */
+export const BOT = {
+  /** Most alive at once: BASE plus PER_PLAYER per runner (one more in overdrive). */
+  CAP_BASE: 2, CAP_PER_PLAYER: 2,
+  skitter: {
+    HP: 45, RADIUS: 0.55, HEIGHT: 0.95, SPEED: 6.8, ACCEL: 30, REACH: 2.2, TELL: 0.4, LUNGE: 11, LUNGE_TIME: 0.26,
+    BITE: 1.5, DAMAGE: 16, KNOCK: 7, REST: 1.1, POUNCE: 6.5, POUNCE_COOLDOWN: 3,
+  },
+  wasp: {
+    HP: 30, RADIUS: 0.6, SPEED: 6.2, ACCEL: 9, HOVER: [5, 9] as [number, number], KEEP: [11, 16] as [number, number],
+    TELL: 0.7, COOLDOWN: 2.4, SHOT_SPEED: 22, SHOT_RADIUS: 0.3, DAMAGE: 12, KNOCK: 4,
+  },
+  /** Knocked about: slams into things above this speed hurt, per m/s over it. */
+  IMPACT_SPEED: 13, IMPACT_DAMAGE: 3.5,
+  /** A bot that was just hit reels for this long (or longer, for heavy hits). */
+  STUN: 0.35,
+};
+
+/** Loose things in the arena: explosive canisters and the armour plates the Warden sheds. */
+export const JUNK = {
+  RADIUS: 0.6, MAX: 16,
+  /** A canister goes off when it hits something hard, is shot or is crushed. */
+  CANISTER_RADIUS: 5, CANISTER_DAMAGE: 60, CANISTER_BOSS: 70, CANISTER_POISE: 30, CANISTER_KNOCK: 14,
+  RESPAWN: 22,
+  /** Moving faster than this, a flying thing hurts what it hits. */
+  HIT_SPEED: 12,
+};
+
 /** Flight, Viktor's gift: left click takes off and lands, the camera steers. */
 export const FLY = {
   /** Cruising speed, and with Shift held. */

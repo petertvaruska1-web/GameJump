@@ -42,7 +42,7 @@ export class Collider {
     this.pcx = this.cx; this.pcy = this.cy; this.pcz = this.cz; this.pry = this.ry;
   }
 
-  get isDynamic() { return this.kind === 'mover' || this.kind === 'sweeper'; }
+  get isDynamic() { return this.kind === 'mover' || this.kind === 'sweeper' || this.kind === 'puppet'; }
   get bottom() { return this.cy - this.hy; }
   /** Highest point of the collider (ramps rise along +Z). */
   get top() { return this.cy + this.hy + Math.max(0, this.rise); }
@@ -165,6 +165,11 @@ export class Collider {
   /** Velocity of a point on this (kinematic) collider over the last update. */
   pointVelocity(x: number, z: number, dt: number, out: Vec3): Vec3 {
     if (dt <= 0 || !this.isDynamic) { out.x = out.y = out.z = 0; return out; }
+    if (this.kind === 'puppet') {
+      puppetDelta(this, x, z, out);
+      out.x /= dt; out.y /= dt; out.z /= dt;
+      return out;
+    }
     if (this.kind === 'sweeper') {
       const dAng = this.ry - this.pry;
       // Rotation about pivot (def.p). Tangential velocity = w x r, with yaw rotating +X toward -Z.
@@ -179,6 +184,20 @@ export class Collider {
     out.z = (this.cz - this.pcz) / dt;
     return out;
   }
+}
+
+/**
+ * How far a point riding a puppet collider was carried by its last move: the
+ * turn about its centre plus the shift of the centre itself.
+ */
+export function puppetDelta(c: Collider, x: number, z: number, out: Vec3): Vec3 {
+  const d = c.ry - c.pry;
+  const cs = Math.cos(d), sn = Math.sin(d);
+  const rx = x - c.pcx, rz = z - c.pcz;
+  out.x = c.cx + rx * cs + rz * sn - x;
+  out.z = c.cz - rx * sn + rz * cs - z;
+  out.y = c.cy - c.pcy;
+  return out;
 }
 
 /** Smooth ping-pong wave with rests at both ends. Returns 0..1. */
@@ -206,6 +225,11 @@ export class CollisionWorld {
   /** Grapple anchors the character controller can hook. */
   readonly grapples: GrappleDef[];
   time = 0;
+  /**
+   * Places each puppet collider for world time `t` (the server from its own
+   * Warden, a client from the Warden it is drawing). Without one they stay put.
+   */
+  puppeteer: ((c: Collider, t: number) => void) | null = null;
   private minX: number;
   private minZ: number;
   private nx: number;
@@ -251,6 +275,7 @@ export class CollisionWorld {
     this.time = t;
     for (const c of this.dynamics) {
       c.pcx = c.cx; c.pcy = c.cy; c.pcz = c.cz; c.pry = c.ry;
+      if (c.kind === 'puppet') { this.puppeteer?.(c, t); continue; }
       const m = c.def.move!;
       if (c.kind === 'sweeper') {
         const ry = c.def.ry + (m.spin ?? 1) * t;

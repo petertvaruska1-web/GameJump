@@ -19,10 +19,11 @@
     "test:ai": "tsx scripts/sim-ai.ts",
     "test:server": "tsx scripts/smoke-server.ts",
     "test:hazards": "tsx scripts/sim-hazards.ts",
-    "test": "npm run check:map && npm run test:routes && npm run test:ai && npm run test:hazards && npm run test:moves && npm run test:server",
+    "test": "npm run check:map && npm run test:routes && npm run test:ai && npm run test:hazards && npm run test:moves && npm run test:boss && npm run test:server",
     "test:balance": "tsx scripts/sim-enemy-balance.ts",
     "balance": "tsx scripts/route-balance.ts",
     "test:moves": "tsx scripts/sim-moves.ts",
+    "test:boss": "tsx scripts/sim-boss.ts",
     "sim:moves": "tsx scripts/sim-moves.ts"
   },
   "dependencies": {
