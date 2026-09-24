@@ -121,7 +121,7 @@ const fighter = (room: Room, p: RoomPlayer) => room.fight!.fighter(p)!;
 {
   // a rematch starts straight in the arena
   const { room, clients } = makeRoom(2, 5, true);
-  check('a rematch starts in the arena', room.stage === 'boss' && clients.every((c) => Math.abs(c.p.pos.z - (ARENA.z - 50.5)) < 2), `stage=${room.stage}`);
+  check('a rematch starts in the arena', room.stage === 'boss' && clients.every((c) => Math.abs(c.p.pos.z - getArena().level.spawns[0][2]) < 2), `stage=${room.stage}`);
 }
 
 // ====================================================================== dying and coming back
@@ -143,7 +143,7 @@ const fighter = (room: Room, p: RoomPlayer) => room.fight!.fighter(p)!;
   check('running out of health is death in the arena', a.p.status === Status.Dead && q.deaths === 1, `status=${a.p.status}`);
   check('one death does not end the fight', room.phase === 'playing');
   tick(room, ARENA.RESPAWN + 0.2);
-  const back = a.p.status === Status.Alive && Math.abs(a.p.pos.z - (ARENA.z - 50.5)) < 2 && q.hp === PHP.MAX;
+  const back = a.p.status === Status.Alive && Math.abs(a.p.pos.z - getArena().level.spawns[0][2]) < 2 && q.hp === PHP.MAX;
   check('a fallen runner comes back at the arena beacon with full health', back && has(a, 'respawn'), `status=${a.p.status} z=${a.p.pos.z.toFixed(1)}`);
   f.hurt(q, 50, 'bite', a.p.pos, { x: 0, y: 0, z: 0 });
   check('just back, nothing can touch you for a moment', q.hp === PHP.MAX);

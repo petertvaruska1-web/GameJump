@@ -1,6 +1,8 @@
 // Headless multiplayer smoke test against the real server entry point: two
 // clients create/join a room, the ready gate holds the start, the match runs,
-// a fall is judged by the server, a teleport is corrected, and the match ends.
+// a fall is judged by the server, a teleport is corrected, and the match ends;
+// then the beacon opens and both go through to the Warden: powers chosen and
+// seen by each other, a power hurting it over the wire, a death and a respawn.
 //
 // With no WS set it starts server/index.ts itself on a free port and shuts it
 // down again, so it can run as part of `npm test`. Point WS at a running
@@ -8,9 +10,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import WebSocket from 'ws';
-import { NET } from '../shared/constants';
+import { ARENA, NET } from '../shared/constants';
 import { getLevel } from '../shared/level/map/index';
-import { PROTOCOL_VERSION, Status } from '../shared/protocol';
+import { BPart, PowAct, PROTOCOL_VERSION, Status } from '../shared/protocol';
 
 let fails = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -142,6 +144,57 @@ try {
   const again = await a.wait((m) => m.t === 'start' && m !== st, 6000);
   check('the host can start another run from the results screen', again.goAt > st.goAt,
     `goAt ${st.goAt.toFixed(1)} -> ${again.goAt.toFixed(1)}`);
+
+  // ------------------------------------------------------------------ past the beacon, over the wire
+  a.msgs.length = 0; b.msgs.length = 0;
+  await a.wait((m) => m.t === 'room' && m.phase === 'playing', 6000);
+  const events = (c: typeof a) => c.msgs.filter((m) => m.t === 'ev').flatMap((m) => m.e);
+  const waitEv = (c: typeof a, k: string, pred: (e: any) => boolean = () => true, ms = 8000) =>
+    c.wait((m) => m.t === 'ev' && m.e.some((e: any) => e.k === k && pred(e)), ms).then((m) => m.e.find((e: any) => e.k === k && pred(e)));
+  a.send({ t: 'dbg', cmd: 'gate' });
+  const gate = await waitEv(b, 'gate');
+  const arena = await waitEv(b, 'arena', () => true, 6000);
+  check('the beacon opens for both runners and pulls them into the arena', gate.id === ja.id && !!arena.spawns[ja.id] && !!arena.spawns[jb.id],
+    JSON.stringify(arena.spawns));
+  a.send({ t: 'pick', k: 2 });
+  b.send({ t: 'pick', k: 4 });
+  const picks = await Promise.all([waitEv(a, 'pick', (e) => e.id === jb.id), waitEv(b, 'pick', (e) => e.id === ja.id)]);
+  check('each runner hears what the other chose', picks[0].power === 4 && picks[1].power === 2);
+  await waitEv(a, 'wake', () => true, 6000);
+  const bsnap = await a.wait((m) => m.t === 'snap' && !!m.b && m.p.every((p: any) => p[8] > 0));
+  check('arena snapshots carry the Warden, its bots, loose things, and every runner\'s power',
+    bsnap.b.length === 11 && Array.isArray(bsnap.m) && Array.isArray(bsnap.j) && bsnap.j.length > 0 && bsnap.p.every((p: any) => p[7] === 100),
+    `b=${JSON.stringify(bsnap.b)} j=${bsnap.j.length}`);
+  // A steps up to the Warden and fires lightning at its core
+  const [wx, wz] = bsnap.b;
+  const px = wx, pz = wz - 15, py = ARENA.y + 0.1;
+  a.send({ t: 'dbg', cmd: 'tp', p: [px, py, pz] });
+  await new Promise((r) => setTimeout(r, 150));
+  let hit: any = null;
+  for (let i = 0; i < 12 && !hit; i++) {
+    const core = { x: wx, y: ARENA.y + 9.5, z: wz };
+    const dx = core.x - px, dy = core.y - (py + 1.25), dz = core.z - pz, l = Math.hypot(dx, dy, dz);
+    a.send({ t: 'st', s: 100 + i, p: [px, py, pz], v: [0, 0, 0], y: 0, a: 0, g: -1, b: 1 });
+    a.send({ t: 'pow', a: PowAct.Bolt, o: [px, py, pz], d: [dx / l, dy / l, dz / l], tg: [0, 0, BPart.Core], tm: 0 });
+    await new Promise((r) => setTimeout(r, 180));
+    hit = events(b).find((e: any) => e.k === 'hit' && e.by === ja.id);
+  }
+  check('a power used over the wire hurts the Warden, and the other runner sees it', !!hit && hit.hp < bsnap.b[5], JSON.stringify(hit));
+  check('the other runner sees the bolt drawn', events(b).some((e: any) => e.k === 'fx' && e.id === ja.id && e.f === PowAct.Bolt));
+  // A walks off the Threshold into the storm: down, not out, and back at the beacon
+  const sA = arena.spawns[ja.id];
+  let [fx2, fy2, fz2] = sA;
+  a.send({ t: 'dbg', cmd: 'tp', p: sA });
+  for (let i = 0; i < 70; i++) {
+    fz2 -= 0.3; if (fz2 < ARENA.z - 57) fy2 -= 0.6 + i * 0.06;
+    a.send({ t: 'st', s: 200 + i, p: [fx2, fy2, fz2], v: [0, -5, -7], y: 0, a: 4, g: -1, b: 1 });
+    await new Promise((r) => setTimeout(r, 33));
+  }
+  const fell = await waitEv(b, 'death', (e) => e.id === ja.id);
+  check('falling off in the arena is a death the other runner sees', fell.cause === 'fall');
+  const back = await waitEv(b, 'respawn', (e) => e.id === ja.id, ARENA.RESPAWN * 1000 + 4000);
+  check('and a few seconds later the runner is back at the arena\'s beacon', Math.hypot(back.p[0] - sA[0], back.p[2] - sA[2]) < 1 && !b.msgs.some((m) => m.t === 'end'),
+    JSON.stringify(back.p));
 
   a.ws.close(); b.ws.close();
 } catch (err) {
