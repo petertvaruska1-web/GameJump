@@ -106,6 +106,15 @@ export function buildArena(): ArenaData {
       // hazard stripes along the edge you jump from
       b.plat(ARENA.x + x, RY, ARENA.z + z, abut, depth, { ry: g, mat: 'metal', hazard: s < 0 ? 'e' : 'w', supports: false, th: 1.2 });
     }
+    // a gantry over the gap: two posts on its outer corners and a beam the anchor hangs from
+    for (const s of [-1, 1]) {
+      const t = s * (A.GAP / 2 + 0.4), r = A.RAMPART_OUT - 0.4;
+      b.block(ARENA.x + Math.sin(g) * r + Math.cos(g) * t, RY, ARENA.z + Math.cos(g) * r - Math.sin(g) * t, 0.5, 10.4, 0.5, 'steel', g);
+    }
+    const outer = A.RAMPART_OUT - 0.4;
+    b.deco(polar(g, outer, A.RAMPART_Y + 10.2), [A.GAP + 1.4, 0.5, 0.5], 'hazard', g);
+    b.deco(polar(g, (rMid + outer) / 2, A.RAMPART_Y + 10.2), [0.4, 0.4, outer - rMid + 0.2], 'steel', g);
+    b.deco(polar(g, rMid, A.RAMPART_Y + 9.3), [0.08, 1.8, 0.08], 'steel', g);
     b.grapple(polar(g, rMid, A.RAMPART_Y + 8.5), { optional: true });
   }
   // the arcs between the gaps, in segments turned to follow the ring
@@ -158,10 +167,10 @@ export function buildArena(): ArenaData {
   // ------------------------------------------------------------ the Threshold (spawn)
   b.section('Threshold');
   const tz = A.THRESHOLD_Z;
-  b.plat(ARENA.x, RY, ARENA.z + tz, 12, 9, { mat: 'white', hazard: 'n', supports: false, th: 1.2, rails: 'sew' });
+  b.plat(ARENA.x, RY, ARENA.z + tz, 12, 9, { mat: 'metal', hazard: 'n', supports: false, th: 1.2, rails: 'sew' });
   b.plat(ARENA.x, RY, ARENA.z + (-A.RAMPART_OUT + tz + 4.5) / 2, 5, -A.RAMPART_OUT - (tz + 4.5) + 1, { mat: 'metal', hazard: '', rails: 'ew', supports: false, th: 1 });
+  // the arena's beacon is the door the team came through (drawn by the client), with its column of light
   const beacon = at(0, A.RAMPART_Y, tz - 2.6);
-  b.prop('beacon', beacon);
   for (const s of [-1, 1]) b.prop('redLight', at(s * 5.4, A.RAMPART_Y + 0.2, tz - 4));
   b.zone('The Threshold', ARENA.x - 6, ARENA.z + tz - 4.5, ARENA.x + 6, ARENA.z + tz + 4.5);
   b.waypoint('Threshold', ARENA.x, RY + 0.1, ARENA.z + tz);
@@ -174,7 +183,7 @@ export function buildArena(): ArenaData {
   const sy = RY + 0.05;
   const level = b.build({
     name: 'The Anvil',
-    spawns: [[ARENA.x - 2.6, sy, ARENA.z + tz + 1.5], [ARENA.x, sy, ARENA.z + tz + 2.1], [ARENA.x + 2.6, sy, ARENA.z + tz + 1.5]],
+    spawns: [[ARENA.x - 2.6, sy, ARENA.z + tz + 3.4], [ARENA.x, sy, ARENA.z + tz + 3.9], [ARENA.x + 2.6, sy, ARENA.z + tz + 3.4]],
     spawnYaw: 0,
     // nothing to reach here: the way out is through the Warden
     finish: { min: [0, -1e4, 0], max: [0, -1e4, 0] },

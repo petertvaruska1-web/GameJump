@@ -16,6 +16,12 @@
 // so it can never snap back upright. Flying (Viktor's gift) tips the whole body
 // about the same hip pivot: upright and floating when slow, stretched out flat
 // with a fist forward at speed, banking into sideways flight.
+//
+// In the Warden's arena a runner's power shows on the body: the hands glow in
+// its colour, a punch lunges fist-first, a meteor slam dives knees-first, a
+// flash strike stretches the runner out flat, and the arms act out every use
+// (a cast, a two-handed telekinetic hold, a throw, a push) laid over whatever
+// the legs are doing, so it reads at a glance what everyone is up to.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -46,6 +52,29 @@ export interface AnimInput {
 }
 
 type Joint = THREE.Group;
+
+/** A power's arm movement, laid over the rest of the pose. */
+export type ActKind = 'punch' | 'cast' | 'hold' | 'throw' | 'push';
+/** How long each one plays (a hold lasts until it is thrown or let go). */
+const ACT_TIME: Record<ActKind, number> = { punch: 0.34, cast: 0.26, hold: 4.6, throw: 0.36, push: 0.38 };
+
+let handTex: THREE.Texture | null = null;
+/** A white glow the hands are tinted with. */
+function handTexture(): THREE.Texture {
+  if (handTex) return handTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  handTex = new THREE.CanvasTexture(c);
+  handTex.colorSpace = THREE.SRGBColorSpace;
+  return handTex;
+}
 
 const geoCache = new Map<string, THREE.BufferGeometry>();
 function capsule(r: number, l: number) {
@@ -169,6 +198,12 @@ export class CharacterModel {
   private cloakK = 0;
   private cloakTarget = 0;
   readonly color: number;
+  /** The arena: the arm movement playing, how far into it, and the glow on the hands. */
+  private actKind: ActKind | null = null;
+  private actT = 0;
+  private readonly hands: THREE.Sprite[] = [];
+  private handK = 0;
+  private hasPower = false;
 
   constructor(colorIndex: number, shadows: boolean) {
     const color = PLAYER_COLORS[colorIndex % 3];
@@ -243,6 +278,13 @@ export class CharacterModel {
       const glove = mesh(sphere(0.058), dark, 0, -0.27, 0.005);
       glove.scale.set(0.95, 1.12, 0.8);
       elbow.add(glove);
+      // the power's glow on each hand (sprites are left out of the joint merge)
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: handTexture(), color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+      glow.position.set(0, -0.28, 0.02);
+      glow.scale.setScalar(0.4);
+      glow.visible = false;
+      elbow.add(glow);
+      this.hands.push(glow);
       // legs
       const hip = this.hip[i];
       hip.position.set(0.1 * s, 0, 0);
@@ -337,6 +379,24 @@ export class CharacterModel {
     this.cloakTarget = cloak;
     this.boots.emissive.setHex(boost ? 0xff7a1a : 0x000000);
     this.boots.emissiveIntensity = boost ? 1.6 : 0;
+  }
+
+  /** The arena: the runner's power colour on its hands (null: no power). */
+  setPowerColor(hex: number | null) {
+    this.hasPower = hex !== null;
+    for (const h of this.hands) {
+      h.visible = this.hasPower;
+      if (hex !== null) (h.material as THREE.SpriteMaterial).color.setHex(hex);
+    }
+  }
+
+  /** A power used: the arms act it out (and the hands flare). */
+  act(kind: ActKind, hex?: number) {
+    // a hold stays up until it is thrown or let go; anything else replaces it
+    this.actKind = kind;
+    this.actT = 0;
+    this.handK = 1;
+    if (hex !== undefined) this.setPowerColor(hex);
   }
 
   /** Smoothly drive a joint value toward a target. */
@@ -526,6 +586,26 @@ export class CharacterModel {
         bob = (1 - k) * float * 0.05;
         headX = -k * 0.9 - 0.1;
         lean = 0.05;
+      } else if (a.anim === Anim.Lunge) {
+        // the punch's lunge: a long stride, the whole body behind the fist
+        rate = 28;
+        thigh = [-0.95, 0.55]; knee = [0.55, 0.45]; ankle = [0.1, 0.35];
+        shoulder = [-1.55, 0.7]; shoulderZ = [0.08, 0.25]; elbow = [-0.05, -1.5];
+        lean = 0.42; twist = 0.35; headX = -0.25;
+      } else if (a.anim === Anim.Slam) {
+        // the meteor: knees drawn up, fists down and back, the body tipped into the dive
+        rate = 18;
+        thigh = [-1.35, -1.1]; knee = [1.7, 1.5]; ankle = [0.45, 0.4];
+        shoulder = [0.75, 0.75]; shoulderZ = [0.45, 0.45]; elbow = [-0.35, -0.35];
+        lean = 0.35; headX = -0.4;
+        flyPitch = 0.55;
+      } else if (a.anim === Anim.Flash) {
+        // the flash strike: stretched out flat, arms swept back, one leg trailing
+        rate = 30;
+        thigh = [-1.25, 0.75]; knee = [0.35, 1.2]; ankle = [0.3, 0.5];
+        shoulder = [1.05, 1.1]; shoulderZ = [0.35, 0.35]; elbow = [-0.2, -0.2];
+        lean = 0.55; headX = -0.6;
+        flyPitch = 0.5;
       } else if (a.anim === Anim.Launch) {
         // thrown by a pad: one arm reaching up, legs trailing
         shoulder = [-2.7, 0.5]; shoulderZ = [0.25, 0.7]; elbow = [-0.1, -0.5];
@@ -625,6 +705,56 @@ export class CharacterModel {
       // pose that sets its own bank -- the dash -- keeps it)
       bodyRoll += clamp(-this.turnSm * clamp(sp / 6, 0, 1) * 0.055, -0.22, 0.22);
       twist += clamp(this.turnSm * 0.028, -0.18, 0.18);
+      // a power's arm movement, over whatever else the body is doing
+      if (this.actKind) {
+        this.actT += dt;
+        const dur = ACT_TIME[this.actKind];
+        if (this.actT >= dur) this.actKind = null;
+        else {
+          const u = this.actT / dur;
+          const w = this.actKind === 'hold' ? Math.min(1, this.actT / 0.1) * Math.min(1, (1 - u) / 0.05) : Math.min(1, this.actT / 0.04) * Math.min(1, (1 - u) / 0.5);
+          const mix = (arr: number[], i: number, v: number) => { arr[i] = lerp(arr[i], v, w); };
+          switch (this.actKind) {
+            case 'punch':
+              mix(shoulder, 0, -1.6); mix(elbow, 0, -0.05); mix(shoulderZ, 0, 0.06);
+              mix(shoulder, 1, 0.55); mix(elbow, 1, -1.5);
+              twist += 0.3 * w; lean += 0.12 * w;
+              break;
+            case 'cast':
+              mix(shoulder, 0, -1.75); mix(elbow, 0, -0.12); mix(shoulderZ, 0, 0.02);
+              twist += 0.18 * w;
+              break;
+            case 'hold':
+              mix(shoulder, 0, -1.95); mix(shoulder, 1, -1.95); mix(elbow, 0, -0.45); mix(elbow, 1, -0.45);
+              mix(shoulderZ, 0, 0.28); mix(shoulderZ, 1, 0.28);
+              headX -= 0.15 * w;
+              break;
+            case 'throw': {
+              const sw = lerp(-2.9, -0.9, clamp(u * 1.8, 0, 1));
+              mix(shoulder, 0, sw); mix(elbow, 0, -0.1); mix(shoulder, 1, -1.2); mix(elbow, 1, -0.6);
+              twist += 0.3 * w; lean += 0.15 * w;
+              break;
+            }
+            case 'push':
+              mix(shoulder, 0, -1.5); mix(shoulder, 1, -1.5); mix(elbow, 0, -0.08); mix(elbow, 1, -0.08);
+              mix(shoulderZ, 0, 0.16); mix(shoulderZ, 1, 0.16);
+              lean += 0.18 * w;
+              break;
+          }
+          rate = Math.max(rate, 26);
+        }
+      }
+    }
+    // the power's glow on the hands, flaring with each use
+    if (this.hasPower) {
+      this.handK = Math.max(0, this.handK - dt * 3.2);
+      const holding = this.actKind === 'hold' ? 0.6 : 0;
+      for (let i = 0; i < 2; i++) {
+        const h = this.hands[i];
+        const k = Math.max(this.handK * (i === 0 || this.actKind === 'hold' || this.actKind === 'push' ? 1 : 0.4), holding);
+        (h.material as THREE.SpriteMaterial).opacity = (0.45 + k * 0.55) * (0.85 + Math.sin(t * 17 + i * 2) * 0.15) * (1 - this.cloakK);
+        h.scale.setScalar(0.32 + k * 0.5);
+      }
     }
 
     // apply

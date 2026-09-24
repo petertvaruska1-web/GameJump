@@ -5,7 +5,8 @@
 // animated in shaders from a time uniform: the whole portal is a handful of
 // draw calls and costs nothing on the CPU.
 //
-// The same view stands in the white room as the doorway you arrive through.
+// The same view stands in the white room as the doorway you arrive through,
+// and (in storm colours) as the gate the beacon opens into the Warden's arena.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -16,12 +17,24 @@ const OVAL = 1.28;
 const SPARKS = 160;
 const SHARDS = 14;
 
+/**
+ * Colours: the portal's gold and cream, or the storm's electric blue for the gate
+ * the beacon opens (A: the vortex's deep bands, B: its light, C: the edge tint;
+ * frame and rim follow).
+ */
+const PALETTES = {
+  gold: { a: [0.93, 0.58, 0.2], b: [1.0, 0.93, 0.76], c: [0.62, 0.8, 1.0], frame: 0xe8b64c, frameGlow: 0x7a4c08, rim: [1.5, 1.08, 0.42], glow: 0xffc766, flare: 0xfff2d8 },
+  storm: { a: [0.12, 0.42, 1.0], b: [0.7, 0.95, 1.0], c: [0.75, 0.55, 1.0], frame: 0x8fa8c8, frameGlow: 0x0d3a70, rim: [0.45, 1.3, 2.2], glow: 0x5fd0ff, flare: 0xe2f8ff },
+};
+export type PortalPalette = keyof typeof PALETTES;
+
 const discVertex = /* glsl */ `
   varying vec2 vUv;
   void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
 `;
 const discFragment = /* glsl */ `
   uniform float uTime, uOpen, uFlare;
+  uniform vec3 uPalA, uPalB, uPalC;
   varying vec2 vUv;
   float hash(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
   float noise(vec2 p){ vec2 i=floor(p); vec2 f=fract(p); vec2 u=f*f*(3.0-2.0*f);
@@ -39,7 +52,7 @@ const discFragment = /* glsl */ `
     // rings of light rushing inward, toward the heart of it
     float rush = pow(0.5 + 0.5 * sin(r * 22.0 + uTime * 6.0), 6.0) * smoothstep(0.1, 0.5, r);
     float heart = smoothstep(0.42, 0.0, r);
-    vec3 amber = vec3(0.93, 0.58, 0.2), cream = vec3(1.0, 0.93, 0.76), sky = vec3(0.62, 0.8, 1.0);
+    vec3 amber = uPalA, cream = uPalB, sky = uPalC;
     vec3 col = mix(amber, cream, smoothstep(0.25, 0.85, bands * 0.75 + n * 0.35));
     col *= 0.62 + 0.38 * fine;
     col = mix(col, sky, smoothstep(0.62, 0.98, r) * 0.45 * (1.0 - bands));
@@ -64,6 +77,7 @@ const beamVertex = /* glsl */ `
 `;
 const beamFragment = /* glsl */ `
   uniform float uTime, uOpen, uAlpha;
+  uniform vec3 uPalB;
   varying float vY;
   varying vec3 vN, vV;
   void main() {
@@ -71,7 +85,7 @@ const beamFragment = /* glsl */ `
     float face = pow(abs(dot(vN, vV)), 1.6);
     float up = pow(1.0 - vY, 1.4) * smoothstep(0.0, 0.03, vY);
     float ripple = 0.8 + 0.2 * sin(vY * 60.0 - uTime * 3.0);
-    gl_FragColor = vec4(vec3(1.0, 0.9, 0.66) * 1.4, face * up * ripple * uAlpha * uOpen);
+    gl_FragColor = vec4(uPalB * 1.4, face * up * ripple * uAlpha * uOpen);
   }
 `;
 
@@ -92,11 +106,12 @@ const sparkVertex = /* glsl */ `
   }
 `;
 const sparkFragment = /* glsl */ `
+  uniform vec3 uPalB;
   varying float vA;
   void main() {
     vec2 d = gl_PointCoord - 0.5;
     float a = smoothstep(0.5, 0.0, length(d));
-    gl_FragColor = vec4(vec3(1.0, 0.9, 0.6) * 1.5, a * vA);
+    gl_FragColor = vec4(uPalB * 1.5, a * vA);
   }
 `;
 
@@ -119,11 +134,12 @@ const shardVertex = /* glsl */ `
   }
 `;
 const shardFragment = /* glsl */ `
+  uniform vec3 uPalA;
   varying vec3 vN;
   varying float vShine;
   void main() {
     float l = 0.55 + 0.45 * max(0.0, dot(normalize(vN), normalize(vec3(0.3, 0.8, 0.5))));
-    gl_FragColor = vec4(vec3(1.0, 0.8, 0.42) * (1.1 * l + vShine * 0.6), 1.0);
+    gl_FragColor = vec4(mix(uPalA, vec3(1.0), 0.35) * (1.1 * l + vShine * 0.6), 1.0);
   }
 `;
 
@@ -177,12 +193,21 @@ export class PortalView {
    * opening is only drawn from the front, so from behind it is an open golden frame
    * (the doorway you step out of in the white room, with the camera behind you).
    */
-  constructor(glowTex: THREE.Texture, opts: { beam: boolean; oneSided?: boolean }) {
+  private readonly rim: number[];
+
+  /** Drawn from the front only: seen from behind, its glow fades away too. */
+  private readonly oneSided: boolean;
+
+  constructor(glowTex: THREE.Texture, opts: { beam: boolean; oneSided?: boolean; palette?: PortalPalette }) {
+    this.oneSided = !!opts.oneSided;
+    const P = PALETTES[opts.palette ?? 'gold'];
+    this.rim = P.rim;
+    const pal = { uPalA: { value: new THREE.Color(...P.a) }, uPalB: { value: new THREE.Color(...P.b) }, uPalC: { value: new THREE.Color(...P.c) } };
     this.group.visible = false;
     this.group.add(this.frame);
     // the rim: lines of light drawn brighter than the tone curve allows, round a burnished frame
-    this.ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 1.08, 0.42), toneMapped: false });
-    const goldMat = new THREE.MeshStandardMaterial({ color: 0xe8b64c, metalness: 0.95, roughness: 0.28, emissive: new THREE.Color(0x7a4c08), emissiveIntensity: 0.9 });
+    this.ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(P.rim[0], P.rim[1], P.rim[2]), toneMapped: false });
+    const goldMat = new THREE.MeshStandardMaterial({ color: P.frame, metalness: 0.95, roughness: 0.28, emissive: new THREE.Color(P.frameGlow), emissiveIntensity: 0.9 });
     // the frame: a burnished gold band with lines of light along its edges
     this.ring = new THREE.Mesh(new THREE.TorusGeometry(PORTAL.RADIUS + 0.14, 0.1, 16, 112), goldMat);
     this.ring.scale.y = OVAL;
@@ -209,7 +234,7 @@ export class PortalView {
     this.frameParts = [this.ring, inner, outer, rays];
     // the opening
     this.discMat = new THREE.ShaderMaterial({
-      vertexShader: discVertex, fragmentShader: discFragment, uniforms: this.shared,
+      vertexShader: discVertex, fragmentShader: discFragment, uniforms: { ...this.shared, ...pal },
       transparent: true, depthWrite: false, side: opts.oneSided ? THREE.FrontSide : THREE.DoubleSide, toneMapped: false,
     });
     const disc = new THREE.Mesh(new THREE.PlaneGeometry(PORTAL.RADIUS * 2.1, PORTAL.RADIUS * 2.1 * OVAL), this.discMat);
@@ -224,7 +249,7 @@ export class PortalView {
     sg.setAttribute('seed', new THREE.BufferAttribute(seeds, 3));
     this.sparkMat = new THREE.ShaderMaterial({
       vertexShader: sparkVertex, fragmentShader: sparkFragment,
-      uniforms: { ...this.shared, uScale: { value: window.innerHeight / 2 } },
+      uniforms: { ...this.shared, uScale: { value: window.innerHeight / 2 }, uPalB: pal.uPalB },
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
     });
     window.addEventListener('resize', () => { this.sparkMat.uniforms.uScale.value = window.innerHeight / 2; });
@@ -243,20 +268,20 @@ export class PortalView {
     for (let i = 0; i < SHARDS; i++) phases[i] = (i / SHARDS) * Math.PI * 2 + Math.random() * 0.2;
     shardGeo.setAttribute('iPhase', new THREE.InstancedBufferAttribute(phases, 1));
     shardGeo.instanceCount = SHARDS;
-    this.shardMat = new THREE.ShaderMaterial({ vertexShader: shardVertex, fragmentShader: shardFragment, uniforms: this.shared, toneMapped: false });
+    this.shardMat = new THREE.ShaderMaterial({ vertexShader: shardVertex, fragmentShader: shardFragment, uniforms: { ...this.shared, uPalA: pal.uPalA }, toneMapped: false });
     const shards = new THREE.Mesh(shardGeo, this.shardMat);
     shards.frustumCulled = false;
     this.frame.add(shards);
     // glows: a big soft halo and a bright flare at the heart
-    this.glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffc766, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.3, fog: false }));
+    this.glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: P.glow, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.3, fog: false }));
     this.glow.position.y = PORTAL.HEIGHT;
     this.glow.scale.set(6, 7, 1);
-    this.flareSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xfff2d8, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.4, fog: false }));
+    this.flareSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: P.flare, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.4, fog: false }));
     this.flareSprite.position.y = PORTAL.HEIGHT;
     this.flareSprite.scale.set(2.2, 2.6, 1);
     this.group.add(this.glow, this.flareSprite);
     // light on the ground
-    const gm = new THREE.MeshBasicMaterial({ map: groundGlowTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    const gm = new THREE.MeshBasicMaterial({ map: groundGlowTexture(), color: opts.palette === 'storm' ? new THREE.Color(0.45, 0.85, 1.4) : 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(6.5, 6.5), gm);
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.position.y = 0.03;
@@ -265,7 +290,7 @@ export class PortalView {
     if (opts.beam) {
       this.beamMat = new THREE.ShaderMaterial({
         vertexShader: beamVertex, fragmentShader: beamFragment,
-        uniforms: { uTime: this.shared.uTime, uOpen: this.shared.uOpen, uAlpha: { value: 0.5 } },
+        uniforms: { uTime: this.shared.uTime, uOpen: this.shared.uOpen, uAlpha: { value: 0.5 }, uPalB: pal.uPalB },
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
       });
       const bg = new THREE.CylinderGeometry(3.4, 0.7, 190, 24, 1, true);
@@ -319,13 +344,20 @@ export class PortalView {
     this.shared.uFlare.value = this.flare;
     // the rays were laid out on the oval already; the rings are circles stretched to it
     for (const f of this.frameParts) f.scale.set(pop, f === this.frameParts[3] ? pop : pop * OVAL, pop);
-    this.ringMat.color.setRGB(1.5 + this.flare * 2.5, 1.08 + this.flare * 2.2, 0.42 + this.flare * 1.8);
+    this.ringMat.color.setRGB(this.rim[0] + this.flare * 2.5, this.rim[1] + this.flare * 2.2, this.rim[2] + this.flare * 1.8);
     this.frameParts[3].rotation.z = Math.sin(t * 0.4) * 0.03;
     const breathe = 1 + Math.sin(t * 1.7) * 0.05;
+    // one-sided: from behind there is nothing to see but the frame
+    let face = 1;
+    if (this.oneSided) {
+      const yaw = this.frame.rotation.y;
+      const d = (camPos.x - this.group.position.x) * Math.sin(yaw) + (camPos.z - this.group.position.z) * Math.cos(yaw);
+      face = Math.max(0, Math.min(1, d / 3 + 0.3));
+    }
     this.glow.scale.set(6 * e * breathe * (1 + this.flare * 1.4), 7.4 * e * breathe * (1 + this.flare * 1.4), 1);
-    (this.glow.material as THREE.SpriteMaterial).opacity = 0.28 + this.flare * 0.6;
+    (this.glow.material as THREE.SpriteMaterial).opacity = (0.28 + this.flare * 0.6) * face;
     this.flareSprite.scale.set(1.6 * e * (1 + this.flare * 3), 1.9 * e * (1 + this.flare * 3), 1);
-    (this.flareSprite.material as THREE.SpriteMaterial).opacity = 0.35 + this.flare * 0.6;
+    (this.flareSprite.material as THREE.SpriteMaterial).opacity = (0.35 + this.flare * 0.6) * face;
     (this.flareSprite.material as THREE.SpriteMaterial).rotation = t * 0.3;
     this.ground.scale.setScalar(e * breathe);
     if (this.beamMat) {

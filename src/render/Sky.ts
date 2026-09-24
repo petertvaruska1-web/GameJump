@@ -29,6 +29,10 @@ export class Sky {
   private lights!: Billboards;
   private flash = 0;
   private nextFlash = 18;
+  /** 0 the clear sky over the course .. 1 the storm over the Warden's arena. */
+  private storm = 0;
+  private readonly clear = { zenith: new THREE.Color(0x24507f), horizon: FOG_COLOR.clone(), warm: new THREE.Color(0xf6d8ae), abyss: new THREE.Color(0x46566b) };
+  private readonly dark = { zenith: new THREE.Color(0x0e1322), horizon: new THREE.Color(0x3a4152), warm: new THREE.Color(0x4d4a5a), abyss: new THREE.Color(0x151a24) };
   private flashDir = new THREE.Vector3();
   onThunder?: (delay: number, strength: number) => void;
 
@@ -43,17 +47,18 @@ export class Sky {
         uAbyss: { value: new THREE.Color(0x46566b) },
         uFlash: { value: 0 },
         uFlashDir: { value: new THREE.Vector3(1, 0, 0) },
+        uSunK: { value: 1 },
       },
       vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = modelViewMatrix*vec4(position,1.0); gl_Position = projectionMatrix*p; gl_Position.z = gl_Position.w; }`,
-      fragmentShader: `uniform vec3 uSun, uZenith, uHorizon, uWarm, uAbyss, uFlashDir; uniform float uFlash; varying vec3 vDir;
+      fragmentShader: `uniform vec3 uSun, uZenith, uHorizon, uWarm, uAbyss, uFlashDir; uniform float uFlash, uSunK; varying vec3 vDir;
         void main(){
           vec3 d = normalize(vDir);
           float h = d.y;
           float sunAmt = max(dot(d, uSun), 0.0);
           vec3 hor = mix(uHorizon, uWarm, pow(sunAmt, 4.0) * 0.85);
           vec3 col = h > 0.0 ? mix(hor, uZenith, pow(clamp(h,0.0,1.0), 0.55)) : mix(hor, uAbyss, pow(clamp(-h*3.0,0.0,1.0),0.7));
-          col += vec3(1.0,0.86,0.62) * pow(sunAmt, 900.0) * 6.0;
-          col += vec3(1.0,0.8,0.55) * pow(sunAmt, 18.0) * 0.35;
+          col += vec3(1.0,0.86,0.62) * pow(sunAmt, 900.0) * 6.0 * uSunK;
+          col += vec3(1.0,0.8,0.55) * pow(sunAmt, 18.0) * 0.35 * uSunK;
           float fl = uFlash * pow(max(dot(d, uFlashDir), 0.0), 6.0) * smoothstep(0.25, -0.1, h);
           col += vec3(0.75,0.8,1.0) * fl * 1.6;
           gl_FragColor = vec4(col, 1.0);
@@ -76,9 +81,10 @@ export class Sky {
         uCam: { value: new THREE.Vector3() },
         uFlash: { value: 0 },
         uFlashPos: { value: new THREE.Vector2() },
+        uDark: { value: 0 },
       },
       vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }`,
-      fragmentShader: `uniform float uTime, uDensity, uFlash; uniform vec3 uSun, uFog, uCam; uniform vec2 uFlashPos; varying vec3 vW;
+      fragmentShader: `uniform float uTime, uDensity, uFlash, uDark; uniform vec3 uSun, uFog, uCam; uniform vec2 uFlashPos; varying vec3 vW;
         ${NOISE}
         void main(){
           vec2 p = vW.xz * 0.0065 + vec2(uTime*0.004, uTime*0.0016);
@@ -91,7 +97,7 @@ export class Sky {
           vec3 nrm = normalize(vec3(-nx*14.0, 1.0, -nz*14.0));
           float lit = clamp(dot(nrm, uSun)*0.9 + 0.35, 0.0, 1.3);
           vec3 shadow = vec3(0.47,0.53,0.64), bright = vec3(1.0,0.96,0.9);
-          vec3 col = mix(vec3(0.28,0.33,0.42), mix(shadow, bright, lit), c);
+          vec3 col = mix(vec3(0.28,0.33,0.42), mix(shadow, bright, lit), c) * mix(1.0, 0.32, uDark);
           float fl = uFlash * exp(-length(vW.xz - uFlashPos) * 0.004);
           col += vec3(0.8,0.85,1.0) * fl * (0.4 + c);
           float dist = length(vW - uCam);
@@ -195,10 +201,10 @@ export class Sky {
       this.puffQuads.set(p.i, x, p.base.y, p.base.z, p.w, p.h, p.a);
     }
     this.lights.setTime(t);
-    // lightning
+    // lightning (far more of it in the storm)
     this.nextFlash -= dt;
     if (this.nextFlash <= 0) {
-      this.nextFlash = 22 + Math.random() * 35;
+      this.nextFlash = this.storm > 0.5 ? 3 + Math.random() * 7 : 22 + Math.random() * 35;
       const a = Math.random() * Math.PI * 2;
       this.flashDir.set(Math.sin(a), -0.08, Math.cos(a)).normalize();
       this.flash = 1;
@@ -216,6 +222,27 @@ export class Sky {
   }
 
   get flashLevel() { return this.flash; }
+
+  /** A flash of lightning right now (a strike close by). */
+  strike(k: number) {
+    this.flash = Math.max(this.flash, k);
+    this.domeMat.uniforms.uFlashDir.value.set(0, 0.2, 1).normalize();
+  }
+
+  /** Turns the sky toward the storm (0 clear, 1 the arena's): the dome, the cloud sea and the fog it fades into. */
+  setStorm(k: number, fog: THREE.Color) {
+    if (Math.abs(k - this.storm) < 1e-3 && k !== 0 && k !== 1) return;
+    this.storm = k;
+    const u = this.domeMat.uniforms;
+    u.uZenith.value.lerpColors(this.clear.zenith, this.dark.zenith, k);
+    u.uHorizon.value.lerpColors(this.clear.horizon, this.dark.horizon, k);
+    u.uWarm.value.lerpColors(this.clear.warm, this.dark.warm, k);
+    u.uAbyss.value.lerpColors(this.clear.abyss, this.dark.abyss, k);
+    this.seaMat.uniforms.uDark.value = k;
+    u.uSunK.value = 1 - k;
+    this.seaMat.uniforms.uFog.value.copy(fog);
+    this.puffQuads.mesh.visible = k < 0.6;
+  }
 }
 
 export function cloudTexture(): THREE.Texture {

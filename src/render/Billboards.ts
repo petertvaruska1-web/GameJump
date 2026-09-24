@@ -160,5 +160,11 @@ export class Billboards {
     this.attrs.alpha.needsUpdate = true;
   }
 
+  /** Recolours quad `i` (flashes reuse their slots in different colours). */
+  setColor(i: number, c: THREE.Color) {
+    this.color[i * 3] = c.r; this.color[i * 3 + 1] = c.g; this.color[i * 3 + 2] = c.b;
+    this.attrs.color.needsUpdate = true;
+  }
+
   setTime(t: number) { this.mat.uniforms.uTime.value = t; }
 }

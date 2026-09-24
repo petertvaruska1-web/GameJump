@@ -52,6 +52,8 @@ export class Renderer {
   readonly hemi: THREE.HemisphereLight;
   readonly shadows: boolean;
   private shadowFocus = new THREE.Vector3();
+  /** The sky light's everyday strength (lightning adds to it); the arena's storm is darker. */
+  hemiBase = 1.05;
 
   constructor(canvas: HTMLCanvasElement, readonly quality: Quality) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality !== 'low', powerPreference: 'high-performance', stencil: false });
@@ -114,7 +116,7 @@ export class Renderer {
   }
 
   setLightning(level: number) {
-    this.hemi.intensity = 1.05 + level * 1.4;
+    this.hemi.intensity = this.hemiBase + level * 1.4;
   }
 
   render() {
