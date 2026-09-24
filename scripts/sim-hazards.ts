@@ -478,6 +478,8 @@ const spots = level.portals ?? [];
 {
   // it stays shut until it opens, and only takes a runner standing at the ring
   const { room, p, log } = setupPortal([0.01, 0, 0.99]);
+  // nine seconds in a sentinel's sight while it opens: its aim is random, and this is not about enemies
+  room.handle(p, { t: 'dbg', cmd: 'god' });
   stepThrough(room, p);
   const shutRefused = !p.away;
   waitUntil(room, p, room.portal!.at + 0.1);
