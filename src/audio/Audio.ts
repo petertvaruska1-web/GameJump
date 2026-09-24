@@ -4,16 +4,18 @@
 // The portal's heavenly music lives in HeavenMusic; flight gets its own air.
 
 import * as THREE from 'three';
+import { ArenaSounds } from './ArenaSounds';
 import { HeavenMusic, type HeavenMix } from './HeavenMusic';
 
 type Dest = AudioNode;
 
 export class AudioEngine {
-  private ctx: AudioContext | null = null;
+  // the context, the buses and the noise are shared with ArenaSounds
+  ctx: AudioContext | null = null;
   private master!: GainNode;
-  private sfx!: GainNode;
-  private music!: GainNode;
-  private noise!: AudioBuffer;
+  sfx!: GainNode;
+  music!: GainNode;
+  noise!: AudioBuffer;
   private windGain!: GainNode;
   private windFilter!: BiquadFilterNode;
   private whistleGain!: GainNode;
@@ -29,14 +31,21 @@ export class AudioEngine {
   private flyGain: GainNode | null = null;
   private flyFilter: BiquadFilterNode | null = null;
   private flyShimmer: GainNode | null = null;
-  private listenerPos = new THREE.Vector3();
-  private listenerRight = new THREE.Vector3(1, 0, 0);
+  readonly listenerPos = new THREE.Vector3();
+  readonly listenerRight = new THREE.Vector3(1, 0, 0);
+  private arenaSfx: ArenaSounds | null = null;
   private beatT = 0;
   private chase = 0;
   private volume = 0.8;
   private musicVol = 0.6;
 
   get ready() { return this.ctx !== null && this.ctx.state === 'running'; }
+
+  /** The Warden's fight: its sounds and its music (null until the audio is running). */
+  get arena(): ArenaSounds | null {
+    if (!this.ready) return null;
+    return (this.arenaSfx ??= new ArenaSounds(this));
+  }
 
   /** Must be called from a user gesture. */
   init() {
@@ -135,7 +144,7 @@ export class AudioEngine {
 
   // ------------------------------------------------------------------ primitives
 
-  private spatial(pos: THREE.Vector3 | null, range = 60): { dest: Dest; gain: number } | null {
+  spatial(pos: THREE.Vector3 | null, range = 60): { dest: Dest; gain: number } | null {
     const ctx = this.ctx!;
     if (!pos) return { dest: this.sfx, gain: 1 };
     const dx = pos.x - this.listenerPos.x, dy = pos.y - this.listenerPos.y, dz = pos.z - this.listenerPos.z;
@@ -153,7 +162,7 @@ export class AudioEngine {
    * same jump, landing or footstep at exactly the same pitch every time sounds
    * like a machine; a few percent of spread makes a run of them sound played.
    */
-  private noiseHit(dest: Dest, o: { type: BiquadFilterType; freq: number; q?: number; gain: number; attack?: number; decay: number; delay?: number; freqEnd?: number; rate?: number; vary?: number }) {
+  noiseHit(dest: Dest, o: { type: BiquadFilterType; freq: number; q?: number; gain: number; attack?: number; decay: number; delay?: number; freqEnd?: number; rate?: number; vary?: number }) {
     const ctx = this.ctx!;
     const t = ctx.currentTime + (o.delay ?? 0);
     const k = 1 + (Math.random() * 2 - 1) * (o.vary ?? 0);
@@ -172,7 +181,7 @@ export class AudioEngine {
     src.stop(t + (o.attack ?? 0.005) + o.decay + 0.05);
   }
 
-  private tone(dest: Dest, o: { type: OscillatorType; f0: number; f1?: number; gain: number; attack?: number; decay: number; delay?: number; lp?: number; vary?: number }) {
+  tone(dest: Dest, o: { type: OscillatorType; f0: number; f1?: number; gain: number; attack?: number; decay: number; delay?: number; lp?: number; vary?: number }) {
     const ctx = this.ctx!;
     const t = ctx.currentTime + (o.delay ?? 0);
     const k = 1 + (Math.random() * 2 - 1) * (o.vary ?? 0);
@@ -495,10 +504,12 @@ export class AudioEngine {
    * soundscape (wind, pad, chase, machinery) fades out under it. `fly` (0..1):
    * flying, scaled by speed.
    */
-  update(dt: number, p: { exposure: number; speed: number; falling: number; chase: number; drone: THREE.Vector3 | null; inGame: boolean; zip?: number; belt?: boolean; heaven?: number; flying?: boolean; fly?: number }) {
+  update(dt: number, p: { exposure: number; speed: number; falling: number; chase: number; drone: THREE.Vector3 | null; inGame: boolean; zip?: number; belt?: boolean; heaven?: number; flying?: boolean; fly?: number; arena?: boolean }) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    const hv = Math.max(0, Math.min(1, p.heaven ?? 0));
+    // in the Warden's arena the battle music takes the pad's and the chase's place
+    const hv = Math.max(0, Math.min(1, p.heaven ?? 0)) || (p.arena ? 0.75 : 0);
+    if (!p.arena && this.arenaSfx) this.arenaSfx.music(dt, 0, false);
     const world = 1 - hv;
     const zip = p.inGame ? p.zip ?? 0 : 0;
     this.zipGain.gain.setTargetAtTime(zip > 0 ? (0.05 + zip * 0.012) * world : 0, t, 0.08);
