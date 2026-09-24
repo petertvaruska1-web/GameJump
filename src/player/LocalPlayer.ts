@@ -31,6 +31,10 @@ export interface PlayerHooks {
   bodyLanded(impact: number): void;
   /** Took off (1) or stopped flying (-1). */
   flew(dir: number): void;
+  /** A meteor slam hit the ground at this speed. */
+  slammed(speed: number): void;
+  /** A flash strike ended (it began at `from`). */
+  flashed(from: { x: number; y: number; z: number }): void;
 }
 
 const wind: [number, number] = [0, 0];
@@ -107,6 +111,17 @@ export class LocalPlayer {
 
   queueJump() { this.jumpQueued = true; }
 
+  /** Which level's lasers, gusts and floor this runner answers to (the course, or the Warden's arena). */
+  setLevel(level: LevelData) { this.level = level; }
+
+  /** A blink: the body is somewhere else at once, keeping its speed; no smoothing across the gap. */
+  blink(x: number, y: number, z: number) {
+    this.motor.blink(x, y, z);
+    this.prev.set(x, y, z); this.cur.set(x, y, z); this.renderPos.set(x, y, z);
+    this.stepSmooth = 0;
+    this.doomed = false;
+  }
+
   /** Killed: the body is thrown and keeps obeying physics (falls, slides, rides platforms). */
   die(impulse?: [number, number, number]) {
     const b = this.motor.body;
@@ -121,11 +136,11 @@ export class LocalPlayer {
     b.ext.x = b.ext.y = b.ext.z = 0;
   }
 
-  /** Shoved by a hit a shield soaked. */
+  /** Shoved by a hit (a shield soaking it, or a blow in the arena). */
   shove(v: [number, number, number]) {
     const b = this.motor.body;
     b.ext.x += v[0]; b.ext.z += v[2];
-    if (b.grounded && v[1] > 0) { b.vel.y = v[1]; b.grounded = false; b.ground = null; }
+    if (v[1] > 0 && (b.grounded || b.vel.y < v[1])) { b.vel.y = Math.max(b.vel.y, v[1]); b.grounded = false; b.ground = null; }
   }
   /** Hook this anchor on the next physics step. */
   requestGrapple(id: number) { this.grappleReq = id; }
@@ -190,6 +205,8 @@ export class LocalPlayer {
       if (ev.flipped) this.hooks.flipped();
       if (ev.dashed !== 0) this.hooks.dashed(ev.dashed);
       if (ev.flew !== 0) this.hooks.flew(ev.flew);
+      if (ev.slammed > 0) this.hooks.slammed(ev.slammed);
+      if (ev.flashed) this.hooks.flashed(m.flashFrom);
       if (!this.frozen && !this.dead && !this.immune && !this.sanctuary && stepT >= this.laserGraceUntil && this.level.lasers.length
         && laserHit(this.level, b.pos.x, b.pos.y, b.pos.z, stepT, b.radius, b.height - 0.1)) {
         this.hooks.laser();

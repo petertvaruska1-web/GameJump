@@ -27,8 +27,10 @@ export interface CamTarget {
   boosted?: boolean;
   /** Flying: full vertical follow, a wider pitch range, the view aimed where you fly. */
   flying?: boolean;
-  /** 0..1: frame over the runner's right shoulder (someone to talk to is in front of you). */
+  /** 0..1: frame over the runner's right shoulder (someone to talk to is in front of you, or a fight). */
   shoulder?: number;
+  /** Metres further back than usual (the Warden's arena wants more of the fight in view). */
+  far?: number;
 }
 
 const BASE_DIST = 5.0;
@@ -126,6 +128,9 @@ export class CameraController {
 
   addShake(a: number) { if (this.shakeEnabled) this.shake = Math.min(1, this.shake + a); }
 
+  /** A punch of wider view (a power going off) that eases back by itself. */
+  kickFov(deg: number) { if (this.shakeEnabled) this.fovKick = Math.min(this.fovKick + deg, 18); }
+
   landing(impact: number) {
     // only real drops dip the camera, and gently
     if (impact > 8) this.dipVel -= Math.min(2.4, (impact - 8) * 0.14);
@@ -199,7 +204,7 @@ export class CameraController {
     const sp3 = Math.hypot(hs, t.vel.y);
     const want = t.flying
       ? BASE_DIST + 0.8 + clamp(sp3 / 20, 0, 1) * 1.2 + clamp(pitch * -0.8, 0, 0.8)
-      : BASE_DIST + (t.sprinting ? 0.5 : 0) + clamp((-t.vel.y - 6) / 25, 0, 1.0) + clamp(pitch * -1.2, 0, 1.2);
+      : BASE_DIST + (t.far ?? 0) + (t.sprinting ? 0.5 : 0) + clamp((-t.vel.y - 6) / 25, 0, 1.0) + clamp(pitch * -1.2, 0, 1.2);
     this.wantDist += (want - this.wantDist) * damp(2.2, dt);
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const dirX = -Math.sin(this.yaw) * cp, dirY = -sp, dirZ = -Math.cos(this.yaw) * cp;

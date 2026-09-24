@@ -24,10 +24,11 @@ import { LevelView } from '../render/LevelView';
 import { Materials } from '../render/Materials';
 import { PropsView } from '../render/Props';
 import { FOG_DENSITY, Renderer } from '../render/Renderer';
-import { cloudTexture, Sky } from '../render/Sky';
+import { cloudTexture, FOG_COLOR, Sky } from '../render/Sky';
 import { loadBest, loadSession, recordRun, saveSession, saveSettings, type Settings } from '../settings';
-import { causeText, fmtTime, UI, type RunSummary } from '../ui/UI';
+import { causeText, fmtTime, UI, type FightSummary, type RunSummary } from '../ui/UI';
 import { EnemyProxy, RemotePlayer } from './Actors';
+import { Arena } from './Arena';
 import { Heaven } from './Heaven';
 
 type Mode = 'menu' | 'connecting' | 'lobby' | 'playing' | 'results';
@@ -54,6 +55,14 @@ const RETICLE_MARGIN = 34;
 
 /** Viktor's gift on the HUD. */
 const FLIGHT_CSS = '#ffd27a';
+
+/** The storm the arena stands in: the fog it fades into, and the sky light under it. */
+const ARENA_FOG = new THREE.Color(0x303848);
+const ARENA_FOG_DENSITY = 0.0046;
+/** The course's fog as the beacon's storm gathers over it. */
+const GATE_FOG = new THREE.Color(0x5d6678);
+/** Best fight time in this browser (seconds). */
+const FIGHT_BEST_KEY = 'skyfall.fight.best.v1';
 
 const tmpV = new THREE.Vector3();
 const tmpF = new THREE.Vector3();
@@ -123,6 +132,10 @@ export class Game {
   private runSummary: RunSummary | null = null;
   /** The portal easter egg: the portal on the course, the white room, Viktor. */
   private readonly heaven: Heaven;
+  /** The Warden's fight past the beacon. */
+  private readonly arena: Arena;
+  /** The arena is what is drawn right now (the course is hidden). */
+  private arenaShown = false;
   private readonly listenerRight = new THREE.Vector3();
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement, private settings: Settings) {
@@ -160,6 +173,7 @@ export class Game {
       offline: (name) => this.startOffline(name),
       ready: (rdy) => this.conn?.send({ t: 'ready', r: rdy }),
       start: () => { this.input.requestLock(); this.conn?.send({ t: 'start' }); },
+      startBoss: () => { this.input.requestLock(); this.conn?.send({ t: 'start', stage: 'boss' }); },
       // unpause without asking for the mouse here: the new run asks for it as it
       // starts, and a second request in the same click lost the lock and paused again
       restart: () => {
@@ -196,6 +210,19 @@ export class Game {
       },
     });
     this.r.scene.add(this.heaven.portal.group);
+    this.arena = new Arena({
+      scene: this.r.scene, camera: this.r.camera, cam: this.cam, ui: this.ui, audio: this.audio,
+      particles: this.effects.particles, mats: this.mats, glowTex: this.mats.glowTex, shadows: this.r.shadows, course: this.level,
+      send: (m) => this.conn?.send(m),
+      meId: () => this.meId,
+      local: () => this.local,
+      remote: (id) => this.remotes.get(id),
+      remotes: () => this.remotes.values(),
+      name: (id) => this.playerName(id),
+      swap: (on) => this.showArena(on),
+      storm: (k) => this.setStorm(k),
+      flashSky: (k) => this.sky.strike(k),
+    }, this.ui.hudRoot);
     // Ctrl is a game key once you can fly, and Ctrl+W cannot be stopped by a page:
     // while the gift is yours, closing the tab asks first
     window.addEventListener('beforeunload', (e) => {
@@ -227,6 +254,57 @@ export class Game {
     // the white room is lit to read as light itself, a touch brighter than the sky outside
     this.r.renderer.toneMappingExposure = inRoom ? 0.98 : 1.05;
     this.ui.heavenHud(inRoom);
+  }
+
+  /** The collision world the local runner is in: the course's, or the Warden's arena's. */
+  private get activeWorld(): CollisionWorld { return this.arenaShown && this.arena.world ? this.arena.world : this.world; }
+  private get activeLevel(): LevelData { return this.arenaShown ? this.arena.level : this.level; }
+  private get activeHazards(): HazardView { return this.arenaShown && this.arena.view ? this.arena.view.hazards : this.hazards; }
+
+  /**
+   * The course or the Warden's arena: what is drawn, the air and the light, and
+   * which level the local runner answers to.
+   */
+  private showArena(on: boolean) {
+    if (this.arenaShown === on) return;
+    this.arenaShown = on;
+    for (const g of [this.levelView.group, this.props.group, this.hazards.group, this.pickups.group, this.heaven.portal.group]) g.visible = !on;
+    for (const e of this.enemies) e.view.root.visible = !on;
+    this.effects.clearProjectiles();
+    this.hazards.setTargeted(-1);
+    for (let i = 0; i < 3; i++) this.hazards.setRope(i, null);
+    const fog = this.r.scene.fog as THREE.FogExp2;
+    fog.color.copy(on ? ARENA_FOG : FOG_COLOR);
+    fog.density = on ? ARENA_FOG_DENSITY : FOG_DENSITY;
+    (this.r.scene.background as THREE.Color).copy(fog.color);
+    this.r.hemiBase = on ? 0.72 : 1.05;
+    this.r.hemi.color.set(on ? 0x9fb2d6 : 0xc4d6ee);
+    this.r.hemi.groundColor.set(on ? 0x4a3226 : 0x6a5e54);
+    this.r.sun.color.set(on ? 0xcad6ff : 0xffe0b8);
+    this.r.sun.intensity = on ? 1.25 : 2.6;
+    this.r.renderer.toneMappingExposure = on ? 1.02 : 1.05;
+    this.sky.setStorm(on ? 1 : 0, fog.color);
+    this.ui.arenaHud(on);
+    this.ui.area(null, 0);
+    if (this.local) {
+      this.local.setLevel(on ? this.arena.level : this.level);
+      // Viktor's gift does not carry into the storm
+      if (on) { this.local.motor.canFly = false; this.local.motor.flying = false; this.input.trapCtrl = false; }
+      this.localDeathShown = false;
+      this.local.finished = false;
+    }
+    if (on) { this.heaven.reset(); this.danger = 0; }
+    this.lastHud = '';
+  }
+
+  /** The course's sky turning as the beacon's storm gathers (0..1). */
+  private setStorm(k: number) {
+    if (this.arenaShown) return;
+    const fog = this.r.scene.fog as THREE.FogExp2;
+    fog.color.lerpColors(FOG_COLOR, GATE_FOG, k);
+    (this.r.scene.background as THREE.Color).copy(fog.color);
+    this.sky.setStorm(k * 0.85, fog.color);
+    this.r.hemiBase = 1.05 - k * 0.2;
   }
 
   // ------------------------------------------------------------------ connection flow
@@ -369,6 +447,10 @@ export class Game {
       case 'start':
         this.conn?.seedClock(m.now);
         this.beginMatch(m.goAt, m.spawns, !!m.resume, m.crumbles ?? []);
+        this.arena.onStart(m, (this.conn?.serverNow() ?? 0) - m.goAt);
+        // build the arena while the run is young, so the beacon never hitches
+        if (!m.stage || m.stage === 'course') window.setTimeout(() => { if (this.mode === 'playing') this.arena.ensureViews(); }, 2500);
+        if (this.arena.inArena) { this.ui.objective('The Warden · choose your power', 6); this.runSummary = null; }
         for (const id of m.taken ?? []) { this.taken.add(id); this.pickups.take(id); }
         for (const [id, sh, cl, bt] of m.powers ?? []) { const ps = this.powerOf(id); ps.shield = !!sh; ps.cloakUntil = cl; ps.boostUntil = bt; }
         if (m.portal) this.heaven.placePortal([m.portal[0], m.portal[1], m.portal[2]], m.portal[3], m.portal[4]);
@@ -377,6 +459,8 @@ export class Game {
         break;
       case 'snap':
         this.onSnapshot(m.ts, m.p, m.e);
+        this.arena.onPlayers(m.p);
+        this.arena.onSnapshot(m.ts, m.b, m.m, m.j);
         break;
       case 'ev':
         for (const e of m.e) this.onEvent(e);
@@ -391,9 +475,12 @@ export class Game {
         this.ui.captureHint(false);
         this.ui.closePause();
         this.paused = false;
-        window.setTimeout(() => {
-          if (this.mode === 'results') this.ui.results(m.results, this.meId, this.hostId === this.meId, m.duration, this.runSummary ?? undefined);
-        }, 1800);
+        {
+          const fight = m.boss && m.fight !== undefined ? this.recordFight(m.fight) : undefined;
+          window.setTimeout(() => {
+            if (this.mode === 'results') this.ui.results(m.results, this.meId, this.hostId === this.meId, m.duration, this.runSummary ?? undefined, fight);
+          }, m.boss ? 900 : 1800);
+        }
         break;
       case 'err':
         if (m.code === 'ROOM_NOT_FOUND' || m.code === 'ROOM_FULL' || m.code === 'IN_PROGRESS') {
@@ -451,6 +538,7 @@ export class Game {
       mantle: () => this.audio.mantle(),
       footstep: (surface, speed) => this.audio.footstep(surface, speed),
       groundChanged: (id) => {
+        if (this.arenaShown) return;
         const c = this.world.get(id);
         if (c?.kind === 'crumble') this.levelView.predictShake(id, this.matchTime);
       },
@@ -493,6 +581,8 @@ export class Game {
           this.effects.particles.burst(p.x, p.y + 0.9, p.z, 18, 2.5, 0.6, 0.3, [1, 0.9, 0.62], 0.7, 2, 0);
         }
       },
+      slammed: (speed) => this.arena.slammed(speed),
+      flashed: (from) => this.arena.flashed(from),
       dashed: (side) => {
         this.audio.dash();
         const p = this.local!.pos;
@@ -561,7 +651,8 @@ export class Game {
     // aim is horizontal ("the anchor ahead of me"): anchors sit high above, players rarely look up
     this.cam.forward(tmpF);
     let best = -1, bestScore = Infinity;
-    for (const g of this.level.grapples) {
+    const world = this.activeWorld;
+    for (const g of this.activeLevel.grapples) {
       const dx = g.p[0] - hx, dy = g.p[1] - hy, dz = g.p[2] - hz;
       const d = Math.hypot(dx, dy, dz), hd = Math.hypot(dx, dz);
       if (d > GRAPPLE.RANGE || d < GRAPPLE.MIN_RANGE || dy < -0.5) continue;
@@ -569,8 +660,8 @@ export class Game {
       if (ang > (d < 8 ? 1.1 : 0.62)) continue;
       const score = ang + d * 0.015;
       if (score >= bestScore) continue;
-      this.world.raycast(hx, hy, hz, dx / d, dy / d, dz / d, d - 0.5, false, this.rayHit);
-      if (this.rayHit.c) continue;
+      world.raycast(hx, hy, hz, dx / d, dy / d, dz / d, d - 0.5, false, this.rayHit);
+      if (this.rayHit.c && this.rayHit.c.kind !== 'puppet') continue;
       best = g.id; bestScore = score;
     }
     return best;
@@ -582,10 +673,11 @@ export class Game {
     const room = this.heaven.inRoom;
     // grapple: reticle + key
     this.grappleTarget = room ? -1 : this.pickAnchor();
-    this.hazards.setTargeted(this.grappleTarget);
+    const hz = this.activeHazards;
+    hz.setTargeted(this.grappleTarget);
     const hooked = !!local?.motor.grapple;
     if (this.grappleTarget >= 0) {
-      const g = this.level.grapples[this.grappleTarget];
+      const g = this.activeLevel.grapples[this.grappleTarget];
       tmpV.set(g.p[0], g.p[1], g.p[2]).project(this.r.camera);
       const el = this.r.renderer.domElement;
       const w = el.clientWidth, h = el.clientHeight;
@@ -600,8 +692,8 @@ export class Game {
       this.ui.reticle(cx, cy, hooked, behind || cx !== sx || cy !== sy);
     } else this.ui.reticle(null);
     const can = !this.paused && !this.debug.freeCam && !this.heaven.locksInput;
-    // left click: take off / land, once Viktor has given you flight
-    if (local && can && !room && this.input.mouseLeftPressed && local.motor.canFly && !local.dead && !local.finished && !local.frozen) local.requestFlyToggle();
+    // left click: take off / land, once Viktor has given you flight (in the arena it is the power's)
+    if (local && can && !room && !this.arenaShown && this.input.mouseLeftPressed && local.motor.canFly && !local.dead && !local.finished && !local.frozen) local.requestFlyToggle();
     if (local && can && !room && !local.motor.flying && this.input.mouseRightPressed && !local.dead && !local.finished) {
       if (hooked) local.requestRelease();
       else if (this.grappleTarget >= 0) { local.requestGrapple(this.grappleTarget); this.audio.grappleFire(); }
@@ -609,21 +701,21 @@ export class Game {
     // ropes: local runner first, then remotes swinging near an anchor
     let rope = 0;
     if (local && local.motor.grapple && !local.dead) {
-      this.hazards.setRope(rope++, tmpV.set(local.renderPos.x, local.renderPos.y + 1.95, local.renderPos.z), local.motor.grapple.id);
+      hz.setRope(rope++, tmpV.set(local.renderPos.x, local.renderPos.y + 1.95, local.renderPos.z), local.motor.grapple.id);
     }
     for (const rp of this.remotes.values()) {
       if (rope >= 3 || rp.anim !== Anim.Swing || rp.status !== Status.Alive) continue;
       let best = -1, bd = GRAPPLE.RANGE + 1;
-      for (const g of this.level.grapples) {
+      for (const g of this.activeLevel.grapples) {
         const d = Math.hypot(g.p[0] - rp.pos.x, g.p[1] - rp.pos.y - GRAPPLE.HAND, g.p[2] - rp.pos.z);
         if (d < bd && g.p[1] > rp.pos.y + 1) { bd = d; best = g.id; }
       }
-      if (best >= 0) this.hazards.setRope(rope++, tmpV.set(rp.pos.x, rp.pos.y + 1.95, rp.pos.z), best);
+      if (best >= 0) hz.setRope(rope++, tmpV.set(rp.pos.x, rp.pos.y + 1.95, rp.pos.z), best);
     }
-    for (; rope < 3; rope++) this.hazards.setRope(rope, null);
+    for (; rope < 3; rope++) hz.setRope(rope, null);
 
     // crates: hide the one we walk through right away (the server decides who gets it)
-    if (local && !local.dead && !local.finished && !local.frozen && !room) {
+    if (local && !local.dead && !local.finished && !local.frozen && !room && !this.arenaShown) {
       for (const c of this.level.pickups) {
         if (this.taken.has(c.id) || this.predicted.has(c.id)) continue;
         const dy = local.pos.y - c.p[1];
@@ -647,7 +739,7 @@ export class Game {
       rp.model.setPowers(ps.shield && rp.status === Status.Alive, timedPower(ps.cloakUntil, mt) ? 0.85 : 0, timedPower(ps.boostUntil, mt));
     }
     const hud: { name: string; color: string; remaining?: number; total?: number }[] = [];
-    if (local && !local.dead) {
+    if (local && !local.dead && !this.arenaShown) {
       if (me.shield) hud.push({ name: POWER_NAME.shield, color: POWER_CSS.shield });
       if (timedPower(me.cloakUntil, mt)) hud.push({ name: POWER_NAME.cloak, color: POWER_CSS.cloak, remaining: me.cloakUntil - mt, total: POWER.CLOAK_TIME });
       if (timedPower(me.boostUntil, mt)) hud.push({ name: POWER_NAME.boost, color: POWER_CSS.boost, remaining: me.boostUntil - mt, total: POWER.BOOST_TIME });
@@ -660,6 +752,8 @@ export class Game {
 
   private clearMatch() {
     this.heaven.reset();
+    this.showArena(false);
+    this.arena.reset();
     this.input.trapCtrl = false;
     this.localDeathShown = false;
     this.shownArea = this.pendingArea = null;
@@ -735,6 +829,31 @@ export class Game {
   }
 
   private onEvent(e: GameEvent) {
+    // the beacon: the course is over for everyone, in one way or another
+    if (e.k === 'gate') {
+      const mine = e.id === this.meId;
+      if (this.local && !this.runSummary) {
+        if (mine) this.runProgress = 1;
+        this.endRun(mine, undefined, e.time);
+      }
+      this.ui.big('The beacon opens', 'storm mid', mine ? `You reached it · ${fmtTime(e.time)}` : `${this.playerName(e.id)} reached it · ${fmtTime(e.time)}`, 2.2);
+      this.ui.objective('Hold on', 3);
+      this.ui.clearTip();
+      this.heaven.closePortal();
+    }
+    if (e.k === 'arena') { this.localDeathShown = false; this.deathCam = 0; this.spectate = 0; this.lastHud = ''; this.ui.bottom(''); this.ui.clearBig(); }
+    // past the beacon, going down is not the end of the run
+    if (e.k === 'death' && this.arena.inArena) {
+      if (e.id === this.meId) this.arena.localDown(e);
+      else {
+        this.ui.toast(`${this.playerName(e.id)} is down`);
+        this.audio.otherDied();
+        if (e.cause !== 'fall') this.effects.particles.burst(e.p[0], e.p[1] + 1, e.p[2], 40, 6, 0.8, 0.35, [1, 0.45, 0.3], 1, 5);
+      }
+      this.lastHud = '';
+      return;
+    }
+    if (this.arena.onEvent(e, this.matchTime)) { if (e.k === 'pick' || e.k === 'respawn' || e.k === 'hurt') this.lastHud = ''; return; }
     switch (e.k) {
       case 'death': {
         if (e.id === this.meId && this.local) {
@@ -882,10 +1001,29 @@ export class Game {
     this.runSummary = { progress: this.runProgress, area, escaped, cause, time, prevBest: rec.prev, further: rec.further, faster: rec.faster, assisted };
   }
 
+  /** The Warden fell: this fight's time against this browser's best. */
+  private recordFight(time: number): FightSummary {
+    let prev: number | null = null;
+    try { const v = Number(localStorage.getItem(FIGHT_BEST_KEY)); if (v > 0 && isFinite(v)) prev = v; } catch { /* private window */ }
+    const best = prev === null || time < prev;
+    if (best) { try { localStorage.setItem(FIGHT_BEST_KEY, String(Math.round(time * 100) / 100)); } catch { /* private window */ } }
+    return { won: true, time, prevBest: prev, best };
+  }
+
   // ------------------------------------------------------------------ input
 
   private onKey(code: string) {
     if (this.debug.toggle(code)) return;
+    if (this.mode === 'playing' && !this.paused) {
+      if (this.arena.onKey(code)) return;
+      this.arena.skipReveal();
+    }
+    // F10: open the beacon now (on the course); in the arena, the Warden to half health (Shift: nearly dead)
+    if (code === 'F10' && this.debug.allowed && this.serverDebug && this.mode === 'playing') {
+      if (!this.arena.inArena) { this.conn?.send({ t: 'dbg', cmd: 'gate' }); this.ui.toast('The beacon opens'); }
+      else { const v = this.input.isDown('ShiftLeft') ? 0.03 : 0.51; this.conn?.send({ t: 'dbg', cmd: 'bosshp', v }); this.ui.toast(`The Warden at ${Math.round(v * 100)}%`); }
+      return;
+    }
     if (code === 'F4' && this.debug.allowed && this.mode === 'playing') {
       this.debug.freeCam = !this.debug.freeCam;
       this.debug.camPos.copy(this.r.camera.position);
@@ -901,7 +1039,7 @@ export class Game {
       this.ui.toast(this.godMode ? 'God mode ON (enemies and lasers cannot kill you)' : 'God mode OFF');
       return;
     }
-    if (this.debug.overlay && this.serverDebug && this.local && !this.local.dead && /^Digit\d$/.test(code)) {
+    if (this.debug.overlay && this.serverDebug && this.local && !this.local.dead && !this.arena.inArena && /^Digit\d$/.test(code)) {
       const n = code === 'Digit0' ? 9 : Number(code.slice(5)) - 1;
       const wp = this.level.waypoints[n + (this.input.isDown('ShiftLeft') ? 10 : 0)];
       if (wp) {
@@ -919,16 +1057,17 @@ export class Game {
     if (code === 'KeyR' && this.mode === 'results' && this.ui.overlayOpen && this.hostId === this.meId) {
       this.audio.click();
       this.input.requestLock();
-      this.conn?.send({ t: 'start' });
+      // after a fight, R is a rematch with the Warden
+      this.conn?.send(this.arenaShown ? { t: 'start', stage: 'boss' } : { t: 'start' });
       return;
     }
-    if (this.mode === 'playing' && this.local && (this.local.dead || this.local.finished) && (code === 'Space' || code === 'KeyE')) this.nextSpectate();
+    if (this.mode === 'playing' && this.local && !this.arenaShown && (this.local.dead || this.local.finished) && (code === 'Space' || code === 'KeyE')) this.nextSpectate();
   }
 
   private openPause() {
     this.paused = true;
     if (this.offline) this.conn?.setPaused(true);
-    this.ui.pause(this.hostId === this.meId, this.offline, this.lobbyPlayers.length === 1);
+    this.ui.pause(this.hostId === this.meId, this.offline, this.lobbyPlayers.length === 1, this.arena.inArena);
     this.ui.captureHint(false);
   }
 
@@ -949,7 +1088,7 @@ export class Game {
 
   /** Q / E: a dash across the way the camera is facing. */
   private readDash(can: boolean): { dashX: number; dashZ: number } {
-    if (this.heaven.inRoom || this.local?.motor.flying) return { dashX: 0, dashZ: 0 };
+    if (this.heaven.inRoom || this.local?.motor.flying || this.arena.locksInput) return { dashX: 0, dashZ: 0 };
     const left = can && this.input.wasPressed('KeyQ');
     const right = can && this.input.wasPressed('KeyE');
     if (left === right) return { dashX: 0, dashZ: 0 };
@@ -963,7 +1102,7 @@ export class Game {
     // Viktor's speech walks the runner onto its mark (the keys do nothing meanwhile)
     const st = this.heaven.steer;
     if (st && !this.paused) return { x: st.x * 0.45, z: st.z * 0.45, sprint: false, jumpHeld: false, jumpPressed: false, aimYaw: st.yaw };
-    const can = !this.paused && !this.debug.freeCam && !this.heaven.locksInput;
+    const can = !this.paused && !this.debug.freeCam && !this.heaven.locksInput && !this.arena.locksInput;
     let ix = 0, iz = 0;
     if (can) {
       if (inp.anyDown('KeyW', 'ArrowUp')) iz += 1;
@@ -1018,17 +1157,20 @@ export class Game {
 
     const t = this.mode === 'playing' || this.mode === 'results' ? this.matchTime : this.time;
     if (this.mode !== 'playing' && this.mode !== 'results') this.world.update(this.time);
-    this.levelView.update(this.world, t, dt);
-    this.hazards.update(t);
-    this.pickups.update(this.time, dt);
-    this.props.update(this.time, dt);
+    // the course is not drawn in the arena: leave it be
+    if (!this.arenaShown) {
+      this.levelView.update(this.world, t, dt);
+      this.hazards.update(t);
+      this.pickups.update(this.time, dt);
+      this.props.update(this.time, dt);
+    }
     this.sky.update(this.time, dt, this.r.camera.position);
     this.r.setLightning(this.sky.flashLevel);
     const lv = this.local ? this.local.renderVel : tmpV.set(0, 0, 0);
-    this.effects.update(dt, t, this.r.camera, this.world, lv);
+    this.effects.update(dt, t, this.r.camera, this.activeWorld, lv);
     this.r.focusShadows(this.local ? this.local.renderPos : this.r.camera.position);
     const lr = this.local;
-    const shadowWorld = this.heaven.inRoom && this.heaven.view ? this.heaven.view.world : this.world;
+    const shadowWorld = this.heaven.inRoom && this.heaven.view ? this.heaven.view.world : this.activeWorld;
     this.dropShadow.update(shadowWorld, lr ? lr.renderPos : tmpV, !!lr && this.mode === 'playing' && !lr.dead && !lr.finished && lr.model.root.visible);
     this.audio.setListener(this.r.camera);
     this.listenerRight.set(1, 0, 0).applyQuaternion(this.r.camera.quaternion);
@@ -1076,15 +1218,20 @@ export class Game {
 
     const move = this.readMove();
     const room = this.heaven.inRoom && this.heaven.view ? this.heaven.view : null;
-    if (local) local.update(dt, move, room ? room.world : this.world, mt);
-    if (room) {
+    // the arena first: a power that moves the runner moves it in this very frame
+    const canAct = !this.paused && !this.debug.freeCam && this.input.locked;
+    this.arena.wheel(this.input.wheel);
+    this.arena.update(dt, this.time, mt, canAct && this.input.mouseLeftPressed, canAct && this.input.mouseLeftDown, canAct);
+    if (local) local.update(dt, move, room ? room.world : this.activeWorld, mt);
+    if (this.arenaShown) { /* no portal, no Viktor past the beacon */ }
+    else if (room) {
       const canTalk = !this.paused && !this.debug.freeCam;
       this.heaven.update(dt, this.time, mt, local, {
         interact: canTalk && this.input.wasPressed('KeyE'),
         advance: canTalk && (this.input.wasPressed('Space') || this.input.mouseLeftPressed),
       }, this.paused);
     } else {
-      const canEnter = !!local && !local.dead && !local.finished && !local.frozen && !local.motor.canFly && this.phase === 'playing' && !this.paused;
+      const canEnter = !!local && !local.dead && !local.finished && !local.frozen && !local.motor.canFly && this.phase === 'playing' && !this.paused && this.arena.stage === 'course';
       this.heaven.updateCourse(dt, this.time, mt, local, canEnter, this.listenerRight);
     }
 
@@ -1095,6 +1242,7 @@ export class Game {
     let droneD = Infinity;
     const lp = local ? local.renderPos : this.r.camera.position;
     for (const e of this.enemies) {
+      if (this.arenaShown) break;
       e.update(renderT, dt, mt, this.r.camera.position);
       const hunting = e.state === EState.Chase || e.state === EState.Alert || e.state === EState.Attack;
       // nobody is hunting a runner who has already escaped (or died)
@@ -1103,11 +1251,11 @@ export class Game {
       if (this.debug.cones) this.debug.updateCone(e.id, e.kind, e.pos, e.yaw, hunting);
     }
     this.danger += ((chasers > 0 ? 1 : 0) - this.danger) * damp(chasers > 0 ? 6 : 1.2, dt);
-    this.vignette.style.opacity = String(this.danger * 0.85);
+    this.vignette.style.opacity = String(Math.max(this.danger, this.arena.danger) * 0.85);
     this.nearestDrone = nearestDrone;
 
     // wind gust sounds near the player
-    if (local && !room) {
+    if (local && !room && !this.arenaShown) {
       for (const w of this.level.winds) {
         const cx = (w.min[0] + w.max[0]) / 2, cz = (w.min[2] + w.max[2]) / 2;
         const u = ((mt / w.period + w.phase) % 1 + 1) % 1;
@@ -1122,7 +1270,7 @@ export class Game {
     if (local && !local.dead && !local.finished && !room) {
       const lp2 = local.pos;
       // first-time tips near each new kind of obstacle
-      if (this.time - this.hintAt > 3) {
+      if (this.time - this.hintAt > 3 && !this.arenaShown) {
         for (const h of this.level.hints) {
           if (this.hintsShown.has(h.key)) continue;
           if (Math.hypot(lp2.x - h.p[0], lp2.z - h.p[2]) < h.r && Math.abs(lp2.y - h.p[1]) < 4) {
@@ -1143,12 +1291,12 @@ export class Game {
       if (m.flying) this.flightTrail(local.renderPos, local.renderVel, dt);
     }
     for (const rp of this.remotes.values()) if (rp.anim === Anim.Fly && rp.status === Status.Alive) this.flightTrail(rp.pos, rp.vel, dt);
-    for (const p of this.hazards.switchedOn) if (p.distanceTo(lp) < 24) this.audio.laserOn(p);
+    if (!this.arenaShown) for (const p of this.hazards.switchedOn) if (p.distanceTo(lp) < 24) this.audio.laserOn(p);
     this.updateAbilities(mt);
 
     this.updateCamera(dt, mt);
     this.sendState(dt);
-    if (!room) this.updateArea(dt);
+    if (!room && !this.arenaShown && this.arena.stage === 'course') this.updateArea(dt);
     this.updateHud(mt);
   }
 
@@ -1197,9 +1345,10 @@ export class Game {
       return;
     }
     if (!local) return;
-    // Viktor's speech has its own camera set-ups
+    // Viktor's speech has its own camera set-ups, and so has arriving at the Warden (and going down there)
     if (this.heaven.ownsCamera) return;
-    const camWorld = this.heaven.inRoom && this.heaven.view ? this.heaven.view.world : this.world;
+    if (this.arena.ownsCamera) { this.arena.updateCamera(dt); return; }
+    const camWorld = this.heaven.inRoom && this.heaven.view ? this.heaven.view.world : this.activeWorld;
     const ended = local.dead || local.finished;
     if (local.dead && local.doomed) {
       // watch the fall from the edge, then move on to spectating
@@ -1225,7 +1374,9 @@ export class Game {
       this.ui.bottom(local.finished && this.aliveRemotes() > 0 ? 'Waiting for the others…' : '');
     }
     const b = local.motor.body;
-    this.cam.update(dt, { pos: local.renderPos, vel: local.renderVel, grounded: b.grounded, sprinting: local.motor.anim === Anim.Sprint, riding: !!local.motor.zip || !!local.motor.grapple, low: local.motor.sliding, dashing: this.dashKick > 0.05, boosted: local.motor.boost, flying: local.motor.flying, shoulder: this.heaven.inRoom ? this.heaven.shoulder : 0 }, camWorld, mt);
+    // in the arena the view sits a little further back and over the shoulder, so the crosshair clears the runner
+    const fight = this.arenaShown ? 1 : 0;
+    this.cam.update(dt, { pos: local.renderPos, vel: local.renderVel, grounded: b.grounded, sprinting: local.motor.anim === Anim.Sprint, riding: !!local.motor.zip || !!local.motor.grapple, low: local.motor.sliding, dashing: this.dashKick > 0.05, boosted: local.motor.boost || local.motor.flashing, flying: local.motor.flying, shoulder: this.heaven.inRoom ? this.heaven.shoulder : fight * 0.55, far: fight * 1.3 }, camWorld, mt);
     this.dashKick = Math.max(0, this.dashKick - dt * 3);
   }
 
@@ -1253,6 +1404,7 @@ export class Game {
       p: [r(b.pos.x), r(b.pos.y), r(b.pos.z)],
       v: [r(b.vel.x + b.ext.x), r(b.vel.y), r(b.vel.z + b.ext.z)],
       y: r(local.motor.yaw), a: local.anim, g: local.groundId, tm: r(this.matchTime),
+      b: this.arenaShown ? 1 : undefined,
     });
   }
 
@@ -1284,7 +1436,8 @@ export class Game {
       let status = p.status;
       if (p.id === this.meId && this.local) status = this.local.dead ? Status.Dead : this.local.finished ? Status.Finished : Status.Alive;
       else if (rp) status = rp.status;
-      return { id: p.id, name: p.name, status, me: p.id === this.meId, connected: p.connected };
+      const fight = this.arena.info(p.id);
+      return { id: p.id, name: p.name, status, me: p.id === this.meId, connected: p.connected, hp: fight ? Math.round(fight.hp / 5) * 5 : undefined, power: fight?.power };
     });
     const key = JSON.stringify(list);
     if (key !== this.lastHud) { this.lastHud = key; this.ui.hudPlayers(list); }
@@ -1304,7 +1457,7 @@ export class Game {
       if (local.motor.zip && !local.dead) { zip = local.motor.zipSpeed; speed = zip; }
       belt = !local.dead && b.grounded && !!b.ground?.def.belt;
     }
-    this.audio.update(dt, { exposure, speed, falling, chase: this.danger, drone: inGame ? this.nearestDrone : null, inGame, zip, belt, heaven: this.heaven.inRoom ? 1 : 0, flying, fly });
+    this.audio.update(dt, { exposure, speed, falling, chase: this.arenaShown ? 0 : this.danger, drone: inGame && !this.arenaShown ? this.nearestDrone : null, inGame, zip, belt, heaven: this.heaven.inRoom ? 1 : 0, flying, fly, arena: this.arenaShown && (this.mode === 'playing' || this.mode === 'results') });
   }
 
   private updateDebugText() {
@@ -1322,7 +1475,8 @@ export class Game {
       const S = ['idle', 'alert', 'chase', 'attack', 'search', 'return'];
       const near = [...this.enemies].sort((a, b) => a.pos.distanceTo(this.r.camera.position) - b.pos.distanceTo(this.r.camera.position)).slice(0, 5);
       for (const e of near) lines.push(`enemy ${e.id} ${e.kind.padEnd(6)} ${S[e.state].padEnd(6)} tgt ${e.target} ${e.pos.distanceTo(this.r.camera.position).toFixed(0)}m`);
-      lines.push('F4 free cam · F6 vision · F7 god · F8 restart · 1-0 teleport (Shift +10)');
+      if (this.arena.inArena) lines.push(this.arena.debugLine());
+      lines.push('F4 free cam · F6 vision · F7 god · F8 restart · F10 beacon / Warden hp · 1-0 teleport (Shift +10)');
     }
     this.ui.debug(lines.join('\n'));
   }

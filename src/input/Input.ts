@@ -7,8 +7,10 @@ export class Input {
   mouseDX = 0;
   mouseDY = 0;
   mouseClicked = false;
-  /** Left mouse button pressed this frame while the mouse is captured (flight: take off / land). */
+  /** Left mouse button pressed this frame while the mouse is captured (flight: take off / land; a power in the arena). */
   mouseLeftPressed = false;
+  /** Left mouse button held down right now (lightning keeps firing while it is). */
+  mouseLeftDown = false;
   /**
    * Hold Ctrl as a game key (flight descends with it): Ctrl shortcuts the page
    * is allowed to stop (Ctrl+D, Ctrl+S, ...) are swallowed while this is on.
@@ -18,6 +20,8 @@ export class Input {
   mouseRightPressed = false;
   /** Right mouse button held down right now (the grapple hangs on while it is). */
   mouseRightDown = false;
+  /** Mouse wheel notches this frame (+ down, - up), while the mouse is captured. */
+  wheel = 0;
   locked = false;
   /**
    * A lock request is in flight. Starting a run asks for the mouse from the
@@ -35,7 +39,7 @@ export class Input {
   constructor(private readonly canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
       if (isTyping(e)) return;
-      if (['Space', 'ArrowUp', 'ArrowDown', 'Tab', 'F3', 'F4', 'F6', 'F7', 'F8', 'F9'].includes(e.code)) e.preventDefault();
+      if (['Space', 'ArrowUp', 'ArrowDown', 'Tab', 'F3', 'F4', 'F6', 'F7', 'F8', 'F9', 'F10'].includes(e.code)) e.preventDefault();
       if (this.trapCtrl && (e.ctrlKey || e.code === 'ControlLeft' || e.code === 'ControlRight')) e.preventDefault();
       if (!this.down.has(e.code)) this.pressed.add(e.code);
       this.down.add(e.code);
@@ -45,24 +49,25 @@ export class Input {
       this.down.delete(e.code);
       this.released.add(e.code);
     });
-    window.addEventListener('blur', () => { this.down.clear(); this.mouseRightDown = false; });
+    window.addEventListener('blur', () => { this.down.clear(); this.mouseRightDown = false; this.mouseLeftDown = false; });
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
       this.mouseDX += e.movementX;
       this.mouseDY += e.movementY;
     });
     canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) { this.mouseClicked = true; if (this.locked) this.mouseLeftPressed = true; }
+      if (e.button === 0) { this.mouseClicked = true; if (this.locked) { this.mouseLeftPressed = true; this.mouseLeftDown = true; } }
       if (e.button === 2) { this.mouseRightPressed = true; this.mouseRightDown = true; }
     });
     // on the window, so letting go over a menu or outside the page still counts
-    window.addEventListener('mouseup', (e) => { if (e.button === 2) this.mouseRightDown = false; });
+    window.addEventListener('mouseup', (e) => { if (e.button === 2) this.mouseRightDown = false; if (e.button === 0) this.mouseLeftDown = false; });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('wheel', (e) => { if (this.locked) this.wheel += Math.sign(e.deltaY); }, { passive: true });
     document.addEventListener('pointerlockerror', () => { this.lockPending = false; });
     document.addEventListener('pointerlockchange', () => {
       this.lockPending = false;
       this.locked = document.pointerLockElement === this.canvas;
-      if (!this.locked) { this.down.clear(); this.mouseRightDown = false; }
+      if (!this.locked) { this.down.clear(); this.mouseRightDown = false; this.mouseLeftDown = false; }
       this.onLockChange?.(this.locked);
     });
   }
@@ -103,6 +108,7 @@ export class Input {
     this.mouseClicked = false;
     this.mouseLeftPressed = false;
     this.mouseRightPressed = false;
+    this.wheel = 0;
   }
 }
 

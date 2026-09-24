@@ -815,6 +815,8 @@ export class Fight {
     this.warden.point(0, 1.9, -0.6, c);
     const dx = c.x - o.pos.x, dy = c.y - o.pos.y, dz = c.z - o.pos.z, d = Math.hypot(dx, dy, dz) || 1;
     o.vel.x = (dx / d) * speed; o.vel.y = (dy / d) * speed; o.vel.z = (dz / d) * speed;
+    // everyone redraws it on its new course
+    this.emit({ k: 'orb', id: o.id, p: p3(o.pos), v: p3(o.vel), t: r2(this.time) });
   }
 
   private punch(q: Fighter, o: Vec3, d: Vec3, tr: number) {

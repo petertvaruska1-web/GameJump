@@ -1,8 +1,9 @@
 // DOM user interface: main menu, join, how-to-play, settings, lobby, HUD,
 // pause menu, results and error dialogs. Minimal during gameplay.
 
-import { MAX_PLAYERS } from '../../shared/constants';
+import { MAX_PLAYERS, SUPERS } from '../../shared/constants';
 import { Status, type LobbyPlayer, type MatchResult, type Phase } from '../../shared/protocol';
+import { POWER_INFO } from '../game/Powers';
 import { PLAYER_CSS } from '../render/CharacterModel';
 import { loadBest, type PersonalBest, type Settings } from '../settings';
 import './styles.css';
@@ -13,6 +14,8 @@ export interface UIHandlers {
   offline(name: string): void;
   ready(r: boolean): void;
   start(): void;
+  /** Straight into the Warden's arena (a rematch, or from the lobby once the beacon has been reached). */
+  startBoss(): void;
   /** Throw away the run in progress and count down a new one (host alone in the room). */
   restart(): void;
   leave(): void;
@@ -31,7 +34,17 @@ export interface LobbyView {
   offline: boolean;
 }
 
-export interface HudPlayer { id: number; name: string; status: Status; me: boolean; connected: boolean }
+export interface HudPlayer { id: number; name: string; status: Status; me: boolean; connected: boolean; hp?: number; power?: number }
+
+/** How the fight with the Warden went, for the results screen. */
+export interface FightSummary {
+  won: boolean;
+  /** Seconds from arriving in the arena to the Warden's fall. */
+  time: number;
+  /** This browser's best fight time before this one (null: the first win). */
+  prevBest: number | null;
+  best: boolean;
+}
 
 /** A line of dialogue on screen: who speaks, the line so far, and where we are in the speech. */
 export interface DialogueView {
@@ -233,6 +246,14 @@ export class UI {
         <li><b>Drones</b> fly after you, even vertically. Hide behind structures until they give up.</li>
         <li>Enemies only chase what they can <i>see</i>. Break line of sight and they search, then return to their post.</li>
       </ul>
+      <h3>The Warden</h3>
+      <ul>
+        <li>The beacon on the Spire is a door. Reach it and the whole team is pulled through into the storm, where the Warden guards the way on: a four-legged war machine that launches bots.</li>
+        <li>Pick one power with <kbd>1</kbd>-<kbd>6</kbd> and use it with the <kbd>Left mouse</kbd> button. Everything you could do on the course still works: sprint, slide, dash, grapple the anchors, ride the zip lines, climb onto its back.</li>
+        <li><b>Kinetic Force</b> punches (in the air: a meteor slam) · <b>Telekinesis</b> grabs and throws bots, canisters, plates and its own shells · <b>Lightning</b> chains bolts while held · <b>Gravity</b> throws a crushing well and lets you float · <b>Super Speed</b> flash-strikes through everything in a line · <b>Teleport</b> blinks to the crosshair, tearing space.</li>
+        <li>Its core on its back and its eye while it charges the beam take more damage. Break its poise and it staggers; charge it into a conductor pillar and it crashes. Down to half and it goes into overdrive.</li>
+        <li>You can be knocked down. You come back at the arena's beacon a few seconds later, and can change your power while you wait.</li>
+      </ul>
       <h3>Routes</h3>
       <p>Three main routes split and rejoin. The safer-looking one may be much longer; the fast one may have brutal jumps or open sightlines. Teammates can split up — anyone who dies keeps watching the others.</p>`;
   }
@@ -323,6 +344,7 @@ export class UI {
         <button class="btn small danger" data-a="leave">Leave</button>
         <div class="row">
           ${!isHost ? `<button class="btn small ${me?.ready ? '' : 'primary'}" data-a="ready">${me?.ready ? 'Not ready' : 'Ready'}</button>` : ''}
+          ${isHost && reachedWarden() ? `<button class="btn small" data-a="boss" ${allReady ? '' : 'disabled'} title="Skip the course: the fight with the Warden">Straight to the Warden</button>` : ''}
           ${isHost ? `<button class="btn primary center" data-a="start" ${allReady ? '' : 'disabled'}>Start run</button>` : ''}
         </div>
       </div>
@@ -331,6 +353,7 @@ export class UI {
     s.querySelector('[data-a=leave]')!.addEventListener('click', () => this.h.leave());
     s.querySelector('[data-a=ready]')?.addEventListener('click', () => this.h.ready(!me?.ready));
     s.querySelector('[data-a=start]')?.addEventListener('click', () => this.h.start());
+    s.querySelector('[data-a=boss]')?.addEventListener('click', () => this.h.startBoss());
     // Enter or Space starts the run straight away
     const startBtn = s.querySelector<HTMLButtonElement>('[data-a=start]:not([disabled])');
     if (startBtn && (document.activeElement === document.body || !document.activeElement)) startBtn.focus();
@@ -353,9 +376,14 @@ export class UI {
     const box = this.hud.querySelector<HTMLElement>('.hud-players')!;
     // on your own the roster is just your name saying you are alive: leave the corner clear
     box.classList.toggle('hidden', list.length < 2);
+    box.classList.toggle('arena', list.some((p) => p.hp !== undefined));
     box.innerHTML = list.map((p) => {
       const st = !p.connected && p.status === Status.Alive ? ['lost', 'Reconnecting'] : p.status === Status.Alive ? ['alive', 'Alive'] : p.status === Status.Dead ? ['dead', 'Dead'] : p.status === Status.Finished ? ['finished', 'Escaped'] : ['left', 'Left'];
-      return `<div class="hud-player ${p.me ? 'me' : ''}" style="border-left-color:${PLAYER_CSS[(p.id - 1) % 3]}"><span class="n">${esc(p.name)}</span><span class="s ${st[0]}">${st[1]}</span></div>`;
+      const arena = p.hp !== undefined;
+      const pw = arena && p.power !== undefined && p.power >= 0 ? POWER_INFO[SUPERS[p.power]] : null;
+      const hp = arena ? `<i class="hp"><i style="width:${Math.max(0, Math.min(100, p.hp!))}%;${p.hp! < 35 ? 'background:var(--danger)' : ''}"></i></i>` : '';
+      const label = arena && p.status === Status.Dead ? ['dead', 'Down'] : arena && p.status === Status.Finished ? ['finished', 'Won'] : st;
+      return `<div class="hud-player ${p.me ? 'me' : ''}" style="border-left-color:${PLAYER_CSS[(p.id - 1) % 3]}"><span class="n">${esc(p.name)}</span>${pw ? `<b class="s" style="color:${pw.color}">${esc(pw.name)}</b>` : ''}${hp}<span class="s ${label[0]}">${label[1]}</span></div>`;
     }).join('');
   }
 
@@ -457,13 +485,20 @@ export class UI {
    * Fades the screen to (or from) white light. `to` is the target opacity, over
    * `seconds`; the colour warms toward gold for the blessing.
    */
-  whiteout(to: number, seconds: number, warm = false) {
+  whiteout(to: number, seconds: number, warm = false, tone: '' | 'storm' = '') {
     const f = this.fade;
     f.classList.toggle('warm', warm);
+    f.classList.toggle('storm', tone === 'storm');
     f.style.transition = `opacity ${seconds}s ${to > 0 ? 'ease-in' : 'ease-out'}`;
     void f.offsetWidth;
     f.style.opacity = String(to);
   }
+
+  /** The HUD's element (the arena lays its own HUD into it). */
+  get hudRoot(): HTMLElement { return this.hud; }
+
+  /** In the Warden's arena: the fight's HUD takes over parts of the run's. */
+  arenaHud(on: boolean) { this.hud.classList.toggle('arena', on); this.hud.querySelector('.crosshair')?.classList.toggle('arena', on); }
 
   /** In the white room the HUD's light-on-dark text turns dark-on-light. */
   heavenHud(on: boolean) { this.hud.classList.toggle('heaven', on); }
@@ -520,14 +555,14 @@ export class UI {
 
   // ------------------------------------------------------------------ overlays
 
-  pause(isHost: boolean, offline: boolean, solo = false) {
+  pause(isHost: boolean, offline: boolean, solo = false, arena = false) {
     this.closeOverlay();
     const o = el(`<div class="screen center interactive"><div class="panel" style="width:min(380px,92vw)">
       <h2>Paused</h2>
       ${offline ? '' : '<p class="hint">The world keeps moving while you are in this menu.</p>'}
       <div class="menu" style="width:100%">
         <button class="btn primary" data-a="resume">Resume</button>
-        ${isHost && solo ? '<button class="btn" data-a="restart">Restart run</button>' : ''}
+        ${isHost && solo ? `<button class="btn" data-a="restart">${arena ? 'Restart the fight' : 'Restart run'}</button>` : ''}
         <button class="btn" data-a="settings">Settings</button>
         <button class="btn" data-a="how">How to play</button>
         ${isHost ? `<button class="btn" data-a="lobby">${solo ? 'Back to lobby' : 'Return everyone to lobby'}</button>` : ''}
@@ -536,7 +571,7 @@ export class UI {
     this.root.appendChild(o);
     this.overlay = o;
     const panel = o.querySelector('.panel')!;
-    const back = () => this.pause(isHost, offline, solo);
+    const back = () => this.pause(isHost, offline, solo, arena);
     o.querySelector('[data-a=restart]')?.addEventListener('click', () => this.h.restart());
     o.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button')) this.h.click(); });
     o.querySelector('[data-a=resume]')!.addEventListener('click', () => this.h.resume());
@@ -555,7 +590,8 @@ export class UI {
 
   closePause() { this.closeOverlay(); }
 
-  results(results: MatchResult[], meId: number, isHost: boolean, duration: number, run?: RunSummary) {
+  results(results: MatchResult[], meId: number, isHost: boolean, duration: number, run?: RunSummary, fight?: FightSummary) {
+    if (fight) { this.fightResults(results, meId, isHost, fight, run); return; }
     this.closeOverlay();
     const me = results.find((r) => r.id === meId);
     const escaped = results.filter((r) => r.status === Status.Finished).length;
@@ -582,6 +618,51 @@ export class UI {
     o.querySelector('[data-a=lobby]')?.addEventListener('click', () => this.h.toLobby());
     o.querySelector('[data-a=again]')?.addEventListener('click', () => this.h.start());
     o.querySelector<HTMLButtonElement>('[data-a=again]')?.focus();
+  }
+
+  /** The Warden is down: the fight's numbers, everyone's share, and a rematch. */
+  private fightResults(results: MatchResult[], meId: number, isHost: boolean, f: FightSummary, run?: RunSummary) {
+    this.closeOverlay();
+    const me = results.find((r) => r.id === meId);
+    const solo = results.length === 1;
+    const total = results.reduce((a, r) => a + (r.damage ?? 0), 0) || 1;
+    const rows = results.map((r) => {
+      const pw = r.power !== undefined && r.power >= 0 ? POWER_INFO[SUPERS[r.power]] : null;
+      const share = Math.round(((r.damage ?? 0) / total) * 100);
+      return `<tr><td><span class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${PLAYER_CSS[(r.id - 1) % 3]};margin-right:10px"></span>${esc(r.name)}${pw ? ` <span class="hint" style="color:${pw.color}">${esc(pw.name)}</span>` : ''}</td>`
+        + `<td class="r">${(r.damage ?? 0).toLocaleString()} <span class="hint">${share}%</span></td><td class="r">${r.bots ?? 0} bots</td><td class="r">${r.deaths ?? 0} down</td></tr>`;
+    }).join('');
+    const best = f.best ? (f.prevBest === null ? '<span class="tag ok">First win</span>' : `<span class="tag ok">New best · was ${fmtTime(f.prevBest)}</span>`)
+      : f.prevBest !== null ? `Your best: <b>${fmtTime(f.prevBest)}</b>` : '';
+    const stat = (v: string, l: string) => `<div><b>${v}</b><span>${l}</span></div>`;
+    const o = el(`<div class="screen center interactive"><div class="panel results-panel">
+      <h2>${f.won ? 'The Warden is down' : 'The fight is over'}</h2>
+      <div class="fight-card">
+        <div class="fight-title">${esc(me && me.power !== undefined && me.power >= 0 ? POWER_INFO[SUPERS[me.power]].name : 'The fight')}</div>
+        <div class="fight-stats">
+          ${stat(fmtTime(f.time), 'Fight')}
+          ${me ? stat((me.damage ?? 0).toLocaleString(), 'Damage') : ''}
+          ${me ? stat(String(me.bots ?? 0), 'Bots') : ''}
+          ${me ? stat(String(me.deaths ?? 0), 'Times down') : ''}
+          ${me && me.course ? stat(fmtTime(me.course), 'Course') : ''}
+        </div>
+        ${best ? `<div class="fight-best">${best}</div>` : ''}
+      </div>
+      ${run && run.escaped && !run.assisted && run.faster ? `<p class="hint">${run.prevBest?.time !== undefined ? `New course record · was ${fmtTime(run.prevBest.time)}` : 'Your first time through the beacon'}</p>` : ''}
+      ${solo ? '' : `<table class="results">${rows}</table>`}
+      ${isHost ? '' : '<p class="hint">Waiting for the host…</p>'}
+      <div class="row between"><button class="btn small danger" data-a="leave">Leave</button>${isHost
+        ? `<span class="row"><button class="btn small" data-a="lobby">Lobby</button><button class="btn small" data-a="again">Run the course</button><button class="btn primary" data-a="boss">Fight again <kbd>R</kbd></button></span>`
+        : ''}</div>
+    </div></div>`);
+    this.root.appendChild(o);
+    this.overlay = o;
+    o.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button')) this.h.click(); });
+    o.querySelector('[data-a=leave]')!.addEventListener('click', () => this.h.leave());
+    o.querySelector('[data-a=lobby]')?.addEventListener('click', () => this.h.toLobby());
+    o.querySelector('[data-a=again]')?.addEventListener('click', () => this.h.start());
+    o.querySelector('[data-a=boss]')?.addEventListener('click', () => this.h.startBoss());
+    o.querySelector<HTMLButtonElement>('[data-a=boss]')?.focus();
   }
 
   modal(title: string, message: string, buttons: { label: string; primary?: boolean; fn: () => void }[]) {
@@ -662,6 +743,11 @@ export function fmtTime(sec: number) {
   const s = Math.max(0, sec);
   const m = Math.floor(s / 60);
   return `${m}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+}
+
+/** Has this browser ever been through the beacon? (The lobby then offers the fight on its own.) */
+function reachedWarden() {
+  try { return localStorage.getItem('skyfall.warden.v1') === '1'; } catch { return false; }
 }
 
 /** A phone or tablet with no mouse or trackpad: the game cannot be controlled there. */
