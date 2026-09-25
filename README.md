@@ -102,7 +102,9 @@ What a static host can and cannot do:
 | `E` near Viktor | Talk to him (see [The portal](#the-portal)) |
 | `1`–`6` (the Warden's arena) | Choose your power (until the Warden wakes) |
 | Left mouse (the Warden's arena) | Use your power (lightning: hold) |
-| `R` (the arena, Kinetic Force) | Tear a slab of debris out of the floor and hurl it |
+| `R` (the arena, Angel) | On the ground: soar up on one great wingbeat. In the air: fold the wings and dive onto what you aim at |
+| `Space` in the air (the arena, Angel) | Beat the wings (up, again and again, while they have the strength); hold it on the way down to glide |
+| `R` (the arena, Sonic Force) | A sonic boom all round you |
 | Mouse wheel + left mouse (the arena, choosing) | Run along the power cards and pick one |
 | Left mouse | Take off / land, once Viktor has given you flight |
 | `Space` / `Ctrl` (or `C`) in flight | Climb / sink. `W` flies wherever the camera looks, `Shift` flies faster |
@@ -241,8 +243,9 @@ pad. For the rest of that run you can fly:
 You ease into speed and glide to a stop when you let go. You float just above
 whatever is below you and pull out of a dive in time rather than slam into the
 floor; hold `Ctrl` all the way down to land, which ends flight. Stopping in
-mid-air hands you back to gravity, so stopping over the void is a fall like
-any other. Walls and ceilings still stop you, enemies still see you and lasers
+mid-air hands you back to gravity, but it is not a death sentence: a click
+takes off again at any height, so a runner who can fly only dies by falling
+below the bottom of the map (the fall camera waits for that too). Walls and ceilings still stop you, enemies still see you and lasers
 still kill. A floor, a ceiling and the edges of the world keep you from flying
 away. The camera follows in all three dimensions and frames you a little below
 the middle of the screen, so the middle of the screen is exactly where forward
@@ -308,24 +311,25 @@ climb onto its back and ride it.
 ### The powers
 
 Each runner picks one of six, with `1`–`6`, and uses it with the left mouse
-button. Before the Warden wakes you can change your mind as often as you like;
-after that it is set. There are no roles or combos: every power can win the
-fight alone, and any mix works in a team.
+button (the angel and sonic force have a second move on `R`). Before the Warden
+wakes you can change your mind as often as you like; after that it is set. There
+are no roles or combos: every power can win the fight alone, and any mix works in
+a team.
 
 | Power | The button | Also |
 |---|---|---|
-| **Kinetic Force** | A combo of lunging punches (jab, cross, hook, uppercut: the hook throws things sideways, the uppercut throws them up); in the air, a meteor slam whose shockwave grows with the fall; `R` tears a slab out of the floor and hurls it, and it shatters on what it hits | You are 1.3× bigger with 160 health; batting orbs back at the machine |
+| **Angel** | A sword combo: a rising cut, a reverse cut, a whirling spin with the wings flung wide, and a two-handed overhead cleave that throws what it hits up (in the air, each slash is held up by a wingbeat). `R` on the ground soars up on one great wingbeat that blows everything round you away; `R` in the air folds the wings and dives along your aim, landing in a burst of light (on the Warden's back: into its core) | Wings: `Space` in the air beats them, lifting you in bobbing strokes while they have the strength (it comes back fast on the ground), and holding `Space` on the way down glides. 125 health, a halo, and wings that fold behind you like a statue's and open nearly four metres wide |
 | **Telekinesis** | Grab the bot, canister, plate or mortar shell under the crosshair, then throw it (54 m/s); with nothing to grab, a push that turns orbs round | A held bot is crushed while you hold it |
 | **Lightning** | Hold for rapid bolts that chain to bots and set off canisters | Heat builds (overheat: a pause); every 25 bolts into the Warden the storm answers with a thunderbolt |
 | **Gravity** | Throw a well that drags bots and loose things in, crushes them, grinds the Warden and bursts | Higher jumps; hold `Space` to float down |
-| **Super Speed** | A flash strike through everything on a line, ready again in a fraction of a second (lighter hits, many more of them) | You run half again as fast, trailing light and afterimages |
-| **Duplication** | Split off a clone of yourself (up to four). Clones fight on their own, going for bots and whatever of the Warden they can reach, and stay near you; with four out, a click sends them all at your target, hitting harder | Clones can be destroyed; one left behind steps out beside you again |
+| **Super Speed** | A dash (a flash strike through everything on a line), with a long wait between dashes | The real weapon is the run: blindingly fast (16 m/s, a 30 m/s sprint), laying a long trail of light that lasts 2.6 s and burns every bot and every foot of the Warden it touches, for as long as they touch it. Run rings round the machine |
+| **Sonic Force** | A cone of raw sonic force that travels out from your hands and strikes whatever its front reaches: bots are thrown back, loose things fly away, shots turn round, and the Warden rocks with each hit. The blast kicks you back (and up, when you fire it at the floor from the air) | `R`: a sonic boom, a ring of force all round you |
 
 Aim is the centre of the screen with a gentle lock: whatever is nearest the
 crosshair, in range and in sight is bracketed, and the power goes for it.
-Everything you do happens on your own screen at once (the lunge, the blink, the
-bolt, the sound); the server decides what it hit, rewinding the Warden to where
-you saw it.
+Everything you do happens on your own screen at once (the step into a slash, the
+dive, the bolt, the blast, the sound); the server decides what it hit, rewinding
+the Warden to where you saw it.
 
 ### The machine
 
@@ -353,7 +357,7 @@ Its health bar sits across the top of the screen with the poise under it.
 
 ### One life
 
-Runners have 100 health (Kinetic Force 160) that comes back slowly, 2.25 a second
+Runners have 100 health (the angel 125) that comes back slowly, 2.25 a second
 after four seconds without a hit. Going down is final, as on the course: you
 watch your team fight on, and when the whole team is down the Warden has won and
 the fight starts over. The results show the fight time (against this browser's
@@ -374,8 +378,11 @@ the same fighters, when they can be hurt, mostly go down within two.
 `warden.ts` is the machine's body, hit spheres and utility AI, and its hazards are
 pure functions of the numbers in each ability's event, so every client draws exactly
 what the server tests runners against. `bots.ts` has the bots, the loose things,
-orbs and wells, and `clones.ts` the clones of duplication (everything that hurts
-runners hurts them too). The arena is its own level and collision world
+orbs and wells; `fight.ts` itself also carries sonic force's waves (their front
+strikes things as it reaches them) and the speedsters' burning trails. The angel's
+wings, sword and halo are `src/render/AngelRig.ts`: about forty instanced feathers
+a wing, placed every frame from a three-bone arm that blends between a folded and a
+spread layout while the shoulder runs through the poses of a wingbeat. The arena is its own level and collision world
 (`shared/level/arena.ts`); the Warden's hull and head are "puppet" colliders the
 fight moves each tick. On the client, `src/game/Arena.ts` follows the stages, draws
 the fight from snapshots and events and turns clicks into powers
@@ -648,7 +655,8 @@ npm run balance        # route balance report: time, early / wandering / late / 
 npm run test:hazards   # server: lasers, zip/grapple not falls, launch arcs, crates, shield, cloak, slide hitbox, bodies,
 #                        and the portal: one run in ten, every spot used, shut until it opens, entry only at the ring,
 #                        untouchable while away, no instant return, back on the pad able to fly, flying over the
-#                        void is not a fall (stopping is), a flyer's speed accepted, the gift gone next run, reconnects
+#                        void is not a fall, nor is letting go of flight until the bottom of the map (then it is),
+#                        a flyer's speed accepted, the gift gone next run, reconnects
 npm run test:moves     # movement: climb reach/limit/cooldown, hooking from a standstill, swing release windows,
 #                        what a flip adds to a jump, and a dash beating a head-on stalker charge; flight: take-off,
 #                        holding height, flying along the view, climb and sink, skimming the floor, landing, walls,
@@ -658,8 +666,12 @@ npm run test:moves     # movement: climb reach/limit/cooldown, hooking from a st
 SLOPPY=1.2 npx tsx scripts/bot-routes.ts
 npm run test:boss      # the Warden against the real Room: the beacon pulling the team through (the dead too),
 #                        choosing and waking, slow healing, going down for good and the fight lost when the team
-#                        is down, each power against the Warden, bots and loose things (combos, the hurl, clones,
-#                        the rally), every ability and stagger, overdrive, the bot cap, victory; then whole fights
+#                        is down, each power against the Warden, bots and loose things (the sword combo, the soar
+#                        and the dive, the angel's wings in the real controller: beats that climb and tire, gliding,
+#                        the moat is no death for wings; the speedster's 30 m/s sprint and the trail that burns bots
+#                        and the Warden's feet; sonic waves that strike when their front arrives, throw bots back,
+#                        send loose things flying, turn shots, pass over a hidden part to hit the rest, and the
+#                        boom), every ability and stagger, overdrive, the bot cap, victory; then whole fights
 #                        by headless fighters: how long each power takes (3-5 min solo), how long a fighter lasts,
 #                        teams of 2 and 3, and no two fights open the same way (QUICK=1 skips the whole fights)
 npm run check:arena    # the arena's floor ends where it is drawn: nothing to stand on over the moat or under the rampart
