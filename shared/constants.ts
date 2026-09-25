@@ -473,8 +473,8 @@ export const POW = {
      * GLIDE_FALL and the air carries you. The strength comes back fast on the ground
      * (WING_REGEN a second) and slowly in the air.
      */
-    WING_MAX: 100, BEAT_COST: 12, BEAT_GAP: 0.22, BEAT_VY: 8.4, BEAT_MAX: 11.5, BEAT_PUSH: 2.2, BEAT_SPEED: 11,
-    WING_REGEN: 55, WING_REGEN_AIR: 6,
+    WING_MAX: 100, BEAT_COST: 6, BEAT_GAP: 0.22, BEAT_VY: 8.4, BEAT_MAX: 11.5, BEAT_PUSH: 2.2, BEAT_SPEED: 11,
+    WING_REGEN: 55, WING_REGEN_AIR: 3,
     GLIDE_FALL: 3.2, GLIDE_ACCEL: 1.7, GLIDE_SPEED: 10,
     /** R on the ground: one great beat that throws you up at SOAR_VY and blows everything round you away. */
     SOAR_COOLDOWN: 3.5, SOAR_VY: 16.5, SOAR_RADIUS: 5.5, SOAR_KNOCK: 14, SOAR_LIFT: 7, SOAR_DAMAGE: 14, SOAR_BOSS: 18, SOAR_POISE: 10,

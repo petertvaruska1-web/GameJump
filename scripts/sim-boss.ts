@@ -283,16 +283,22 @@ function wardenPart(room: Room, part: number): PartSphere {
   const y0 = m2.body.pos.y;
   let top = y0, beats = 0, dips = 0, lastVy = 0;
   const every = Math.round(0.3 / PHYS.STEP);
-  run(m2, 7, (i) => {
+  // (a beat every 0.3 s for 12 s; the first beat that finds the wings too tired ends the climb)
+  let tiredAt = -1, beatsTired = 0;
+  run(m2, 12, (i) => {
     top = Math.max(top, m2.body.pos.y);
     if (m2.events.beat) beats++;
     if (lastVy > 0 && m2.body.vel.y <= 0) dips++;
     lastVy = m2.body.vel.y;
-    return { ...idle(), jumpPressed: i % every === 0 };
+    const press = i % every === 0;
+    if (press && tiredAt < 0 && i > 0 && m2.wingStamina < POW.angel.BEAT_COST) { tiredAt = i * PHYS.STEP; beatsTired = beats; }
+    return { ...idle(), jumpPressed: press };
   });
-  const maxBeats = Math.floor((POW.angel.WING_MAX + POW.angel.WING_REGEN_AIR * 7) / POW.angel.BEAT_COST) + 1;
+  const maxBeats = Math.floor((POW.angel.WING_MAX + POW.angel.WING_REGEN_AIR * Math.max(0, tiredAt)) / POW.angel.BEAT_COST) + 1;
   check('angel: beat after beat climbs high, rising and sinking with each stroke', top - y0 > 8 && dips >= 5, `climbed ${(top - y0).toFixed(1)} m, ${beats} beats, ${dips} tops`);
-  check('angel: the wings tire (a beat costs strength, and it comes back slowly in the air)', beats <= maxBeats && beats >= 6, `${beats} beats in 7 s (at most ${maxBeats})`);
+  check('angel: the wings tire (a beat costs strength, and it comes back slowly in the air)', beatsTired <= maxBeats && tiredAt > 0, `${beatsTired} beats before they tired after ${tiredAt.toFixed(1)} s (at most ${maxBeats})`);
+  // at first a beat cost 12 of the 100 and the air gave back 6 a second: a beat every 0.3 s tired them in 2.7 s
+  check('angel: the wings keep beating twice as long as they first did', tiredAt >= 2 * 2.7, `tired after ${tiredAt.toFixed(1)} s of beating (was 2.7 s)`);
   // gliding: Space held on the way down
   const m3 = fresh(), m4 = fresh();
   m3.body.pos.y = m4.body.pos.y = ARENA.y + 30;
