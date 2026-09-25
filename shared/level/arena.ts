@@ -40,6 +40,9 @@ export const ANVIL = {
   THRESHOLD_Z: -52,
 };
 
+/** How many slabs make the rim of the round floor. */
+const FLOOR_SLABS = 24;
+
 /** Where the arena is in the world. */
 export const at = (x: number, y: number, z: number): V3 => [ARENA.x + x, ARENA.y + y, ARENA.z + z];
 /** A point at angle `phi` and radius `r` from the centre, `y` above the floor. */
@@ -65,10 +68,21 @@ export function buildArena(): ArenaData {
 
   // ------------------------------------------------------------ the Anvil (floor)
   b.section('Anvil');
-  // a disc of four squares turned by an eighth of a turn each: a sixteen-point star
-  // whose points reach 2% past the edge, drawn as a round floor by the arena view
+  // The round floor is built from boxes that never reach past its edge (the arena view
+  // draws the disc itself). Big squares turned against each other would poke their
+  // corners out to 1.41 times their size, under the moat and the rampart, and leave an
+  // invisible floor there; so: a core of four small turned squares (reaching 16-19 m),
+  // and a ring of slabs out to the edge, each as wide as its share of the rim, so
+  // together they end between FLOOR_R and 1% past it all the way round.
+  const core = 13.4;
   for (let k = 0; k < 4; k++) {
-    b.box(at(0, -1, 0), [A.FLOOR_R * 2, 2, A.FLOOR_R * 2], 'invisible', { ry: (k * PI) / 8, visible: false, sight: false, tint: 1 });
+    b.box(at(0, -1, 0), [core * 2, 2, core * 2], 'invisible', { ry: (k * PI) / 8, visible: false, sight: false, tint: 1 });
+  }
+  const SLABS = FLOOR_SLABS, r0 = 14;
+  const slabW = 2 * A.FLOOR_R * Math.tan(PI / SLABS);
+  for (let k = 0; k < SLABS; k++) {
+    const phi = (k * 2 * PI) / SLABS;
+    b.box(polar(phi, (r0 + A.FLOOR_R) / 2, -1), [slabW, 2, A.FLOOR_R - r0], 'invisible', { ry: phi, visible: false, sight: false, tint: 1 });
   }
   // conductor pillars: tall cover, a crash for a charging Warden, a perch on top
   const pillars: V3[] = [];
