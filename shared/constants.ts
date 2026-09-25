@@ -419,7 +419,7 @@ export const ARENA = {
   KILL_DROP: 45,
   /** Server's horizontal speed limit in the arena (knockback, with slack); a speedster's is higher. */
   MAX_CLIENT_SPEED: 22,
-  MAX_SPEEDSTER_SPEED: 36,
+  MAX_SPEEDSTER_SPEED: 46,
 };
 
 /**
@@ -434,42 +434,57 @@ export const PHP = {
   REGEN_DELAY: 4,
 };
 
-export type SuperPower = 'kinetic' | 'telekinesis' | 'lightning' | 'gravity' | 'speed' | 'clone';
+export type SuperPower = 'angel' | 'telekinesis' | 'lightning' | 'gravity' | 'speed' | 'sonic';
 /** Snapshot order (index + 1 on the wire, 0 = none chosen yet). */
-export const SUPERS: SuperPower[] = ['kinetic', 'telekinesis', 'lightning', 'gravity', 'speed', 'clone'];
+export const SUPERS: SuperPower[] = ['angel', 'telekinesis', 'lightning', 'gravity', 'speed', 'sonic'];
 
-/** Most health a runner with this power has (kinetic force makes you bigger and tougher). */
+/** Most health a runner with this power has (the angel is a little tougher than a plain runner). */
 export function powerHp(k: SuperPower | null | undefined): number {
-  return k === 'kinetic' ? POW.kinetic.HP : PHP.MAX;
+  return k === 'angel' ? POW.angel.HP : PHP.MAX;
 }
 
 /**
  * The six powers. Each is one ability on the left mouse button whose behaviour
  * follows what you are doing (on the ground or in the air, holding something or
- * not), never a kit of separate moves. Server and client read the same numbers:
+ * not); the angel and sonic force have a second one on R. Server and client read the same numbers:
  * the client to play it at once, the server to decide what it hit.
  */
 export const POW = {
-  kinetic: {
-    /** The power makes you bigger (drawn this much larger) and tougher (this much health). */
-    SCALE: 1.3, HP: 160,
+  angel: {
+    /** Wings, a sword and a little more health than a plain runner. */
+    HP: 125,
     /**
-     * Punch: a short lunge along the aim, then a cone that hits everything in front of you.
-     * Punches run as a combo (jab, cross, hook, uppercut) while they come within COMBO
-     * seconds of each other; the hook throws things sideways, the uppercut throws them up.
+     * Slash: a sword combo (a rising cut, a reverse cut, a spinning sweep, an overhead
+     * cleave) while slashes come within COMBO seconds of each other. Each steps in
+     * along the aim and cuts an arc in front of you; the sweep reaches wider, the
+     * cleave further and harder, and throws what it hits up.
      */
-    COOLDOWN: 0.5, LUNGE_SPEED: 17, LUNGE_TIME: 0.13, REACH: 5.0, CONE: 0.85, COMBO: 1.0,
-    DAMAGE: 26, BOT_DAMAGE: 55, POISE: 13, KNOCK: 17, LIFT: 6, UPPERCUT_LIFT: 14, HOOK_SIDE: 12,
-    /** Meteor slam (press in the air): a dive whose landing is a shockwave that grows with the drop. */
-    SLAM_SPEED: 30, SLAM_RADIUS: 5.8, SLAM_BASE: 22, SLAM_PER_SPEED: 2.1, SLAM_MAX: 95, SLAM_POISE: 26, SLAM_COOLDOWN: 1.0,
-    /** Objects (scrap, canisters) punched away fly off at this speed. */
-    BAT_SPEED: 30,
+    COOLDOWN: 0.4, COMBO: 0.95, LUNGE_SPEED: 12, LUNGE_TIME: 0.11,
+    REACH: 4.4, CONE: 0.95, SWEEP_CONE: 1.35, CLEAVE_REACH: 5.8,
+    DAMAGE: 17, BOT_DAMAGE: 46, POISE: 8, KNOCK: 9, CUT_SIDE: 7, LIFT: 4, CLEAVE_LIFT: 12, SWEEP_K: 1.15, CLEAVE_K: 1.7,
+    /** Objects (scrap, canisters) struck with the sword fly off at this speed. */
+    BAT_SPEED: 26,
+    /** In the air every slash is held up by a beat of the wings (rising at least this fast). */
+    AIR_HOVER: 3.2,
     /**
-     * Hurl (R): tear a slab of debris out of the floor, heave it up for LIFT seconds and
-     * throw it along the aim; it shatters on whatever it hits, hurting all round it.
+     * Wings. Space in the air beats them: up at BEAT_VY (faster if already climbing, up
+     * to BEAT_MAX), a push along the move keys, BEAT_COST of the wings' strength, at most
+     * one beat every BEAT_GAP. Holding Space on the way down glides: the fall slows to
+     * GLIDE_FALL and the air carries you. The strength comes back fast on the ground
+     * (WING_REGEN a second) and slowly in the air.
      */
-    HURL_COOLDOWN: 3.5, HURL_LIFT: 0.32, HURL_SPEED: 38, HURL_RADIUS: 3,
-    HURL_DAMAGE: 60, HURL_BOT: 70, HURL_POISE: 30, HURL_KNOCK: 13,
+    WING_MAX: 100, BEAT_COST: 12, BEAT_GAP: 0.22, BEAT_VY: 8.4, BEAT_MAX: 11.5, BEAT_PUSH: 2.2, BEAT_SPEED: 11,
+    WING_REGEN: 55, WING_REGEN_AIR: 6,
+    GLIDE_FALL: 3.2, GLIDE_ACCEL: 1.7, GLIDE_SPEED: 10,
+    /** R on the ground: one great beat that throws you up at SOAR_VY and blows everything round you away. */
+    SOAR_COOLDOWN: 3.5, SOAR_VY: 16.5, SOAR_RADIUS: 5.5, SOAR_KNOCK: 14, SOAR_LIFT: 7, SOAR_DAMAGE: 14, SOAR_BOSS: 18, SOAR_POISE: 10,
+    /**
+     * R in the air: the wings fold and you dive along the aim (never shallower than
+     * DIVE_PITCH below level, so the dive stays under the server's speed limit) at
+     * DIVE_SPEED; the landing is a burst of light that grows with the speed. A wingbeat
+     * pulls out of it.
+     */
+    DIVE_COOLDOWN: 1.0, DIVE_SPEED: 32, DIVE_PITCH: 0.95, DIVE_RADIUS: 6, DIVE_BASE: 20, DIVE_PER_SPEED: 2.2, DIVE_MAX: 100, DIVE_POISE: 28,
   },
   telekinesis: {
     /** Between grabs, and after a throw (a throw needs a moment to wind up the next). */
@@ -501,31 +516,39 @@ export const POW = {
     JUMP: 1.3, FLOAT: 0.3, FLOAT_MAX_FALL: 5,
   },
   speed: {
-    /** Passive: much faster running and sprinting, snappier acceleration (and a trail of light behind you). */
-    RUN: 1.875, SPRINT: 2.25, ACCEL: 2.2,
-    /** Above this speed the trail and the afterimages show. */
-    TRAIL_SPEED: 10,
+    /** Passive: far faster running and sprinting (a sprint is 30 m/s), snappier acceleration. */
+    RUN: 2.8125, SPRINT: 3.375, ACCEL: 3,
     /**
-     * Flash strike: a straight streak along the aim that hits everything it passes.
-     * Aimed at something, it stops OVERSHOOT metres past it (at most DIST away);
-     * aimed at nothing, it runs the whole DIST.
+     * The speedster's weapon is its trail: running faster than TRAIL_SPEED lays a
+     * ribbon of light (a point every TRAIL_STEP metres) that lasts TRAIL_LIFE seconds
+     * and burns whatever touches it (within TRAIL_RADIUS of it, from the ankles to
+     * over the head): TRAIL_BOT a second to a bot, TRAIL_BOSS to the Warden, dealt
+     * every TRAIL_TICK. Run rings round the machine and through the bots.
      */
-    COOLDOWN: 0.3, CHAIN_COOLDOWN: 0.1, CHAIN_MAX: 6, CHAIN_REST: 0.45,
-    DIST: 14, OVERSHOOT: 2.5, FLASH_SPEED: 110, WIDTH: 1.7, PITCH: 0.7,
+    TRAIL_SPEED: 10, TRAIL_LIFE: 2.6, TRAIL_STEP: 0.8, TRAIL_RADIUS: 1.0, TRAIL_TICK: 0.1,
+    TRAIL_BOT: 38, TRAIL_BOSS: 60, TRAIL_POISE: 5,
+    /**
+     * Flash strike (a dash, with a long wait between them): a straight streak along
+     * the aim that hits everything it passes. Aimed at something, it stops OVERSHOOT
+     * metres past it (at most DIST away); aimed at nothing, it runs the whole DIST.
+     */
+    COOLDOWN: 3.2, DIST: 14, OVERSHOOT: 2.5, FLASH_SPEED: 110, WIDTH: 1.7, PITCH: 0.7,
     /** Damage grows with how fast you were going when you struck. */
-    BASE: 8, PER_SPEED: 0.9, BOSS_SHARE: 0.75, POISE: 6, KNOCK: 11,
+    BASE: 10, PER_SPEED: 0.9, BOSS_SHARE: 0.75, POISE: 10, KNOCK: 11,
   },
-  clone: {
-    /** Split: a copy of you steps out, up to MAX at once, one every SPLIT_COOLDOWN seconds. */
-    MAX: 4, SPLIT_COOLDOWN: 1.3, HP: 55,
-    /** They run with you: back to your side past LEASH metres, reappearing beside you past REGROUP (or when stuck). */
-    SPEED: 8.6, ACCEL: 38, LEASH: 11, REGROUP: 19, STUCK: 1.4, SLOT_R: 2.8,
-    /** What they go for: bots and the Warden within TARGET_RANGE of you. */
-    TARGET_RANGE: 15,
-    /** Their strike: an open-palm blow that reaches REACH metres from the chest. */
-    REACH: 3.4, DAMAGE: 10.5, BOT_DAMAGE: 22, POISE: 3.5, KNOCK: 7, STRIKE_COOLDOWN: 0.8,
-    /** Rally (click with all four out): they all go for what you point at, harder, for RALLY_TIME. */
-    RALLY_TIME: 3.5, RALLY_K: 1.6, RALLY_COOLDOWN: 5, RALLY_RANGE: 22,
+  sonic: {
+    /**
+     * Blast: a cone of sonic force (half-angle CONE) that leaves the hands at SPEED and
+     * strikes everything its front reaches within RANGE: the Warden, bots, loose things
+     * and shots. Bots are thrown back, loose things fly off, shots turn round; it all
+     * hits less hard the further out it is (down to 1 - FALLOFF). Firing it pushes you
+     * back (and up, when you blast the floor under you in the air).
+     */
+    COOLDOWN: 0.5, RANGE: 20, CONE: 0.5, SPEED: 70, FALLOFF: 0.45,
+    DAMAGE: 24, BOT_DAMAGE: 30, POISE: 7, KNOCK: 24, LIFT: 6.5, JUNK_SPEED: 26,
+    RECOIL: 5.5, FLOOR_KICK: 9,
+    /** R: a sonic boom, a ring of force all round you out to BOOM_RADIUS. */
+    BOOM_COOLDOWN: 6, BOOM_RADIUS: 9, BOOM_SPEED: 45, BOOM_DAMAGE: 45, BOOM_BOT: 40, BOOM_POISE: 30, BOOM_KNOCK: 26, BOOM_LIFT: 9,
   },
 };
 

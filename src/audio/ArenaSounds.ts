@@ -2,11 +2,12 @@
 //
 // Three families. The machine: footfalls you feel more than hear, hydraulics,
 // the whine of the eye charging, cannons, sirens, the groan when it staggers and
-// the long collapse when it falls. The powers: each has its own voice (a thump
-// with a crack for kinetic, a glassy pull for telekinesis, dry zaps for
-// lightning, a sub drop for gravity, a tearing rush for speed, a shimmering
-// split for duplication, and a grinding crack as a kinetic runner tears a slab
-// out of the floor). And the fight around them: metal ringing where hits land, a tick
+// the long collapse when it falls. The powers: each has its own voice (the
+// angel's blade singing through the air, the whump of its wings and a bright
+// chord when it soars or lands a dive; a glassy pull for telekinesis, dry zaps
+// for lightning, a sub drop for gravity, a tearing rush for speed; a deep thoom
+// with a crack for each sonic blast, a boom you feel). And the fight around
+// them: metal ringing where hits land, a tick
 // for your own hits, bots, orbs, explosions, the storm. Under it all runs the
 // battle music (BattleMusic), driven by how hard the fight is going.
 
@@ -42,18 +43,55 @@ export class ArenaSounds {
     if (!s) return;
     const d = s.dest, g = s.gain * k, A = this.a;
     switch (kind) {
-      case 'punch':
-        A.tone(d, { type: 'sine', f0: 170, f1: 48, gain: 0.42 * g, decay: 0.2, vary: 0.08 });
-        A.noiseHit(d, { type: 'lowpass', freq: 1400, freqEnd: 300, gain: 0.34 * g, decay: 0.16, vary: 0.1 });
-        A.noiseHit(d, { type: 'highpass', freq: 3200, gain: 0.1 * g, decay: 0.04 });
+      case 'slash':
+        // the blade: a rising whoosh, and a thin ring of steel
+        A.noiseHit(d, { type: 'bandpass', freq: 900, freqEnd: 3800, q: 1.3, gain: 0.3 * g, attack: 0.02, decay: 0.18, vary: 0.12 });
+        A.tone(d, { type: 'triangle', f0: 2300, f1: 2900, gain: 0.03 * g, decay: 0.22, vary: 0.05 });
+        A.tone(d, { type: 'sine', f0: 5200, gain: 0.012 * g, decay: 0.3, delay: 0.03 });
         break;
-      case 'slamDive':
-        A.noiseHit(d, { type: 'bandpass', freq: 500, freqEnd: 2600, q: 1.2, gain: 0.22 * g, attack: 0.12, decay: 0.3 });
+      case 'beat':
+        // a wingbeat: a soft heavy whump of air
+        A.noiseHit(d, { type: 'lowpass', freq: 650, freqEnd: 180, gain: 0.28 * g, attack: 0.03, decay: 0.24, vary: 0.1 });
+        A.noiseHit(d, { type: 'bandpass', freq: 1300, q: 0.9, gain: 0.06 * g, attack: 0.02, decay: 0.16 });
+        A.tone(d, { type: 'sine', f0: 92, f1: 55, gain: 0.16 * g, decay: 0.16 });
         break;
-      case 'slam':
+      case 'soar':
+        // one great beat, and a bright chord lifting with it
+        A.noiseHit(d, { type: 'lowpass', freq: 900, freqEnd: 120, gain: 0.55 * g, attack: 0.02, decay: 0.6 });
+        A.tone(d, { type: 'sine', f0: 70, f1: 34, gain: 0.45 * g, decay: 0.6 });
+        [523.3, 659.3, 784, 1046.5].forEach((f, i) => A.tone(d, { type: 'triangle', f0: f, f1: f * 1.02, gain: 0.035 * g, attack: 0.05, decay: 0.9, delay: 0.05 + i * 0.05 }));
+        break;
+      case 'diveStart':
+        // wings folded: the air starts to scream past
+        A.noiseHit(d, { type: 'bandpass', freq: 1200, freqEnd: 4000, q: 1.1, gain: 0.22 * g, attack: 0.25, decay: 0.3 });
+        A.tone(d, { type: 'sine', f0: 1400, f1: 620, gain: 0.05 * g, attack: 0.1, decay: 0.4 });
+        break;
+      case 'dive':
+        // landing a dive: a deep strike, and a chime of light over it
         A.tone(d, { type: 'sine', f0: 110, f1: 28, gain: 0.7 * g, decay: 0.7 });
         A.noiseHit(d, { type: 'lowpass', freq: 700, freqEnd: 120, gain: 0.55 * g, decay: 0.8 });
         A.noiseHit(d, { type: 'highpass', freq: 2200, gain: 0.2 * g, decay: 0.09 });
+        [880, 1318.5].forEach((f, i) => A.tone(d, { type: 'triangle', f0: f, gain: 0.04 * g, decay: 0.9, delay: 0.04 + i * 0.03 }));
+        break;
+      case 'blast':
+        // sonic force: a deep thoom, a crack, and the rush of the air it shoves
+        A.tone(d, { type: 'sine', f0: 72, f1: 34, gain: 0.6 * g, decay: 0.35 });
+        A.noiseHit(d, { type: 'highpass', freq: 2000, gain: 0.24 * g, decay: 0.05 });
+        A.noiseHit(d, { type: 'bandpass', freq: 400, freqEnd: 2400, q: 0.8, gain: 0.35 * g, attack: 0.01, decay: 0.3 });
+        A.tone(d, { type: 'sawtooth', f0: 180, f1: 60, gain: 0.16 * g, decay: 0.25, lp: 800 });
+        break;
+      case 'boom':
+        // the boom: felt more than heard, the air ringing after it
+        A.tone(d, { type: 'sine', f0: 56, f1: 22, gain: 0.8 * g, decay: 0.9 });
+        A.noiseHit(d, { type: 'lowpass', freq: 600, freqEnd: 80, gain: 0.6 * g, decay: 1.0 });
+        A.noiseHit(d, { type: 'highpass', freq: 1800, gain: 0.3 * g, decay: 0.07 });
+        A.tone(d, { type: 'sine', f0: 220, f1: 196, gain: 0.08 * g, attack: 0.02, decay: 0.8 });
+        break;
+      case 'impact':
+        // the wave striking something: a thud and a crack
+        A.tone(d, { type: 'sine', f0: 140, f1: 50, gain: 0.35 * g, decay: 0.2, vary: 0.1 });
+        A.noiseHit(d, { type: 'bandpass', freq: 1600, q: 1.2, gain: 0.2 * g, decay: 0.08, vary: 0.2 });
+        A.noiseHit(d, { type: 'lowpass', freq: 900, gain: 0.2 * g, decay: 0.2 });
         break;
       case 'grab':
         A.tone(d, { type: 'sine', f0: 320, f1: 760, gain: 0.12 * g, decay: 0.22 });
@@ -88,34 +126,6 @@ export class ArenaSounds {
         A.noiseHit(d, { type: 'bandpass', freq: 3400, freqEnd: 700, q: 0.9, gain: 0.34 * g, decay: 0.22 });
         A.tone(d, { type: 'sine', f0: 1400, f1: 260, gain: 0.1 * g, decay: 0.2 });
         A.tone(d, { type: 'sine', f0: 80, f1: 40, gain: 0.25 * g, decay: 0.25 });
-        break;
-      case 'rip':
-        // concrete tearing: a low crack, grinding grit, a thump as it comes free
-        A.noiseHit(d, { type: 'lowpass', freq: 900, freqEnd: 250, gain: 0.45 * g, attack: 0.01, decay: 0.35 });
-        A.noiseHit(d, { type: 'bandpass', freq: 2600, q: 1.5, gain: 0.18 * g, decay: 0.25, rate: 0.6 });
-        A.tone(d, { type: 'sine', f0: 80, f1: 40, gain: 0.35 * g, decay: 0.3, delay: 0.12 });
-        break;
-      case 'hurl':
-        A.noiseHit(d, { type: 'bandpass', freq: 500, freqEnd: 1600, q: 1, gain: 0.3 * g, attack: 0.03, decay: 0.3 });
-        A.tone(d, { type: 'sine', f0: 150, f1: 70, gain: 0.3 * g, decay: 0.25 });
-        break;
-      case 'split':
-        // a shimmer that splits in two, like a chord coming apart
-        A.tone(d, { type: 'sine', f0: 660, f1: 520, gain: 0.08 * g, decay: 0.35 });
-        A.tone(d, { type: 'sine', f0: 660, f1: 840, gain: 0.08 * g, decay: 0.35 });
-        A.noiseHit(d, { type: 'bandpass', freq: 3000, freqEnd: 900, q: 2, gain: 0.12 * g, attack: 0.02, decay: 0.25 });
-        break;
-      case 'cloneOut':
-        A.noiseHit(d, { type: 'highpass', freq: 2200, gain: 0.2 * g, decay: 0.2 });
-        [880, 740, 587].forEach((f, i) => A.tone(d, { type: 'triangle', f0: f, gain: 0.05 * g, decay: 0.2, delay: i * 0.05 }));
-        break;
-      case 'cloneHit':
-        A.tone(d, { type: 'sine', f0: 240, f1: 90, gain: 0.18 * g, decay: 0.12, vary: 0.1 });
-        A.noiseHit(d, { type: 'bandpass', freq: 1800, q: 1.5, gain: 0.1 * g, decay: 0.07, vary: 0.2 });
-        break;
-      case 'rally':
-        [440, 554, 659, 880].forEach((f, i) => A.tone(d, { type: 'sawtooth', f0: f, gain: 0.04 * g, decay: 0.3, delay: i * 0.04, lp: 2500 }));
-        A.noiseHit(d, { type: 'bandpass', freq: 800, freqEnd: 2400, q: 1, gain: 0.18 * g, attack: 0.05, decay: 0.3 });
         break;
     }
   }
@@ -306,13 +316,6 @@ export class ArenaSounds {
     if (c === 6) {
       for (let i = 0; i < 4; i++) A.noiseHit(s.dest, { type: 'highpass', freq: 2500, gain: 0.2 * g, decay: 0.08, delay: i * 0.03 });
       A.tone(s.dest, { type: 'sawtooth', f0: 120, f1: 40, gain: 0.3 * g, decay: 0.5, lp: 900 });
-      return;
-    }
-    if (c === 8) {
-      // a slab of floor breaking apart: a crack, then rubble raining down
-      A.noiseHit(s.dest, { type: 'highpass', freq: 1600, gain: 0.3 * g, decay: 0.08 });
-      A.noiseHit(s.dest, { type: 'lowpass', freq: 700, freqEnd: 150, gain: 0.5 * g, decay: 0.5 });
-      for (let i = 0; i < 5; i++) A.noiseHit(s.dest, { type: 'bandpass', freq: 1200 + Math.random() * 1500, q: 3, gain: 0.08 * g, decay: 0.06, delay: 0.1 + i * 0.07 + Math.random() * 0.05 });
       return;
     }
     A.noiseHit(s.dest, { type: 'lowpass', freq: 1100, freqEnd: 120, gain: 0.55 * g, decay: 0.5 + k * 0.5 });

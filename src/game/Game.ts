@@ -460,7 +460,7 @@ export class Game {
       case 'snap':
         this.onSnapshot(m.ts, m.p, m.e);
         this.arena.onPlayers(m.p);
-        this.arena.onSnapshot(m.ts, m.b, m.m, m.j, m.c);
+        this.arena.onSnapshot(m.ts, m.b, m.m, m.j);
         break;
       case 'ev':
         for (const e of m.e) this.onEvent(e);
@@ -584,6 +584,7 @@ export class Game {
       },
       slammed: (speed) => this.arena.slammed(speed),
       flashed: (from) => this.arena.flashed(from),
+      beat: (kind) => this.arena.beat(kind),
       dashed: (side) => {
         this.audio.dash();
         const p = this.local!.pos;
@@ -1231,7 +1232,7 @@ export class Game {
     // the arena first: a power that moves the runner moves it in this very frame
     const canAct = !this.paused && !this.debug.freeCam && this.input.locked;
     this.arena.wheel(this.input.wheel);
-    // R: kinetic force's debris hurl (on the results screen R is a rematch, handled in onKey)
+    // R: the angel's soar or dive, sonic force's boom (on the results screen R is a rematch, handled in onKey)
     this.arena.update(dt, this.time, mt, canAct && this.input.mouseLeftPressed, canAct && this.input.mouseLeftDown, canAct, canAct && this.input.wasPressed('KeyR'));
     if (local) local.update(dt, move, room ? room.world : this.activeWorld, mt);
     if (this.arenaShown) { /* no portal, no Viktor past the beacon */ }

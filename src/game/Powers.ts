@@ -1,7 +1,8 @@
 // The local runner's superpower: aim, the press, and everything that happens on
 // your own screen the moment the button goes down. Nothing waits for the server:
-// a punch lunges and a blink moves you there and then, a bolt cracks out, a well
-// flies, the effects and sounds play; the server is told what you did ('pow')
+// a slash steps in and a dive or a soar moves you there and then, a bolt cracks
+// out, a well flies, a sonic blast leaves your hands, the effects and sounds play;
+// the server is told what you did ('pow')
 // and decides what it hit, and its answers (damage, a chain of bolts, what you
 // are holding) arrive a moment later as events and snapshots.
 //
@@ -21,32 +22,28 @@ import type { LocalPlayer } from '../player/LocalPlayer';
 /** Something the crosshair can lock onto. kind: 0 the Warden (with a part), 1 a bot, 2 a loose thing. */
 export interface AimTarget { kind: 0 | 1 | 2; id: number; part: number; pos: THREE.Vector3; r: number; junk?: number }
 
-/** A power's arm movement on the runner (see CharacterModel). */
-export type PowerAct = 'jab' | 'cross' | 'hook' | 'uppercut' | 'cast' | 'hold' | 'throw' | 'push' | 'lift' | 'hurl';
-/** The combo's punches, in order. */
-export const COMBO: PowerAct[] = ['jab', 'cross', 'hook', 'uppercut'];
+/** A power's movement on the runner (see CharacterModel). */
+export type PowerAct = 'rise' | 'reverse' | 'sweep' | 'cleave' | 'soar' | 'dive' | 'cast' | 'hold' | 'throw' | 'push' | 'blast' | 'boom';
+/** The angel's sword combo, in order: a rising cut, a reverse cut, a spinning sweep, an overhead cleave. */
+export const SLASHES: PowerAct[] = ['rise', 'reverse', 'sweep', 'cleave'];
 
 export interface PowersHost {
   send(m: C2S): void;
   world(): CollisionWorld;
   /** Everything that can be aimed at right now. */
   targets(): AimTarget[];
-  /** Duplication: how many clones of the local runner are out. */
-  clones(): number;
-  /** Kinetic: a slab torn out of the floor at `at`. */
-  rip(at: THREE.Vector3): void;
   /** Where a thing held with telekinesis floats (the runner's own, drawn without lag). */
   holdPoint(out: THREE.Vector3): THREE.Vector3;
   /** Feedback on your own screen. */
-  punch(at: THREE.Vector3, dir: THREE.Vector3, hit: boolean): void;
-  slam(at: THREE.Vector3, speed: number): void;
+  slash(at: THREE.Vector3, dir: THREE.Vector3, combo: number, hit: boolean): void;
+  soar(at: THREE.Vector3): void;
+  dive(at: THREE.Vector3, speed: number): void;
+  sonic(from: THREE.Vector3, dir: THREE.Vector3, boom: boolean): void;
   bolt(pts: THREE.Vector3[]): void;
   push(at: THREE.Vector3, dir: THREE.Vector3): void;
   well(from: THREE.Vector3, dir: THREE.Vector3): void;
   flash(from: THREE.Vector3, to: THREE.Vector3): void;
   thrown(from: THREE.Vector3, dir: THREE.Vector3): void;
-  /** Duplication: all clones sent at what the crosshair is on. */
-  rally(at: THREE.Vector3): void;
   sound(kind: string, strength?: number): void;
   shake(k: number): void;
   fov(deg: number): void;
@@ -56,12 +53,12 @@ export interface PowersHost {
 
 /** The six powers on screen: name, colour and what the button does. */
 export const POWER_INFO: Record<SuperPower, { name: string; color: string; hex: number; line: string; how: string }> = {
-  kinetic: { name: 'Kinetic Force', color: '#ff9a3c', hex: 0xff9a3c, line: 'Hit like a falling building.', how: 'You grow bigger and tougher. Click: a combo of punches (jab, cross, hook, uppercut); in the air, a meteor slam. R: tear up debris and hurl it.' },
+  angel: { name: 'Angel', color: '#ffe3a3', hex: 0xffe3a3, line: 'Wings, and a blade of light.', how: 'Space in the air beats your wings (hold it to glide). Click: a sword combo (two cuts, a spinning sweep, a cleave). R: soar up with one great wingbeat; in the air, dive onto what you aim at.' },
   telekinesis: { name: 'Telekinesis', color: '#ff5fd2', hex: 0xff5fd2, line: 'Take hold of anything. Throw it.', how: 'Click: grab the bot, canister, plate or shell under the crosshair. Click again: throw it. Nothing to grab: a push that turns shots round.' },
   lightning: { name: 'Lightning', color: '#5ee7ff', hex: 0x5ee7ff, line: 'Faster than anything in the storm.', how: 'Hold: rapid bolts that chain between targets. Watch the heat. Keep pouring it on and the storm answers.' },
   gravity: { name: 'Gravity', color: '#8c6bff', hex: 0x8c6bff, line: 'Make the world fall where you choose.', how: 'Click: throw a well that drags bots in, crushes them and bursts. Your jumps go higher; hold Space to float down.' },
-  speed: { name: 'Super Speed', color: '#ffe04a', hex: 0xffe04a, line: 'Everything else is standing still.', how: 'You run half again as fast, trailing light. Click: a flash strike through everything in your path, again and again.' },
-  clone: { name: 'Duplication', color: '#4dffa6', hex: 0x4dffa6, line: 'Never fight alone.', how: 'Click: split off a clone (up to four) that fights the Warden and its bots beside you. With four out, click sends them all at the crosshair.' },
+  speed: { name: 'Super Speed', color: '#ffe04a', hex: 0xffe04a, line: 'Everything else is standing still.', how: 'You run blindingly fast, and your long trail of light burns every bot and every foot of the Warden it touches. Click: a dash through everything in a line (a long wait between dashes).' },
+  sonic: { name: 'Sonic Force', color: '#6cf5cf', hex: 0x6cf5cf, line: 'Point. Blast. Everything moves.', how: 'Click: a cone of raw sonic force that throws everything in front of you back (and kicks you back too). R: a sonic boom all round you.' },
 };
 
 const hit: RayHit = { dist: 0, c: null };
@@ -71,20 +68,17 @@ export class Powers {
   kind: SuperPower | null = null;
   // the server's cool-downs, mirrored (match times)
   ready = 0;
-  slamReady = 0;
   pushReady = 0;
   boltReady = 0;
   flashReady = 0;
-  chain = 0;
   heat = 0;
   overheatUntil = 0;
-  /** Kinetic: the combo so far, the debris hurl's cool-down and when the heaved slab leaves the hands. */
+  /** The angel: the combo so far, the next dive and the next soar; sonic force: the next boom. */
   combo = -1;
-  lastPunch = -9;
-  hurlReady = 0;
-  private hurlAt = 0;
-  /** Duplication: the next rally. */
-  rallyReady = 0;
+  lastSlash = -9;
+  diveReady = 0;
+  soarReady = 0;
+  boomReady = 0;
   /** What you hold with telekinesis (optimistic until a snapshot says otherwise). */
   held: { kind: 1 | 2; id: number; at: number } | null = null;
   /** What the crosshair is locked onto. */
@@ -101,13 +95,13 @@ export class Powers {
   /** A new power (or the same one after coming back): cool-downs reset, passives applied. */
   set(index: number, local: LocalPlayer | null) {
     this.kind = index >= 0 ? SUPERS[index] : null;
-    this.ready = this.slamReady = this.pushReady = this.boltReady = this.flashReady = 0;
-    this.chain = 0; this.heat = 0; this.overheatUntil = 0; this.combo = -1; this.hurlReady = 0; this.hurlAt = 0; this.rallyReady = 0;
+    this.ready = this.pushReady = this.boltReady = this.flashReady = 0;
+    this.heat = 0; this.overheatUntil = 0; this.combo = -1; this.diveReady = this.soarReady = this.boomReady = 0;
     this.held = null;
     if (local) this.passives(local);
   }
 
-  /** The power's effect on how the runner moves (speed runs faster, gravity jumps higher and floats). */
+  /** The power's effect on how the runner moves (speed runs faster, gravity jumps higher and floats, the angel has wings). */
   passives(local: LocalPlayer) {
     const m = local.motor, k = this.kind;
     m.runScale = k === 'speed' ? POW.speed.RUN : 1;
@@ -115,6 +109,7 @@ export class Powers {
     m.accelScale = k === 'speed' ? POW.speed.ACCEL : 1;
     m.jumpScale = k === 'gravity' ? POW.gravity.JUMP : 1;
     m.floaty = k === 'gravity';
+    m.wings = k === 'angel';
   }
 
   /** Back to a plain runner (leaving the arena). */
@@ -127,24 +122,31 @@ export class Powers {
   /** How ready the button is, 0..1 (for the HUD ring). */
   readiness(mt: number): number {
     switch (this.kind) {
-      case 'kinetic': return clamp(1 - (this.ready - mt) / POW.kinetic.COOLDOWN, 0, 1);
+      case 'angel': return clamp(1 - (this.ready - mt) / POW.angel.COOLDOWN, 0, 1);
       case 'telekinesis': return this.held ? 1 : clamp(1 - (Math.max(this.ready, this.pushReady) - mt) / POW.telekinesis.PUSH_COOLDOWN, 0, 1);
       case 'lightning': return mt < this.overheatUntil ? 0 : 1 - this.heatAt(mt) / 100;
       case 'gravity': return clamp(1 - (this.ready - mt) / POW.gravity.COOLDOWN, 0, 1);
-      case 'speed': return clamp(1 - (this.flashReady - mt) / POW.speed.CHAIN_REST, 0, 1);
-      case 'clone': return this.host.clones() >= POW.clone.MAX ? clamp(1 - (this.rallyReady - mt) / POW.clone.RALLY_COOLDOWN, 0, 1) : clamp(1 - (this.ready - mt) / POW.clone.SPLIT_COOLDOWN, 0, 1);
+      case 'speed': return clamp(1 - (this.flashReady - mt) / POW.speed.COOLDOWN, 0, 1);
+      case 'sonic': return clamp(1 - (this.ready - mt) / POW.sonic.COOLDOWN, 0, 1);
       default: return 0;
     }
   }
 
+  /** How ready R is (0..1): the angel's soar (on the ground) or dive (in the air), sonic force's boom. */
+  altReadiness(mt: number, grounded: boolean): number {
+    if (this.kind === 'angel') return grounded ? clamp(1 - (this.soarReady - mt) / POW.angel.SOAR_COOLDOWN, 0, 1) : clamp(1 - (this.diveReady - mt) / POW.angel.DIVE_COOLDOWN, 0, 1);
+    if (this.kind === 'sonic') return clamp(1 - (this.boomReady - mt) / POW.sonic.BOOM_COOLDOWN, 0, 1);
+    return 1;
+  }
+
   private range(): number {
     switch (this.kind) {
-      case 'kinetic': return POW.kinetic.REACH + 3;
+      case 'angel': return POW.angel.CLEAVE_REACH + 2;
       case 'telekinesis': return POW.telekinesis.RANGE;
       case 'lightning': return POW.lightning.RANGE;
       case 'gravity': return POW.gravity.RANGE;
       case 'speed': return POW.speed.DIST - POW.speed.OVERSHOOT;
-      default: return POW.clone.RALLY_RANGE;
+      default: return POW.sonic.RANGE;
     }
   }
 
@@ -168,16 +170,14 @@ export class Powers {
     const b = local.motor.body;
     chest.set(b.pos.x, b.pos.y + 1.25, b.pos.z);
     this.lock = k ? this.pickLock(cam, fwd, k) : null;
-    // the heaved slab leaves the hands
-    if (this.hurlAt && mt >= this.hurlAt) { this.hurlAt = 0; this.host.act('hurl'); this.host.sound('hurl'); this.host.shake(0.2); this.host.fov(4); }
     if (!k || !can || local.dead || local.frozen) return;
     switch (k) {
-      case 'kinetic': if (alt) this.hurl(mt, local); else if (press) this.punch(mt, local); break;
+      case 'angel': if (alt) this.wing(mt, local); else if (press) this.slash(mt, local); break;
       case 'telekinesis': if (press) this.telekinesis(mt); break;
       case 'lightning': if (hold || press) this.bolt(mt); break;
       case 'gravity': if (press) this.well(mt); break;
       case 'speed': if (press) this.flash(mt, local); break;
-      case 'clone': if (press) this.split(mt); break;
+      case 'sonic': if (alt) this.boom(mt, local); else if (press) this.blast(mt, local); break;
     }
   }
 
@@ -189,7 +189,6 @@ export class Powers {
     const w = this.host.world();
     for (const t of this.host.targets()) {
       if (k === 'telekinesis' && t.kind === 0) continue; // the Warden is too heavy to lift
-      if (k === 'clone' && t.kind === 2) continue; // clones fight, they do not fetch
       if (k === 'telekinesis' && this.held && t.kind === this.held.kind && t.id === this.held.id) continue;
       tmp.subVectors(t.pos, cam);
       const along = tmp.dot(dir);
@@ -232,68 +231,68 @@ export class Powers {
 
   // ------------------------------------------------------------------ the six
 
-  private punch(mt: number, local: LocalPlayer) {
-    const K = POW.kinetic, m = local.motor, b = m.body;
-    if (!m.free) return;
-    if (!b.grounded && m.coyote <= 0) {
-      // in the air: a meteor slam (the landing is told to the server when it happens)
-      if (mt < this.slamReady || m.slamming) return;
-      m.startSlam(K.SLAM_SPEED);
-      this.host.sound('slamDive');
-      this.host.fov(4);
-      return;
-    }
-    if (mt < this.ready) return;
-    this.ready = mt + K.COOLDOWN;
-    // punches in quick succession run the combo: jab, cross, hook, uppercut
-    this.combo = mt - this.lastPunch < K.COMBO ? (this.combo + 1) % COMBO.length : 0;
-    this.lastPunch = mt;
+  /** The angel's sword: the combo runs while slashes come quickly; on the ground each steps in, in the air the wings hold you up. */
+  private slash(mt: number, local: LocalPlayer) {
+    const A = POW.angel, m = local.motor, b = m.body;
+    if (!m.free || m.slamming || mt < this.ready) return;
+    this.ready = mt + A.COOLDOWN;
+    this.combo = mt - this.lastSlash < A.COMBO ? (this.combo + 1) % SLASHES.length : 0;
+    this.lastSlash = mt;
     const d = this.aimFrom(chest, tmp);
     const flat = tmp2.set(d.x, 0, d.z);
     if (flat.lengthSq() < 1e-4) flat.set(Math.sin(m.yaw), 0, Math.cos(m.yaw));
     flat.normalize();
-    m.startLunge(flat.x, flat.z, K.LUNGE_SPEED * (this.combo === 3 ? 0.7 : 1), K.LUNGE_TIME);
-    d.y = clamp(d.y, -0.5, 0.6);
-    this.tell(PowAct.Punch, d, b.pos, mt, { v: this.combo });
-    const fist = chest.clone().addScaledVector(flat, 1.6);
-    if (this.combo === 3) fist.y += 0.6;
-    const reaching = !!this.lock && chest.distanceTo(this.lock.pos) - this.lock.r < K.REACH + 1.6;
+    if (!b.grounded && m.coyote <= 0) m.airLift(A.AIR_HOVER);
+    else m.startLunge(flat.x, flat.z, A.LUNGE_SPEED * (this.combo === 3 ? 0.75 : 1), A.LUNGE_TIME);
+    d.y = clamp(d.y, -0.7, 0.7);
+    this.tell(PowAct.Slash, d, b.pos, mt, { v: this.combo });
+    const reach = this.combo === 3 ? A.CLEAVE_REACH : A.REACH;
+    const reaching = !!this.lock && chest.distanceTo(this.lock.pos) - this.lock.r < reach + 1.2;
     const heavy = this.combo >= 2;
-    this.host.punch(fist, this.combo === 3 ? flat.clone().setY(1.2).normalize() : flat, reaching);
-    this.host.act(COMBO[this.combo]);
-    this.host.sound('punch', (reaching ? 1 : 0.5) * (heavy ? 1.25 : 1));
-    this.host.shake((reaching ? 0.22 : 0.08) * (heavy ? 1.4 : 1));
-    this.host.fov(reaching ? (heavy ? 6 : 4) : 2);
+    this.host.slash(chest.clone(), flat.clone(), this.combo, reaching);
+    this.host.act(SLASHES[this.combo]);
+    this.host.sound('slash', (reaching ? 1 : 0.6) * (heavy ? 1.2 : 1));
+    this.host.shake((reaching ? 0.16 : 0.05) * (heavy ? 1.5 : 1));
+    this.host.fov(reaching ? (heavy ? 5 : 3) : 1.5);
   }
 
-  /** Kinetic's R: tear a slab out of the floor and heave it up; it is thrown a moment later (the server throws it). */
-  private hurl(mt: number, local: LocalPlayer) {
-    const K = POW.kinetic, m = local.motor, b = m.body;
-    if (mt < this.hurlReady || !m.free || (!b.grounded && m.coyote <= 0)) return;
-    this.hurlReady = mt + K.HURL_COOLDOWN;
-    this.hurlAt = mt + K.HURL_LIFT;
-    const d = this.aimFrom(chest.clone().setY(chest.y + 1.2), tmp);
-    this.tell(PowAct.Hurl, d, b.pos, mt, { tg: this.tg() });
-    const hl = Math.hypot(d.x, d.z) || 1;
-    this.host.rip(new THREE.Vector3(b.pos.x + (d.x / hl) * 1.2, b.pos.y, b.pos.z + (d.z / hl) * 1.2));
-    this.host.act('lift');
-    this.host.sound('rip');
-    this.host.shake(0.25);
-  }
-
-  /** How ready the debris hurl is (0..1). */
-  hurlReadiness(mt: number) { return clamp(1 - (this.hurlReady - mt) / POW.kinetic.HURL_COOLDOWN, 0, 1); }
-
-  /** A slam landed (from the runner's motor). */
-  slamLanded(mt: number, local: LocalPlayer, speed: number) {
-    if (this.kind !== 'kinetic') return;
-    this.slamReady = mt + POW.kinetic.SLAM_COOLDOWN;
-    const b = local.motor.body;
-    this.host.send({ t: 'pow', a: PowAct.Slam, o: [b.pos.x, b.pos.y, b.pos.z], d: [0, -1, 0], p: [b.pos.x, b.pos.y, b.pos.z], v: Math.round(speed * 100) / 100, tm: mt });
-    this.host.slam(new THREE.Vector3(b.pos.x, b.pos.y, b.pos.z), speed);
-    this.host.sound('slam', clamp(speed / POW.kinetic.SLAM_SPEED, 0.5, 1.2));
-    this.host.shake(0.55);
+  /** The angel's R: on the ground, soar up on one great wingbeat; in the air, fold the wings and dive along the aim. */
+  private wing(mt: number, local: LocalPlayer) {
+    const A = POW.angel, m = local.motor, b = m.body;
+    if (!m.free || m.slamming) return;
+    if (b.grounded || m.coyote > 0) {
+      if (mt < this.soarReady) return;
+      this.tell(PowAct.Soar, tmp.set(0, 1, 0), b.pos, mt);
+      if (!m.soar(A.SOAR_VY)) return;
+      this.soarReady = mt + A.SOAR_COOLDOWN;
+      this.host.soar(new THREE.Vector3(b.pos.x, b.pos.y, b.pos.z));
+      this.host.act('soar');
+      this.host.sound('soar');
+      this.host.shake(0.35);
+      this.host.fov(7);
+      return;
+    }
+    if (mt < this.diveReady) return;
+    const d = this.aimFrom(chest, tmp);
+    if (!m.startDive(d.x, d.y, d.z, A.DIVE_SPEED)) return;
+    this.host.act('dive');
+    this.host.sound('diveStart');
     this.host.fov(6);
+  }
+
+  /** How strong the angel's wings are right now (0..1). */
+  wingStrength(local: LocalPlayer) { return clamp(local.motor.wingStamina / POW.angel.WING_MAX, 0, 1); }
+
+  /** A dive landed (from the runner's motor). */
+  diveLanded(mt: number, local: LocalPlayer, speed: number) {
+    if (this.kind !== 'angel') return;
+    this.diveReady = mt + POW.angel.DIVE_COOLDOWN;
+    const b = local.motor.body;
+    this.host.send({ t: 'pow', a: PowAct.Dive, o: [b.pos.x, b.pos.y, b.pos.z], d: [0, -1, 0], p: [b.pos.x, b.pos.y, b.pos.z], v: Math.round(speed * 100) / 100, tm: mt });
+    this.host.dive(new THREE.Vector3(b.pos.x, b.pos.y, b.pos.z), speed);
+    this.host.sound('dive', clamp(speed / POW.angel.DIVE_SPEED, 0.5, 1.2));
+    this.host.shake(0.6);
+    this.host.fov(7);
   }
 
   private telekinesis(mt: number) {
@@ -376,15 +375,39 @@ export class Powers {
     this.flashV = Math.hypot(b.vel.x, b.vel.z);
     this.flashDir.copy(d);
     m.startFlash(d.x, d.y, d.z, dist, S.FLASH_SPEED);
-    // the chain: a strike that finds something is ready again almost at once
-    if (this.flashLocked) {
-      this.chain++;
-      this.flashReady = mt + (this.chain >= S.CHAIN_MAX ? S.CHAIN_REST : S.CHAIN_COOLDOWN);
-      if (this.chain >= S.CHAIN_MAX) this.chain = 0;
-    } else { this.chain = 0; this.flashReady = mt + S.COOLDOWN; }
+    this.flashReady = mt + S.COOLDOWN;
     this.host.sound('flash');
     this.host.fov(8);
     this.host.shake(0.12);
+  }
+
+  /** Sonic force: a cone of force out of the hands, and the kick of it (up, off a floor blasted from the air). */
+  private blast(mt: number, local: LocalPlayer) {
+    const S = POW.sonic, b = local.motor.body;
+    if (mt < this.ready) return;
+    this.ready = mt + S.COOLDOWN;
+    const d = this.aimFrom(chest, tmp);
+    this.tell(PowAct.Blast, d, b.pos, mt);
+    b.ext.x -= d.x * S.RECOIL; b.ext.z -= d.z * S.RECOIL;
+    if (!b.grounded && d.y < -0.5) b.vel.y = Math.max(b.vel.y, S.FLOOR_KICK * -d.y);
+    this.host.sonic(chest.clone(), d.clone(), false);
+    this.host.act('blast');
+    this.host.sound('blast');
+    this.host.shake(0.2);
+    this.host.fov(3);
+  }
+
+  /** Sonic force's R: a boom, a ring of force all round. */
+  private boom(mt: number, local: LocalPlayer) {
+    const b = local.motor.body;
+    if (mt < this.boomReady) return;
+    this.boomReady = mt + POW.sonic.BOOM_COOLDOWN;
+    this.tell(PowAct.Boom, tmp.set(0, 1, 0), b.pos, mt);
+    this.host.sonic(chest.clone(), tmp.clone(), true);
+    this.host.act('boom');
+    this.host.sound('boom');
+    this.host.shake(0.5);
+    this.host.fov(7);
   }
 
   /** The streak ended (from the runner's motor): now the server hears where it went. */
@@ -397,27 +420,6 @@ export class Powers {
     if (this.flashLocked) this.host.shake(0.2);
   }
 
-  /** Duplication: a clone steps out; with all four out, they rally at what the crosshair is on. */
-  private split(mt: number) {
-    const C = POW.clone;
-    if (this.host.clones() >= C.MAX) {
-      if (mt < this.rallyReady || !this.lock || this.lock.kind === 2) return;
-      this.rallyReady = mt + C.RALLY_COOLDOWN;
-      this.tell(PowAct.Rally, this.aimFrom(chest, tmp), chestFeet(), mt, { tg: this.tg() });
-      this.host.rally(this.lock.pos.clone());
-      this.host.act('push');
-      this.host.sound('rally');
-      this.host.shake(0.12);
-      return;
-    }
-    if (mt < this.ready) return;
-    this.ready = mt + C.SPLIT_COOLDOWN;
-    this.tell(PowAct.Split, this.aimFrom(chest, tmp), chestFeet(), mt);
-    this.host.act('cast');
-    this.host.sound('split');
-    this.host.fov(3);
-    this.host.shake(0.08);
-  }
 }
 
 /** The runner's feet (what 'pow' messages say they are from); filled by the arena each frame. */

@@ -305,6 +305,8 @@ kbd {
 .xhair.ready .arc { opacity: 1; filter: drop-shadow(0 0 4px currentColor); }
 .xhair.hot { color: #ff6a3d; }
 .xhair.hot .arc { animation: tag-blink 0.25s steps(2) infinite; }
+.xhair .wing { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; opacity: 0.8; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.7)); transition: stroke-dasharray 0.08s linear; }
+.xhair.tired .wing { stroke: #ff8a6a; animation: tag-blink 0.3s steps(2) infinite; }
 .xhair .pips { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); display: flex; gap: 4px; margin-top: 2px; }
 .xhair .pips i { width: 10px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.2); }
 .xhair .pips i.on { background: currentColor; box-shadow: 0 0 6px currentColor; }

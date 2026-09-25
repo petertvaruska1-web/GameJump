@@ -119,7 +119,11 @@ export class WardenModel {
   private readonly shock: THREE.LineSegments;
   private readonly shockPos: Float32Array;
   private hitFlash = 0;
+  private bodyPitch = 0;
+  private bodyRoll = 0;
   private recoilK = [0, 0];
+  /** Being shoved by a blast of force: springs on its pitch, its roll and a sway of the whole body (local x / z). */
+  private readonly shove = { p: 0, vp: 0, r: 0, vr: 0, x: 0, vx: 0, z: 0, vz: 0 };
   private stomp = 0;
   private lastX = NaN;
   private lastZ = NaN;
@@ -335,6 +339,21 @@ export class WardenModel {
   /** A mortar shell left a cannon (-1 left, 1 right). */
   recoil(side: number) { this.recoilK[side < 0 ? 0 : 1] = 1; }
 
+  /**
+   * A blast of force struck it, pushing along (dx, dz) in the world with strength
+   * k (0..1+): the whole machine rocks away from it, sways and settles, and its
+   * head snaps back.
+   */
+  shoved(dx: number, dz: number, k: number) {
+    const yaw = this.root.rotation.y, c = Math.cos(yaw), s = Math.sin(yaw);
+    const fwd = dx * s + dz * c, side = dx * c - dz * s;
+    const S = this.shove;
+    S.vp += fwd * 2.3 * k; S.vr -= side * 1.9 * k;
+    S.vx += side * 3.2 * k; S.vz += fwd * 3.2 * k;
+    this.head.rotation.x -= 0.34 * k;
+    this.hitFlash = Math.max(this.hitFlash, 0.5 * k);
+  }
+
   /** Local point on the Warden -> world (with its current pose). */
   private toWorld(x: number, z: number, yaw: number, lx: number, ly: number, lz: number, floorY: number, out: THREE.Vector3) {
     const c = Math.cos(yaw), s = Math.sin(yaw);
@@ -369,9 +388,17 @@ export class WardenModel {
     roll += clamp(-wrapAngle(Math.atan2(this.vel.x, this.vel.z) - p.yaw) * speed * 0.01, -0.06, 0.06);
     // a footfall settles the body a touch
     for (const l of this.legs) if (l.stepping) bob -= 0.05;
-    this.body.position.y = p.lift + bob;
-    this.body.rotation.x += (pitch - this.body.rotation.x) * damp(5, dt);
-    this.body.rotation.z += (roll - this.body.rotation.z) * damp(4, dt);
+    // a shove rocks it on springs, over the pose it holds
+    const S = this.shove, h = Math.min(dt, 0.05);
+    S.vp += (-70 * S.p - 8 * S.vp) * h; S.p += S.vp * h;
+    S.vr += (-70 * S.r - 8 * S.vr) * h; S.r += S.vr * h;
+    S.vx += (-45 * S.x - 7 * S.vx) * h; S.x += S.vx * h;
+    S.vz += (-45 * S.z - 7 * S.vz) * h; S.z += S.vz * h;
+    this.body.position.set(S.x, p.lift + bob, S.z);
+    this.bodyPitch += (pitch - this.bodyPitch) * damp(5, dt);
+    this.bodyRoll += (roll - this.bodyRoll) * damp(4, dt);
+    this.body.rotation.x = this.bodyPitch + S.p;
+    this.body.rotation.z = this.bodyRoll + S.r;
 
     // the head turns toward whoever it is watching
     let headYaw = 0;

@@ -31,10 +31,12 @@ export interface PlayerHooks {
   bodyLanded(impact: number): void;
   /** Took off (1) or stopped flying (-1). */
   flew(dir: number): void;
-  /** A meteor slam hit the ground at this speed. */
+  /** The angel's dive hit the ground at this speed. */
   slammed(speed: number): void;
   /** A flash strike ended (it began at `from`). */
   flashed(from: { x: number; y: number; z: number }): void;
+  /** The angel's wings beat (1), or took it up in one great beat (2). */
+  beat(kind: number): void;
 }
 
 const wind: [number, number] = [0, 0];
@@ -207,6 +209,7 @@ export class LocalPlayer {
       if (ev.flew !== 0) this.hooks.flew(ev.flew);
       if (ev.slammed > 0) this.hooks.slammed(ev.slammed);
       if (ev.flashed) this.hooks.flashed(m.flashFrom);
+      if (ev.beat) this.hooks.beat(ev.beat);
       if (!this.frozen && !this.dead && !this.immune && !this.sanctuary && stepT >= this.laserGraceUntil && this.level.lasers.length
         && laserHit(this.level, b.pos.x, b.pos.y, b.pos.z, stepT, b.radius, b.height - 0.1)) {
         this.hooks.laser();

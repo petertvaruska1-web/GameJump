@@ -5,7 +5,8 @@
 //                 trailing behind it, a tick at the overdrive line, and under it
 //                 the poise meter that fills toward a stagger
 //   centre        the crosshair in your power's colour, ringed by how ready the
-//                 power is (lightning's heat, teleport's charges as pips), a
+//                 power is (lightning's heat, R's readiness as a pip, the angel's
+//                 wing strength as a pair of wings either side of it), a
 //                 bracket round whatever it is locked onto, a mark when you land
 //                 a hit, a red wedge pointing at whatever just hurt you
 //   bottom left   your power and your health
@@ -20,12 +21,12 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 
 /** A glyph for each power, drawn in its colour. */
 export const POWER_ICON: Record<string, string> = {
-  kinetic: '<path d="M24 4 L28 18 L42 12 L32 24 L44 32 L29 31 L30 45 L22 34 L12 43 L16 29 L3 25 L17 21 L10 8 L22 17 Z" fill="currentColor"/>',
+  angel: '<path d="M24 3 L26.5 8 L26.5 32 L21.5 32 L21.5 8 Z" fill="currentColor"/><rect x="15.5" y="32" width="17" height="3" rx="1.5" fill="currentColor"/><rect x="22.5" y="35" width="3" height="7" fill="currentColor"/><circle cx="24" cy="44.5" r="2.2" fill="currentColor"/><path d="M20 19 C13 11 6 10 1 12 C4 15 5 17 3 20 C7 20 9 22 7 25 C11 24 14 26 13 29 C16 26 19 25 20 25 Z" fill="currentColor" opacity="0.8"/><path d="M28 19 C35 11 42 10 47 12 C44 15 43 17 45 20 C41 20 39 22 41 25 C37 24 34 26 35 29 C32 26 29 25 28 25 Z" fill="currentColor" opacity="0.8"/>',
   telekinesis: '<circle cx="24" cy="24" r="7" fill="currentColor"/><ellipse cx="24" cy="24" rx="19" ry="8" fill="none" stroke="currentColor" stroke-width="3" transform="rotate(-30 24 24)"/><circle cx="39" cy="15" r="3.5" fill="currentColor"/><circle cx="9" cy="33" r="3" fill="currentColor"/>',
   lightning: '<path d="M28 2 L10 27 L22 27 L17 46 L38 18 L26 18 L32 2 Z" fill="currentColor"/>',
   gravity: '<circle cx="24" cy="24" r="6" fill="currentColor"/><path d="M24 6 A18 18 0 0 1 42 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/><path d="M42 24 A18 18 0 0 1 24 42" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0.7"/><path d="M24 42 A18 18 0 0 1 6 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/><path d="M6 24 A18 18 0 0 1 24 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.35"/>',
   speed: '<path d="M6 10 L20 24 L6 38 L12 38 L26 24 L12 10 Z M20 10 L34 24 L20 38 L26 38 L40 24 L26 10 Z" fill="currentColor"/><rect x="0" y="22" width="6" height="4" fill="currentColor" opacity="0.6"/>',
-  clone: '<circle cx="24" cy="10" r="5.5" fill="currentColor"/><path d="M15 44 L17 24 Q24 18 31 24 L33 44 Z" fill="currentColor"/><circle cx="10" cy="15" r="4" fill="currentColor" opacity="0.55"/><path d="M3 44 L5 28 Q10 23 15 27 L14 44 Z" fill="currentColor" opacity="0.55"/><circle cx="38" cy="15" r="4" fill="currentColor" opacity="0.55"/><path d="M34 44 L33 27 Q38 23 43 28 L45 44 Z" fill="currentColor" opacity="0.55"/>',
+  sonic: '<circle cx="6" cy="24" r="4.5" fill="currentColor"/><path d="M14.7 17.2 A11 11 0 0 1 14.7 30.8" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/><path d="M21 12.3 A19 19 0 0 1 21 35.7" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" opacity="0.85"/><path d="M27.3 7.4 A27 27 0 0 1 27.3 40.6" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" opacity="0.65"/><path d="M32.8 3.1 A34 34 0 0 1 32.8 44.9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0.45"/>',
 };
 
 export interface BossView { name: string; hpK: number; poiseK: number; overdrive: boolean; staggered: boolean; dormant: boolean }
@@ -53,6 +54,7 @@ export class ArenaHud {
   private readonly hpText: HTMLElement;
   private readonly cross: HTMLElement;
   private readonly ringArc: SVGCircleElement;
+  private readonly wingArcs: SVGPathElement[];
   private readonly pips: HTMLElement;
   private readonly lockEl: HTMLElement;
   private readonly hitMark: HTMLElement;
@@ -74,7 +76,7 @@ export class ArenaHud {
         <div class="boss-bar"><i class="boss-trail"></i><i class="boss-fill"></i><b class="boss-od"></b><s></s></div>
         <div class="boss-poise"><i></i></div>
       </div>
-      <div class="xhair"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="3" class="dot"/><circle cx="32" cy="32" r="22" class="track"/><circle cx="32" cy="32" r="22" class="arc"/></svg><div class="pips"></div></div>
+      <div class="xhair"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="3" class="dot"/><circle cx="32" cy="32" r="22" class="track"/><circle cx="32" cy="32" r="22" class="arc"/><path class="wing" pathLength="1" d="M10 46 A28 28 0 0 1 10 18"/><path class="wing" pathLength="1" d="M54 46 A28 28 0 0 0 54 18"/></svg><div class="pips"></div></div>
       <div class="lock hidden"><i></i><i></i><i></i><i></i></div>
       <div class="hitmark"></div>
       <div class="hurt"></div>
@@ -87,6 +89,7 @@ export class ArenaHud {
     this.boss = q('.boss'); this.bossFill = q('.boss-fill'); this.bossTrail = q('.boss-trail'); this.bossPoise = q('.boss-poise > i'); this.bossTag = q('.boss-tag');
     this.me = q('.me'); this.hpFill = q('.me-hp > i'); this.hpText = q('.me-hp > span');
     this.cross = q('.xhair'); this.ringArc = q<SVGCircleElement>('.xhair .arc'); this.pips = q('.pips');
+    this.wingArcs = [...this.root.querySelectorAll<SVGPathElement>('.xhair .wing')];
     this.lockEl = q('.lock'); this.hitMark = q('.hitmark'); this.hurtEl = q('.hurt');
     this.select = q('.select'); this.numLayer = q('.nums');
     this.select.addEventListener('click', (e) => {
@@ -153,8 +156,14 @@ export class ArenaHud {
     if (this.hpText.textContent !== txt) this.hpText.textContent = txt;
   }
 
-  /** The ring round the crosshair: how ready the power is (0..1), `hot` for lightning's heat, `pips` for charges. */
-  ring(ready: number, opts: { hot?: boolean; pips?: [number, number] } = {}) {
+  /** The ring round the crosshair: how ready the power is (0..1), `hot` for lightning's heat, `pips` for R, `wing` the angel's wing strength (0..1). */
+  ring(ready: number, opts: { hot?: boolean; pips?: [number, number]; wing?: number } = {}) {
+    const wk = opts.wing === undefined ? -1 : Math.max(0, Math.min(1, opts.wing));
+    for (const a of this.wingArcs) {
+      a.style.display = wk < 0 ? 'none' : '';
+      if (wk >= 0) a.style.strokeDasharray = `${wk.toFixed(3)} 1`;
+    }
+    this.cross.classList.toggle('tired', wk >= 0 && wk < 0.12);
     const C = 2 * Math.PI * 22;
     this.ringArc.style.strokeDasharray = `${(C * Math.max(0, Math.min(1, ready))).toFixed(1)} ${C.toFixed(1)}`;
     this.cross.classList.toggle('hot', !!opts.hot);

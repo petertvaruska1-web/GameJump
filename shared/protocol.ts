@@ -3,7 +3,7 @@
 import type { EnemyKind, SuperPower } from './constants';
 import type { PowerKind } from './level/types';
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 export type Phase = 'lobby' | 'countdown' | 'playing' | 'ended';
 
@@ -40,18 +40,16 @@ export type BotKind = (typeof BotKind)[keyof typeof BotKind];
 export const BotState = { Flying: 0, Boot: 1, Hunt: 2, Tell: 3, Strike: 4, Rest: 5, Reel: 6, Held: 7 } as const;
 export type BotState = (typeof BotState)[keyof typeof BotState];
 
-/** Rock: a slab of floor a kinetic runner tore up and threw (it shatters on impact). */
-export const JunkKind = { Canister: 0, Plate: 1, Shell: 2, Rock: 3 } as const;
+export const JunkKind = { Canister: 0, Plate: 1, Shell: 2 } as const;
 export type JunkKind = (typeof JunkKind)[keyof typeof JunkKind];
 
 /**
- * A power being used (C2S 'pow' action codes). Kinetic: punch / slam landing /
- * hurl (R: tear up debris and throw it). Telekinesis: grab / throw / push.
- * Lightning: bolt. Gravity: well. Speed: flash strike. Duplication: split (a
- * new clone) / rally (all clones at the target). Drop and CloneHit are only
- * ever sent by the server, in 'fx' events.
+ * A power being used (C2S 'pow' action codes). Angel: slash / dive landing / soar
+ * (R on the ground). Telekinesis: grab / throw / push. Lightning: bolt. Gravity:
+ * well. Speed: flash strike. Sonic force: blast / boom (R). Drop and Impact (where
+ * a sonic wave struck something) are only ever sent by the server, in 'fx' events.
  */
-export const PowAct = { Punch: 0, Slam: 1, Grab: 2, Throw: 3, Push: 4, Bolt: 5, Well: 6, Flash: 7, Drop: 9, Hurl: 10, Split: 11, Rally: 12, CloneHit: 13 } as const;
+export const PowAct = { Slash: 0, Dive: 1, Grab: 2, Throw: 3, Push: 4, Bolt: 5, Well: 6, Flash: 7, Drop: 9, Soar: 10, Blast: 11, Boom: 12, Impact: 13 } as const;
 export type PowAct = (typeof PowAct)[keyof typeof PowAct];
 
 /**
@@ -97,9 +95,9 @@ export type C2S =
   | { t: 'pick'; k: number }
   /**
    * In the arena: I used my power. `a`: PowAct. `o`: where from, `d`: the aim
-   * (unit vector), `tg`: what it was aimed at, `p`: where it ended (a blink's
-   * destination, a flash strike's end, a slam's landing), `v`: a number the act
-   * needs (a slam's landing speed), `tm`: my match clock.
+   * (unit vector), `tg`: what it was aimed at, `p`: where it ended (a flash
+   * strike's end, a dive's landing), `v`: a number the act needs (a slash's place
+   * in the combo, a dive's landing speed), `tm`: my match clock.
    */
   | { t: 'pow'; a: number; o: [number, number, number]; d: [number, number, number]; tg?: TargetRef; p?: [number, number, number]; v?: number; tm: number }
   | { t: 'dbg'; cmd: 'tp'; p: [number, number, number] }
@@ -127,8 +125,6 @@ export type BossSnap = [number, number, number, number, number, number, number, 
 export type BotSnap = [number, number, number, number, number, number, number, number, number];
 /** A loose thing: [id, kind, x, y, z, holder (player id, 0 none), spin]. */
 export type JunkSnap = [number, number, number, number, number, number, number];
-/** A runner's clone (duplication): [id, owner, x, y, z, yaw, anim, hp share 0..100]. */
-export type CloneSnap = [number, number, number, number, number, number, number, number];
 
 /** What hurt a runner in the arena (for the hit direction and the sound). */
 export type HurtSrc = 'stomp' | 'beam' | 'mortar' | 'charge' | 'swipe' | 'shock' | 'bite' | 'sting' | 'blast';
@@ -188,8 +184,6 @@ export type GameEvent =
   | { k: 'oend'; id: number; p: [number, number, number] }
   /** Runner `id` was hurt: `n` damage, `hp` left, shoved by `v`, from `from`. */
   | { k: 'hurt'; id: number; n: number; hp: number; src: HurtSrc; v?: [number, number, number]; from?: [number, number, number] }
-  /** A clone of runner `owner` steps out ('in'), is destroyed ('out'), or reappears beside its owner ('back', from `q`). */
-  | { k: 'clone'; id: number; owner: number; s: 'in' | 'out' | 'back'; p: [number, number, number]; q?: [number, number, number] }
   /**
    * Runner `id` used a power (everyone draws it; the user already has). `f`: the
    * PowAct, `d`: numbers that shape it (points, a chain's path, a charge).
@@ -238,7 +232,7 @@ export type S2C =
      */
     stage?: Stage; gateAt?: number; course?: number; picks?: [number, number][]; awake?: boolean; wake?: number;
   }
-  | { t: 'snap'; ts: number; p: PlayerSnap[]; e: EnemySnap[]; b?: BossSnap; m?: BotSnap[]; j?: JunkSnap[]; c?: CloneSnap[] }
+  | { t: 'snap'; ts: number; p: PlayerSnap[]; e: EnemySnap[]; b?: BossSnap; m?: BotSnap[]; j?: JunkSnap[] }
   | { t: 'ev'; e: GameEvent[] }
   | { t: 'pong'; c: number; s: number }
   | { t: 'fix'; p: [number, number, number] }

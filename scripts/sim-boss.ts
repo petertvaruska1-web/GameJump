@@ -183,7 +183,7 @@ function duel(k: SuperPower, lx: number, lz: number, seed = 21) {
   const x = ARENA.x + lx, y = ARENA.y, z = ARENA.z + lz;
   room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [x, y, z] });
   report(room, a.p, x, y, z);
-  // the power is what is being checked here: the runner itself cannot be hurt (its clones can)
+  // the power is what is being checked here: the runner itself cannot be hurt
   room.handle(a.p, { t: 'dbg', cmd: 'god' });
   return { room, a, f, w, x, y, z };
 }
@@ -199,8 +199,8 @@ function wardenPart(room: Room, part: number): PartSphere {
 }
 
 {
-  // kinetic: a punch at its foot hurts it; punches have a cool-down; a slam on its back hits the core
-  const { room, a, w } = duel('kinetic', 0, -9.5);
+  // the angel: a slash at its foot hurts it; slashes have a cool-down; a dive onto its back hits the core
+  const { room, a, w } = duel('angel', 0, -9.5);
   const leg = wardenParts(w.x, ARENA.y, w.z, w.yaw, w.lift, []).filter((s) => s.part === 4 && s.y - ARENA.y < 2)
     .sort((p, q) => Math.hypot(p.x - a.p.pos.x, p.z - a.p.pos.z) - Math.hypot(q.x - a.p.pos.x, q.z - a.p.pos.z))[0];
   // step up to it
@@ -209,55 +209,132 @@ function wardenPart(room: Room, part: number): PartSphere {
   room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [sx, ARENA.y, sz] });
   report(room, a.p, sx, ARENA.y, sz);
   const hp0 = w.hp;
-  room.handle(a.p, { t: 'pow', a: PowAct.Punch, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: aimAt(a.p.pos.x, a.p.pos.y + 1.2, a.p.pos.z, leg.x, leg.y, leg.z), tm: room.matchTime });
+  room.handle(a.p, { t: 'pow', a: PowAct.Slash, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: aimAt(a.p.pos.x, a.p.pos.y + 1.2, a.p.pos.z, leg.x, leg.y, leg.z), tm: room.matchTime });
   const leg2 = Math.hypot(leg.x - a.p.pos.x, leg.z - a.p.pos.z);
   tick(room, 0.1);
-  check('kinetic: a punch in reach of its leg hurts the Warden', w.hp < hp0, `hp ${hp0} -> ${w.hp}, leg ${leg2.toFixed(1)} m away`);
+  check('angel: a slash in reach of its leg hurts the Warden', w.hp < hp0, `hp ${hp0} -> ${w.hp}, leg ${leg2.toFixed(1)} m away`);
   // too soon again: nothing
   const hp1 = w.hp;
-  room.handle(a.p, { t: 'pow', a: PowAct.Punch, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: aimAt(a.p.pos.x, a.p.pos.y + 1.2, a.p.pos.z, leg.x, leg.y, leg.z), tm: room.matchTime });
-  check('kinetic: punches have a cool-down', w.hp === hp1);
-  // a slam on its back hits the core
+  room.handle(a.p, { t: 'pow', a: PowAct.Slash, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: aimAt(a.p.pos.x, a.p.pos.y + 1.2, a.p.pos.z, leg.x, leg.y, leg.z), tm: room.matchTime });
+  check('angel: slashes have a cool-down', w.hp === hp1);
+  // a dive onto its back hits the core
   tick(room, 1.2);
   const core = wardenPart(room, 1);
   const hp2 = w.hp;
-  // the runner came down on its back
   room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [core.x, core.y - 1.4, core.z] });
   report(room, a.p, core.x, core.y - 1.4, core.z, { g: arena.hull });
-  room.handle(a.p, { t: 'pow', a: PowAct.Slam, o: [core.x, core.y - 1.4, core.z], d: [0, -1, 0], p: [core.x, core.y - 1.4, core.z], v: 30, tm: room.matchTime });
+  room.handle(a.p, { t: 'pow', a: PowAct.Dive, o: [core.x, core.y - 1.4, core.z], d: [0, -1, 0], p: [core.x, core.y - 1.4, core.z], v: POW.angel.DIVE_SPEED, tm: room.matchTime });
   const dmg = hp2 - w.hp;
-  check('kinetic: a slam landing on its back hits the core hard', dmg >= 120, `damage ${dmg}`);
-  check('kinetic: the power makes you tougher', fighter(room, a.p).hp === POW.kinetic.HP && powerHp('kinetic') === 160, `hp ${fighter(room, a.p).hp}`);
+  check('angel: a dive landing on its back hits the core hard', dmg >= 120, `damage ${dmg}`);
+  check('angel: wings make you a little tougher', fighter(room, a.p).hp === POW.angel.HP && powerHp('angel') === 125, `hp ${fighter(room, a.p).hp}`);
 }
 
 {
-  // kinetic: the combo's fourth punch is an uppercut that throws a bot up; the hurl tears up debris and it shatters on the Warden
-  const { room, a, f, w } = duel('kinetic', 0, -16);
+  // the angel: the combo's fourth slash is a cleave that throws a bot up; the soar blows everything round it away
+  const { room, a, f, w } = duel('angel', 0, -16);
   const q = fighter(room, a.p);
   f.launchBot(w, 0);
   const bot = f.bots[f.bots.length - 1];
   tick(room, 1.6, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
-  const bx = a.p.pos.x, bz = a.p.pos.z + 2.4;
-  bot.pos.x = bx; bot.pos.y = ARENA.y; bot.pos.z = bz; bot.v.x = bot.v.y = bot.v.z = 0;
+  bot.hp = 500;
+  bot.pos.x = a.p.pos.x; bot.pos.y = ARENA.y; bot.pos.z = a.p.pos.z + 2.4; bot.v.x = bot.v.y = bot.v.z = 0;
   q.ready = 0;
-  room.handle(a.p, { t: 'pow', a: PowAct.Punch, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], v: 3, tm: room.matchTime });
+  room.handle(a.p, { t: 'pow', a: PowAct.Slash, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], v: 3, tm: room.matchTime });
   tick(room, 0.05);
-  const fx = a.events.filter((e) => e.k === 'fx' && e.f === PowAct.Punch).pop() as Extract<GameEvent, { k: 'fx' }> | undefined;
-  check('kinetic: an uppercut throws a bot up', bot.v.y >= POW.kinetic.UPPERCUT_LIFT - 0.5 || bot.dead, `vy=${bot.v.y.toFixed(1)} dead=${bot.dead}`);
-  check('kinetic: everyone sees which punch of the combo it was', !!fx && fx.d[7] === 3, JSON.stringify(fx?.d ?? null));
-  // the hurl: from the floor, at the hull
-  tick(room, 0.6, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
-  const hull = wardenPart(room, 0);
-  const hp0 = w.hp;
-  room.handle(a.p, { t: 'pow', a: PowAct.Hurl, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: aimAt(a.p.pos.x, a.p.pos.y + 2.2, a.p.pos.z, hull.x, hull.y, hull.z), tm: room.matchTime });
-  const rock = f.junk.find((j) => j.kind === JunkKind.Rock);
-  check('kinetic: R tears a slab of debris out of the floor', !!rock && rock.heldBy === q);
-  let shattered = false;
-  tick(room, 2.5, () => { shattered = shattered || a.events.some((e) => e.k === 'boom' && e.c === 8); report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z); });
-  check('kinetic: the thrown debris shatters on the Warden and hurts it', shattered && w.hp < hp0 && !f.junk.some((j) => j.kind === JunkKind.Rock), `boom=${shattered} hp ${hp0} -> ${w.hp}`);
-  const n = f.junk.length;
-  room.handle(a.p, { t: 'pow', a: PowAct.Hurl, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
-  check('kinetic: the hurl has a cool-down', f.junk.length === n);
+  const fx = a.events.filter((e) => e.k === 'fx' && e.f === PowAct.Slash).pop() as Extract<GameEvent, { k: 'fx' }> | undefined;
+  check('angel: the cleave throws a bot up', bot.v.y >= POW.angel.CLEAVE_LIFT * 0.75, `vy=${bot.v.y.toFixed(1)}`);
+  check('angel: everyone sees which slash of the combo it was', !!fx && fx.d[7] === 3, JSON.stringify(fx?.d ?? null));
+  // the soar: a bot right beside it is blown away
+  tick(room, 1, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  bot.pos.x = a.p.pos.x + 2.2; bot.pos.y = ARENA.y; bot.pos.z = a.p.pos.z; bot.v.x = bot.v.y = bot.v.z = 0;
+  room.handle(a.p, { t: 'pow', a: PowAct.Soar, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 1, 0], tm: room.matchTime });
+  tick(room, 0.03);
+  const soars = a.events.filter((e) => e.k === 'fx' && e.f === PowAct.Soar).length;
+  check('angel: the soar\'s great wingbeat blows a bot away', soars === 1 && bot.v.x > 5, `soars=${soars} vx=${bot.v.x.toFixed(1)}`);
+  room.handle(a.p, { t: 'pow', a: PowAct.Soar, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 1, 0], tm: room.matchTime });
+  tick(room, 0.03);
+  check('angel: the soar has a cool-down', a.events.filter((e) => e.k === 'fx' && e.f === PowAct.Soar).length === 1);
+}
+
+{
+  // the angel's wings, in the real character controller over the arena floor (its zip lines
+  // taken away: a cable in reach catches anyone in the air)
+  const world = new CollisionWorld({ ...arena.level, ziplines: [] });
+  const fresh = () => {
+    const m = new PlayerMotor();
+    m.wings = true;
+    m.spawn(ARENA.x - 10, ARENA.y + 4, ARENA.z - 10, 0);
+    return m;
+  };
+  const run = (m: PlayerMotor, secs: number, inp: (i: number) => MoveInput) => {
+    const n = Math.round(secs / PHYS.STEP);
+    for (let i = 0; i < n; i++) m.step(world, PHYS.STEP, inp(i));
+  };
+  const idle = (): MoveInput => ({ x: 0, z: 0, sprint: false, jumpHeld: false, jumpPressed: false });
+  // one beat
+  const m1 = fresh();
+  run(m1, 0.05, idle);
+  const st0 = m1.wingStamina;
+  run(m1, PHYS.STEP, () => ({ ...idle(), jumpPressed: true }));
+  check('angel: Space in the air beats the wings: up it goes', m1.body.vel.y >= POW.angel.BEAT_VY - 0.5 && m1.events.beat === 1 && m1.wingStamina < st0,
+    `vy=${m1.body.vel.y.toFixed(1)} stamina ${st0.toFixed(0)} -> ${m1.wingStamina.toFixed(0)}`);
+  // beating on and on: it climbs, bobbing up and down, until the wings tire
+  const m2 = fresh();
+  const y0 = m2.body.pos.y;
+  let top = y0, beats = 0, dips = 0, lastVy = 0;
+  const every = Math.round(0.3 / PHYS.STEP);
+  run(m2, 7, (i) => {
+    top = Math.max(top, m2.body.pos.y);
+    if (m2.events.beat) beats++;
+    if (lastVy > 0 && m2.body.vel.y <= 0) dips++;
+    lastVy = m2.body.vel.y;
+    return { ...idle(), jumpPressed: i % every === 0 };
+  });
+  const maxBeats = Math.floor((POW.angel.WING_MAX + POW.angel.WING_REGEN_AIR * 7) / POW.angel.BEAT_COST) + 1;
+  check('angel: beat after beat climbs high, rising and sinking with each stroke', top - y0 > 8 && dips >= 5, `climbed ${(top - y0).toFixed(1)} m, ${beats} beats, ${dips} tops`);
+  check('angel: the wings tire (a beat costs strength, and it comes back slowly in the air)', beats <= maxBeats && beats >= 6, `${beats} beats in 7 s (at most ${maxBeats})`);
+  // gliding: Space held on the way down
+  const m3 = fresh(), m4 = fresh();
+  m3.body.pos.y = m4.body.pos.y = ARENA.y + 30;
+  run(m3, 1.2, () => ({ ...idle(), jumpHeld: true, x: 1, z: 0 }));
+  run(m4, 1.2, () => ({ ...idle(), x: 1, z: 0 }));
+  check('angel: holding Space on the way down glides', -m3.body.vel.y <= POW.angel.GLIDE_FALL + 0.4 && m3.anim === Anim.Glide && -m4.body.vel.y > 15,
+    `gliding falls at ${(-m3.body.vel.y).toFixed(1)} m/s, falling at ${(-m4.body.vel.y).toFixed(1)} m/s`);
+  // the dive: steep along the aim, and it lands
+  const m5 = fresh();
+  m5.body.pos.y = ARENA.y + 12;
+  const x0 = m5.body.pos.x;
+  const started = m5.startDive(1, 0, 0, POW.angel.DIVE_SPEED);
+  let landed = 0;
+  run(m5, 1.5, () => { if (m5.events.slammed > 0) landed = m5.events.slammed; return idle(); });
+  const run5 = m5.body.pos.x - x0;
+  check('angel: the dive goes steeply along the aim (never flat) and lands at full force', started && landed >= POW.angel.DIVE_SPEED - 0.5 && run5 > 3 && run5 < 12 / Math.tan(POW.angel.DIVE_PITCH) + 1,
+    `landed at ${landed.toFixed(1)} m/s, ${run5.toFixed(1)} m along`);
+  // a wingbeat pulls out of the dive
+  const m6 = fresh();
+  m6.body.pos.y = ARENA.y + 20;
+  m6.startDive(0, -1, 0, POW.angel.DIVE_SPEED);
+  run(m6, 0.1, idle);
+  run(m6, PHYS.STEP, () => ({ ...idle(), jumpPressed: true }));
+  check('angel: a wingbeat pulls out of a dive', !m6.slamming && m6.body.vel.y > 0);
+  // the soar
+  const m7 = fresh();
+  run(m7, 1, idle);
+  const soared = m7.soar(POW.angel.SOAR_VY);
+  check('angel: R on the ground throws you up with one great beat', soared && m7.body.vel.y === POW.angel.SOAR_VY && m7.events.beat === 2);
+}
+
+{
+  // the angel over the moat: wings can beat it back up, so only the bottom of the arena kills it
+  const { room, a } = duel('angel', 0, -9.5);
+  room.handle(a.p, { t: 'dbg', cmd: 'god' });
+  const [mx, mz] = [ARENA.x + 31.8, ARENA.z];
+  let y = ARENA.y + 1;
+  room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [mx, y, mz] });
+  while (y > room.fight!.killY + 1) { y -= 0.5; now += 1 / 30; report(room, a.p, mx, y, mz, { a: Anim.Fall }); room.tick(1 / 30); }
+  check('angel: dropping into the moat is not death while the wings can still save you', a.p.status === Status.Alive, `status=${a.p.status} y=${y.toFixed(1)}`);
+  for (let i = 0; i < 4; i++) { y -= 0.5; now += 1 / 30; report(room, a.p, mx, y, mz, { a: Anim.Fall }); room.tick(1 / 30); }
+  check('angel: falling out of the bottom of the arena is', a.p.status === Status.Dead && a.p.cause === 'fall', `status=${a.p.status}`);
 }
 
 {
@@ -317,7 +394,7 @@ function wardenPart(room: Room, part: number): PartSphere {
 }
 
 {
-  // speed: a flash strike through its legs hurts it, and the jump in position is accepted
+  // speed: a flash strike (a dash) through its legs hurts it, the jump in position is accepted, and the next one is a long way off
   const { room, a, w } = duel('speed', 0, -10);
   const hp0 = w.hp;
   const legs = wardenParts(w.x, ARENA.y, w.z, w.yaw, w.lift, []).filter((s) => s.part === 4 && s.y - ARENA.y < 2);
@@ -332,69 +409,139 @@ function wardenPart(room: Room, part: number): PartSphere {
   check('speed: a flash strike through a leg hurts the Warden', w.hp < hp0, `hp ${hp0} -> ${w.hp}`);
   check('speed: the streak itself is not taken for a teleport', a.fixes === fixes && Math.hypot(a.p.pos.x - to[0], a.p.pos.z - to[2]) < 0.1);
   const q = fighter(room, a.p);
-  check('speed: little wait between strikes', q.flashReady - room.matchTime <= POW.speed.COOLDOWN + 0.05, `ready in ${(q.flashReady - room.matchTime).toFixed(2)} s`);
-  check('speed: each strike hurts less than it did', hp0 - w.hp <= (10 + 1.1 * 12) * 0.75 * 3 + 1, `dealt ${hp0 - w.hp}`);
-  // running at a speedster's speed is not taken for cheating
+  check('speed: a long wait between dashes, hit or miss', q.flashReady - room.matchTime >= 3 && POW.speed.COOLDOWN >= 3, `ready in ${(q.flashReady - room.matchTime).toFixed(2)} s`);
+  // running at a speedster's speed (a 30 m/s sprint) is not taken for cheating
   const fx0 = a.fixes;
   let x = a.p.pos.x;
-  for (let i = 0; i < 30; i++) { now += 1 / 30; x += 20 / 30; report(room, a.p, x, a.p.pos.y, a.p.pos.z, { a: Anim.Sprint }); room.tick(1 / 30); }
-  check('speed: a speedster running flat out is believed', a.fixes === fx0, `fixes ${a.fixes - fx0}`);
+  for (let i = 0; i < 30; i++) { now += 1 / 30; x -= 30 / 30; report(room, a.p, x, a.p.pos.y, a.p.pos.z, { a: Anim.Sprint, v: [-30, 0, 0] }); room.tick(1 / 30); }
+  check('speed: a speedster sprinting flat out is believed', a.fixes === fx0, `fixes ${a.fixes - fx0}`);
 }
 
 {
-  // duplication: four clones step out, fight on their own near their owner, rally, and can be destroyed
-  const { room, a, f, w } = duel('clone', 0, -12);
+  // speed: half again as fast as it was, in the real controller
+  const world = new CollisionWorld(arena.level);
+  const m = new PlayerMotor();
+  m.runScale = POW.speed.RUN; m.sprintScale = POW.speed.SPRINT; m.accelScale = POW.speed.ACCEL;
+  m.spawn(ARENA.x - 14, ARENA.y + 0.05, ARENA.z - 14, 0);
+  let top = 0;
+  for (let i = 0; i < 180; i++) { m.step(world, PHYS.STEP, { x: 0.707, z: 0.707, sprint: true, jumpHeld: false, jumpPressed: false }); top = Math.max(top, Math.hypot(m.body.vel.x, m.body.vel.z)); }
+  check('speed: running half again as fast as it did (a sprint of 30 m/s)', POW.speed.RUN === 1.875 * 1.5 && POW.speed.SPRINT === 2.25 * 1.5 && top >= 29.5, `top speed ${top.toFixed(1)} m/s`);
+}
+
+{
+  // speed: the trail it runs is its weapon: it burns bots and the Warden that touch it, and fades away
+  const { room, a, f, w } = duel('speed', 0, -14);
   const q = fighter(room, a.p);
-  let made = 0;
-  for (let i = 0; i < 6; i++) {
-    room.handle(a.p, { t: 'pow', a: PowAct.Split, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
-    made = f.clones.length;
-    tick(room, POW.clone.SPLIT_COOLDOWN + 0.05, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
-  }
-  check('duplication: clones step out, four at most', made === 4 && f.clones.length === 4 && has(a, 'clone'), `clones ${f.clones.length}`);
-  const hp0 = w.hp;
-  let far = 0;
-  tick(room, 8, () => { report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z); for (const c of f.clones) far = Math.max(far, Math.hypot(c.pos.x - a.p.pos.x, c.pos.z - a.p.pos.z)); });
-  const byClones = hp0 - w.hp;
-  check('duplication: the clones go for the Warden on their own', byClones > 0 && a.events.some((e) => e.k === 'fx' && e.f === PowAct.CloneHit), `dealt ${byClones}`);
-  check('duplication: they never stray far from their owner', far <= POW.clone.REGROUP, `farthest ${far.toFixed(1)} m`);
-  // rally at the Warden (topped up to four first: any lost in the fight are replaced by a click)
-  for (let i = 0; i < 4 && f.clones.filter((c) => !c.dead).length < 4; i++) {
-    room.handle(a.p, { t: 'pow', a: PowAct.Split, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
-    tick(room, POW.clone.SPLIT_COOLDOWN + 0.05, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
-  }
-  const leg = wardenPart(room, 4);
-  room.handle(a.p, { t: 'pow', a: PowAct.Split, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tg: [0, 0, leg.part], tm: room.matchTime });
-  tick(room, 0.05);
-  check('duplication: with four out, a click rallies them at the target', f.clones.length === 4 && f.clones.every((c) => c.rallyUntil > room.matchTime) && a.events.some((e) => e.k === 'fx' && e.f === PowAct.Rally),
-    `clones ${f.clones.length}, leg ${Math.hypot(leg.x - a.p.pos.x, leg.z - a.p.pos.z).toFixed(1)} m away, rally ${f.clones.map((c) => (c.rallyUntil - room.matchTime).toFixed(1)).join(",")} fx ${a.events.filter((e) => e.k === "fx").map((e) => (e as any).f).join("")}`);
-  // they are hit by what hits runners
-  const c0 = f.clones[0];
-  f.hurtVictim(c0, POW.clone.HP + 1, 'stomp', c0.pos, { x: 0, y: 0, z: 0 });
-  tick(room, 0.05);
-  check('duplication: a clone can be destroyed', c0.dead && f.clones.length === 3 && a.events.some((e) => e.k === 'clone' && e.s === 'out'));
-  // a clone left far behind steps out beside its owner again
-  const c1 = f.clones[0];
-  c1.pos.x = a.p.pos.x + 25; c1.pos.z = a.p.pos.z;
-  tick(room, 0.1, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
-  check('duplication: a clone left behind reappears at its owner\'s side', Math.hypot(c1.pos.x - a.p.pos.x, c1.pos.z - a.p.pos.z) < 5, `${Math.hypot(c1.pos.x - a.p.pos.x, c1.pos.z - a.p.pos.z).toFixed(1)} m`);
-  // bots hunt clones too
   f.launchBot(w, 0);
   const bot = f.bots[f.bots.length - 1];
-  tick(room, 3, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
-  check('duplication: bots fight the clones as well as the runner', bot.dead || bot.target !== null, `target ${bot.target?.id}`);
-  // the owner goes down: the clones go with it
-  room.handle(a.p, { t: 'dbg', cmd: 'god' });
-  f.hurt(q, 999, 'beam', a.p.pos, { x: 0, y: 0, z: 0 });
+  tick(room, 1.6, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  // run a line across the floor, 12 m, at 18 m/s
+  const z0 = a.p.pos.z, x0 = ARENA.x - 8;
+  room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [x0, ARENA.y, z0] });
+  for (let i = 0; i <= 20; i++) { now += 1 / 30; report(room, a.p, x0 + i * 0.6, ARENA.y, z0, { a: Anim.Sprint, v: [18, 0, 0] }); room.tick(1 / 30); }
+  const laid = q.trail.length;
+  check('speed: running fast lays a trail', laid >= 10, `${laid} points`);
+  // a bot standing in it burns
+  const hpB = bot.hp;
+  bot.hp = 500;
+  const hits0 = a.events.filter((e) => e.k === 'bhit').length;
+  tick(room, 1, () => { bot.pos.x = x0 + 6; bot.pos.y = ARENA.y; bot.pos.z = z0 + 0.4; bot.v.x = bot.v.y = bot.v.z = 0; report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z); });
+  const burned = 500 - bot.hp;
+  check('speed: a bot touching the trail burns, again and again', burned >= POW.speed.TRAIL_BOT * 0.6 && a.events.filter((e) => e.k === 'bhit').length - hits0 >= 3,
+    `burned ${burned.toFixed(0)} in 1 s (was at ${hpB})`);
+  // run a line through one of its feet (its body stands far too high for the trail)
+  const hpW = w.hp;
+  const foot = wardenParts(w.x, ARENA.y, w.z, w.yaw, w.lift, []).filter((sp) => sp.part === 4 && sp.y - ARENA.y < 2)[0];
+  const wx = foot.x, wz = foot.z;
+  room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [wx - 7, ARENA.y, wz] });
+  for (let i = 0; i <= 24; i++) { now += 1 / 30; report(room, a.p, wx - 7 + i * 0.6, ARENA.y, wz, { a: Anim.Sprint, v: [18, 0, 0] }); room.tick(1 / 30); }
+  tick(room, 1, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  check('speed: the trail burns the feet of the Warden where they touch it', w.hp < hpW - POW.speed.TRAIL_BOSS * 0.4, `hp ${hpW} -> ${w.hp}`);
+  tick(room, POW.speed.TRAIL_LIFE + 0.3, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  check('speed: the trail fades after a while', q.trail.length === 0, `${q.trail.length} points left`);
+}
+
+// ====================================================================== sonic force
+
+{
+  // sonic force: a blast is force travelling out from the hands: what it reaches is struck when its front gets there
+  const { room, a, f, w } = duel('sonic', 0, -15);
+  const q = fighter(room, a.p);
+  const hull = wardenPart(room, 0);
+  const hp0 = w.hp;
+  const chest = [a.p.pos.x, a.p.pos.y + 1.25, a.p.pos.z] as const;
+  room.handle(a.p, { t: 'pow', a: PowAct.Blast, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: aimAt(chest[0], chest[1], chest[2], hull.x, hull.y, hull.z), tm: room.matchTime });
+  const atOnce = w.hp;
+  tick(room, 0.4, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  const imp = a.events.find((e) => e.k === 'fx' && e.f === PowAct.Impact && e.d[3] === 0) as Extract<GameEvent, { k: 'fx' }> | undefined;
+  check('sonic: a blast strikes the Warden when its front gets there, not before', atOnce === hp0 && w.hp < hp0 && !!imp, `hp ${hp0} -> ${atOnce} -> ${w.hp}`);
+  // cool-down
+  const hp1 = w.hp, waves = f.waves.length;
+  room.handle(a.p, { t: 'pow', a: PowAct.Blast, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime - 0.2 });
+  check('sonic: blasts have a cool-down', f.waves.length === waves);
+  // a bot in front is thrown back, one behind is left alone
+  tick(room, 0.3, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  f.launchBot(w, 0); f.launchBot(w, 2);
+  const [b1, b2] = f.bots.slice(-2);
+  tick(room, 1.6, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  for (const [bot, dz] of [[b1, 7], [b2, -5]] as const) { bot.hp = 500; bot.pos.x = a.p.pos.x; bot.pos.y = ARENA.y; bot.pos.z = a.p.pos.z + dz; bot.v.x = bot.v.y = bot.v.z = 0; bot.knock(f, 0, 0, 0, 1.5); }
+  room.handle(a.p, { t: 'pow', a: PowAct.Blast, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
+  let back = 0;
+  tick(room, 0.25, () => { back = Math.max(back, b1.v.z); b2.v.x = b2.v.y = b2.v.z = 0; report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z); });
+  check('sonic: a bot in front is thrown back hard', back > 10 && b1.hp < 500, `vz ${back.toFixed(1)}, hurt ${500 - b1.hp}`);
+  check('sonic: what is behind you is left alone', b2.hp === 500);
+  // loose things fly away, a wasp's shot turns round
+  tick(room, 0.4, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  const plate = (f as unknown as { addJunk: (k: number, x: number, y: number, z: number) => { vel: { x: number; y: number; z: number } } }).addJunk(JunkKind.Plate, a.p.pos.x + 0.5, ARENA.y + 0.1, a.p.pos.z + 5);
+  f.fireOrb({ centre: (o: { x: number; y: number; z: number }) => { o.x = a.p.pos.x; o.y = a.p.pos.y + 1.2; o.z = a.p.pos.z + 12; return o; } } as never, q);
+  const orb = f.orbs[f.orbs.length - 1];
+  tick(room, 0.1);
+  room.handle(a.p, { t: 'pow', a: PowAct.Blast, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
+  tick(room, 0.2, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  check('sonic: loose things fly away from the blast', plate.vel.z > 10, `plate vz ${plate.vel.z.toFixed(1)}`);
+  check('sonic: a wasp\'s shot is turned round', orb.turnedBy === q || orb.dead, `turned=${!!orb.turnedBy}`);
+  void hp1;
+}
+
+{
+  // sonic force: a leg hidden behind cover does not stop the wave striking the rest of the machine
+  const { room, a, f, w } = duel('sonic', -11.1, -15.2);
+  w.update = () => {};
+  w.x = ARENA.x; w.z = ARENA.z; w.yaw = Math.PI;
+  const q = fighter(room, a.p);
+  const chest = { x: a.p.pos.x, y: a.p.pos.y + 1.25, z: a.p.pos.z };
+  const parts = w.partsAt(f);
+  const hidden = parts.filter((sp) => !(f as unknown as { reach: (o: unknown, x: number, y: number, z: number, r: number, w: boolean) => boolean }).reach(chest, sp.x, sp.y, sp.z, 40, true)).length;
+  const head = parts.find((sp) => sp.part === 2)!;
+  const hp0 = w.hp;
+  q.ready = 0;
+  room.handle(a.p, { t: 'pow', a: PowAct.Blast, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: aimAt(chest.x, chest.y, chest.z, head.x, head.y, head.z), tm: room.matchTime });
+  tick(room, 0.5, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  check('sonic: a part of the Warden behind cover does not stop the wave hitting the rest of it', w.hp < hp0, `${hidden} parts hidden, hp ${hp0} -> ${w.hp}`);
+}
+
+{
+  // sonic force: the boom (R) strikes all round, and has its own cool-down
+  const { room, a, f, w } = duel('sonic', 0, -15);
+  f.launchBot(w, 0); f.launchBot(w, 2);
+  const [b1, b2] = f.bots.slice(-2);
+  tick(room, 1.6, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  for (const [bot, dx] of [[b1, 4], [b2, -4]] as const) { bot.hp = 500; bot.pos.x = a.p.pos.x + dx; bot.pos.y = ARENA.y; bot.pos.z = a.p.pos.z; bot.v.x = bot.v.y = bot.v.z = 0; bot.knock(f, 0, 0, 0, 1.5); }
+  room.handle(a.p, { t: 'pow', a: PowAct.Boom, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
+  let v1 = 0, v2 = 0;
+  tick(room, 0.3, () => { v1 = Math.max(v1, b1.v.x); v2 = Math.min(v2, b2.v.x); report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z); });
+  check('sonic: the boom throws everything round you away', v1 > 10 && v2 < -10 && b1.hp < 500 && b2.hp < 500, `vx ${v1.toFixed(1)} / ${v2.toFixed(1)}`);
+  const booms = a.events.filter((e) => e.k === 'fx' && e.f === PowAct.Boom).length;
+  room.handle(a.p, { t: 'pow', a: PowAct.Boom, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
   tick(room, 0.05);
-  check('duplication: when the owner goes down its clones vanish', f.clones.every((c) => c.dead));
+  check('sonic: the boom has its own cool-down', booms === 1 && a.events.filter((e) => e.k === 'fx' && e.f === PowAct.Boom).length === 1);
 }
 
 // ====================================================================== the Warden's own rules
 
 {
   // enough poise damage staggers it; a stagger exposes it
-  const { room, a, w } = duel('kinetic', 0, -9.5);
+  const { room, a, w } = duel('angel', 0, -9.5);
   const f = room.fight!;
   const q = fighter(room, a.p);
   const core = wardenPart(room, 1);
@@ -412,7 +559,7 @@ function wardenPart(room: Room, part: number): PartSphere {
 
 {
   // a charge that meets a pillar ends in a crash and a stagger
-  const { room, a, w } = duel('kinetic', 0, -9.5);
+  const { room, a, w } = duel('angel', 0, -9.5);
   const f = room.fight!;
   const pillar = arena.pillars[2]; // south
   w.x = pillar[0]; w.z = pillar[2] + 12; w.yaw = Math.PI;
@@ -443,7 +590,7 @@ function wardenPart(room: Room, part: number): PartSphere {
 
 {
   // the end: its health runs out, it dies, and a moment later the run is won
-  const { room, a, w, f } = duel('kinetic', 0, -9.5);
+  const { room, a, w, f } = duel('angel', 0, -9.5);
   f.hitWarden(fighter(room, a.p), 99999, 0, a.p.pos, 0);
   tick(room, 0.05);
   check('health out: the Warden falls', w.state === BState.Dying && has(a, 'fall'));
@@ -493,6 +640,7 @@ class Brain {
     m.accelScale = kind === 'speed' ? POW.speed.ACCEL : 1;
     m.jumpScale = kind === 'gravity' ? POW.gravity.JUMP : 1;
     m.floaty = kind === 'gravity';
+    m.wings = kind === 'angel';
   }
 
   get q() { return this.room.fight!.fighter(this.c.p)!; }
@@ -513,13 +661,15 @@ class Brain {
     }
     const w = f.warden, t = room.matchTime;
     const inp: MoveInput = { x: 0, z: 0, sprint: true, jumpHeld: false, jumpPressed: false, aimYaw: 0 };
-    // --- where to be: at the power's range from the Warden, circling it
-    const want = this.kind === 'kinetic' ? 6 : this.kind === 'speed' ? 9 : this.kind === 'clone' ? 8 : 16;
+    // --- where to be: at the power's range from the Warden, circling it (a speedster
+    // runs rings round it over its feet, where its trail can burn them)
+    const want = this.kind === 'angel' ? 5.5 : this.kind === 'speed' ? 9.7 : this.kind === 'sonic' ? 12 : 16;
     const dx = w.x - b.pos.x, dz = w.z - b.pos.z, d = Math.hypot(dx, dz) || 1;
     this.strafeT -= dt;
     if (this.strafeT <= 0) { this.strafe = this.r() < 0.5 ? -1 : 1; this.strafeT = 2 + this.r() * 3; }
-    let mx = (dx / d) * (d - want) * 0.25 + (-dz / d) * this.strafe * 0.8;
-    let mz = (dz / d) * (d - want) * 0.25 + (dx / d) * this.strafe * 0.8;
+    const circle = this.kind === 'speed' ? 1.2 : 0.8, pull = this.kind === 'speed' ? 0.6 : 0.25;
+    let mx = (dx / d) * (d - want) * pull + (-dz / d) * this.strafe * circle;
+    let mz = (dz / d) * (d - want) * pull + (dx / d) * this.strafe * circle;
     // stay on the floor
     const fromC = Math.hypot(b.pos.x - ARENA.x, b.pos.z - ARENA.z);
     if (fromC > 26) { mx += (ARENA.x - b.pos.x) / fromC * 1.5; mz += (ARENA.z - b.pos.z) / fromC * 1.5; }
@@ -554,7 +704,7 @@ class Brain {
       this.world.update(t);
       m.step(this.world, PHYS.STEP, inp, 0, 0);
       inp.jumpPressed = false; inp.slidePressed = false; inp.dashX = 0; inp.dashZ = 0;
-      if (m.events.slammed > 0) this.send(PowAct.Slam, [0, -1, 0], undefined, [b.pos.x, b.pos.y, b.pos.z], m.events.slammed);
+      if (m.events.slammed > 0) this.send(PowAct.Dive, [0, -1, 0], undefined, [b.pos.x, b.pos.y, b.pos.z], m.events.slammed);
       if (m.events.flashed) this.send(PowAct.Flash, this.flashDir, undefined, [b.pos.x, b.pos.y, b.pos.z], this.flashV, [m.flashFrom.x, m.flashFrom.y, m.flashFrom.z]);
     }
     report(room, p, b.pos.x, b.pos.y, b.pos.z, { a: m.anim, g: b.grounded && b.ground ? b.ground.id : -1, v: [b.vel.x, b.vel.y, b.vel.z] });
@@ -563,7 +713,7 @@ class Brain {
   private flashDir: [number, number, number] = [0, 0, 1];
   private flashV = 0;
   private combo = 0;
-  private lastPunch = -9;
+  private lastSlash = -9;
 
   private send(a: number, d: [number, number, number], tg?: [number, number, number], p?: [number, number, number], v?: number, o?: [number, number, number]) {
     const b = this.m.body;
@@ -589,22 +739,30 @@ class Brain {
   private usePower(t: number, inp: MoveInput) {
     const f = this.room.fight!, b = this.m.body, q = this.q, w = f.warden;
     if (!w.alive || !w.awake) return;
+    const d = Math.hypot(w.x - b.pos.x, w.z - b.pos.z);
     const chest = { x: b.pos.x, y: b.pos.y + 1.25, z: b.pos.z };
     const aim = (s: { x: number; y: number; z: number }) => aimAt(chest.x, chest.y, chest.z, s.x, s.y, s.z);
     switch (this.kind) {
-      case 'kinetic': {
-        const s = this.target(POW.kinetic.REACH + 1.5);
-        if (s && t >= q.ready && b.grounded) {
-          const d = aim(s);
-          this.combo = t - this.lastPunch < POW.kinetic.COMBO ? (this.combo + 1) % 4 : 0;
-          this.lastPunch = t;
-          this.m.startLunge(d[0], d[2], POW.kinetic.LUNGE_SPEED, POW.kinetic.LUNGE_TIME);
-          this.send(PowAct.Punch, d, undefined, undefined, this.combo);
+      case 'angel': {
+        const A = POW.angel;
+        // coming down over it: dive onto its back
+        const core = wardenParts(w.x, ARENA.y, w.z, w.yaw, w.lift, []).find((x) => x.part === 1)!;
+        if (!b.grounded && b.vel.y < 0 && t >= q.diveReady && this.m.free && chest.y > core.y + 1.5 && Math.hypot(core.x - b.pos.x, core.z - b.pos.z) < 7) {
+          const d = aim(core);
+          this.m.startDive(d[0], d[1], d[2], A.DIVE_SPEED);
           break;
         }
-        // out of reach: heave a slab of floor at it
-        const far = this.target(30);
-        if (!s && far && t >= q.hurlReady && b.grounded) this.send(PowAct.Hurl, aimAt(chest.x, chest.y + 1.2, chest.z, far.x, far.y, far.z));
+        const s = this.target(A.REACH + 1.5);
+        if (s && t >= q.ready) {
+          const d = aim(s);
+          this.combo = t - this.lastSlash < A.COMBO ? (this.combo + 1) % 4 : 0;
+          this.lastSlash = t;
+          if (b.grounded) this.m.startLunge(d[0], d[2], A.LUNGE_SPEED, A.LUNGE_TIME); else this.m.airLift(A.AIR_HOVER);
+          this.send(PowAct.Slash, d, undefined, undefined, this.combo);
+          break;
+        }
+        // close by and the wings are ready: up, to come down on its back
+        if (b.grounded && t >= q.soarReady && d < 9 && this.r() < 0.02 && this.m.soar(A.SOAR_VY)) this.send(PowAct.Soar, [0, 1, 0]);
         break;
       }
       case 'telekinesis': {
@@ -636,6 +794,7 @@ class Brain {
         break;
       }
       case 'speed': {
+        // the trail does the work; a dash now and then when something is lined up
         if (t < q.flashReady || !this.m.free) break;
         const s = this.target(POW.speed.DIST - POW.speed.OVERSHOOT, POW.speed.PITCH);
         if (s) {
@@ -649,11 +808,16 @@ class Brain {
         }
         break;
       }
-      case 'clone': {
-        const mine = f.clones.filter((c) => c.owner === q && !c.dead).length;
-        if (mine < POW.clone.MAX) { if (t >= q.ready) this.send(PowAct.Split, [0, 0, 1]); break; }
-        const s = this.target(POW.clone.RALLY_RANGE);
-        if (s && t >= q.rallyReady) this.send(PowAct.Rally, aim(s), [0, 0, s.part]);
+      case 'sonic': {
+        const S = POW.sonic;
+        // bots at its throat, or right under the Warden: the boom
+        const close = f.bots.filter((x) => x.state !== 0 && Math.hypot(x.pos.x - b.pos.x, x.pos.z - b.pos.z) < 6).length;
+        if (t >= q.boomReady && (close >= 2 || d < 8)) { this.send(PowAct.Boom, [0, 0, 1]); break; }
+        if (t < q.ready) break;
+        const bot = f.bots.find((x) => x.state !== 0 && Math.hypot(x.pos.x - b.pos.x, x.pos.z - b.pos.z) < 9);
+        if (bot) { this.send(PowAct.Blast, aim(bot.pos)); break; }
+        const s = this.target(S.RANGE - 1);
+        if (s) this.send(PowAct.Blast, aim(s));
         break;
       }
     }
@@ -724,7 +888,7 @@ if (!QUICK) {
   const openings = new Set<string>();
   for (let s = 10; s < 16; s++) openings.add(fightOut(['lightning'], s, 45, true).sequence);
   check('no two fights open the same way', openings.size >= 4, [...openings].join(' | '));
-  for (const team of [['kinetic', 'lightning'], ['telekinesis', 'gravity', 'clone']] as SuperPower[][]) {
+  for (const team of [['angel', 'lightning'], ['telekinesis', 'gravity', 'sonic']] as SuperPower[][]) {
     const r = fightOut(team, 4, 900, true);
     console.log(`  team ${team.join('+')}: ${r.won ? 'down' : 'NOT DOWN'} in ${r.t.toFixed(0)} s, damage ${r.damage.join('/')}, most bots ${r.maxBots}/${r.cap}, opening ${r.sequence}`);
     check(`a team of ${team.length} (${team.join(', ')}) can bring the Warden down`, r.won, `t=${r.t.toFixed(0)}`);

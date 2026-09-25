@@ -18,18 +18,21 @@
 // with a fist forward at speed, banking into sideways flight.
 //
 // In the Warden's arena a runner's power shows on the body: the hands glow in
-// its colour, a punch lunges fist-first, a meteor slam dives knees-first, a
-// flash strike stretches the runner out flat, and the arms act out every use
-// (a boxer's combo of jab, cross, hook and uppercut, a cast, a two-handed
-// telekinetic hold, a throw, a push, heaving a slab out of the floor and
-// hurling it) laid over whatever the legs are doing, so it reads at a glance
-// what everyone is up to.
+// its colour, a flash strike stretches the runner out flat, and the arms act out
+// every use (a cast, a two-handed telekinetic hold, a throw, a push, a sonic
+// blast thrust from both palms, a boom thrown out wide) laid over whatever the
+// legs are doing, so it reads at a glance what everyone is up to. The angel wears
+// wings, a sword and a halo (AngelRig): its sword combo is a rising cut, a
+// reverse cut, a whirling spin with the wings flung wide and a two-handed
+// overhead cleave; it glides tipped forward on spread wings, beats them with
+// its legs dangling, and dives head-first with the sword out like a lance.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DASH, FLIP, FLY } from '../../shared/constants';
 import { Anim } from '../../shared/physics/character';
 import { clamp, damp, lerp } from '../../shared/math';
+import { AngelRig } from './AngelRig';
 
 export const PLAYER_COLORS = [0xff7a2f, 0x2fd4c4, 0xc65bff];
 export const PLAYER_CSS = ['#ff7a2f', '#2fd4c4', '#c65bff'];
@@ -55,10 +58,10 @@ export interface AnimInput {
 
 type Joint = THREE.Group;
 
-/** A power's arm movement, laid over the rest of the pose (the left arm is index 0). */
-export type ActKind = 'jab' | 'cross' | 'hook' | 'uppercut' | 'cast' | 'hold' | 'throw' | 'push' | 'lift' | 'hurl';
+/** A power's arm movement, laid over the rest of the pose (the left arm is index 0; the angel's sword is in the right). */
+export type ActKind = 'rise' | 'reverse' | 'sweep' | 'cleave' | 'soar' | 'dive' | 'cast' | 'hold' | 'throw' | 'push' | 'blast' | 'boom';
 /** How long each one plays (a hold lasts until it is thrown or let go). */
-const ACT_TIME: Record<ActKind, number> = { jab: 0.26, cross: 0.3, hook: 0.38, uppercut: 0.44, cast: 0.26, hold: 4.6, throw: 0.36, push: 0.38, lift: 0.36, hurl: 0.4 };
+const ACT_TIME: Record<ActKind, number> = { rise: 0.34, reverse: 0.34, sweep: 0.46, cleave: 0.52, soar: 0.6, dive: 0.3, cast: 0.26, hold: 4.6, throw: 0.36, push: 0.38, blast: 0.34, boom: 0.5 };
 const smooth = (a: number, b: number, x: number) => { const k = clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
 
 let handTex: THREE.Texture | null = null;
@@ -207,10 +210,14 @@ export class CharacterModel {
   private readonly hands: THREE.Sprite[] = [];
   private handK = 0;
   private hasPower = false;
+  /** The angel's wings, sword and halo (while its runner has that power). */
+  angel: AngelRig | null = null;
+  private readonly shadowsOn: boolean;
 
   constructor(colorIndex: number, shadows: boolean) {
     const color = PLAYER_COLORS[colorIndex % 3];
     this.color = color;
+    this.shadowsOn = shadows;
     this.gait = (colorIndex % 3) * 2.1;
     this.limp = 0.04 + (colorIndex % 3) * 0.018;
     const jacket = new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05 });
@@ -388,7 +395,7 @@ export class CharacterModel {
   setPowerColor(hex: number | null) {
     this.hasPower = hex !== null;
     for (const h of this.hands) {
-      h.visible = this.hasPower;
+      h.visible = this.hasPower && !this.angel;
       if (hex !== null) (h.material as THREE.SpriteMaterial).color.setHex(hex);
     }
   }
@@ -400,7 +407,33 @@ export class CharacterModel {
     this.actT = 0;
     this.handK = 1;
     if (hex !== undefined) this.setPowerColor(hex);
+    // the angel's cleave comes down with a beat of the wings, the soar is one great beat
+    if (this.angel && kind === 'cleave') this.angel.beat(0.8);
+    if (this.angel && kind === 'soar') this.angel.beat(1.6);
   }
+
+  /** The angel's wings and sword on (with the power's colour in the feathers) or off. */
+  setAngel(on: boolean, hex = 0xffe3a3) {
+    if (on === !!this.angel) return;
+    if (on) {
+      const rig = new AngelRig(hex, this.shadowsOn);
+      this.torso.add(rig.wings);
+      this.el[1].add(rig.sword);
+      this.head.add(rig.halo);
+      this.angel = rig;
+    } else if (this.angel) {
+      const rig = this.angel;
+      this.torso.remove(rig.wings);
+      this.el[1].remove(rig.sword);
+      this.head.remove(rig.halo);
+      rig.dispose();
+      this.angel = null;
+    }
+    for (const h of this.hands) h.visible = this.hasPower && !this.angel;
+  }
+
+  /** The wings beat (the local runner's own beats come straight from its motor). */
+  wingBeat(k = 1) { this.angel?.beat(k); }
 
   /** Smoothly drive a joint value toward a target. */
   private j(key: string, target: number, rate: number, dt: number) {
@@ -415,7 +448,7 @@ export class CharacterModel {
     const sp = a.speed;
     const flying = a.anim === Anim.Fly;
     const air = a.anim === Anim.Jump || a.anim === Anim.Fall || a.anim === Anim.Launch || a.anim === Anim.Zip
-      || a.anim === Anim.Swing || a.anim === Anim.Flip || flying;
+      || a.anim === Anim.Swing || a.anim === Anim.Flip || a.anim === Anim.Glide || a.anim === Anim.Beat || flying;
     // the flying aura swells in and out
     this.auraK += ((flying ? 1 : 0) - this.auraK) * damp(flying ? 4 : 2.5, dt);
     this.aura.visible = this.auraK > 0.01;
@@ -464,6 +497,8 @@ export class CharacterModel {
     let rate = 16;
     /** Flying: how far the whole body tips forward about the hips. */
     let flyPitch = 0;
+    /** The angel's whirling sweep: how far round the whole body has turned. */
+    let whirl = 0;
 
     if (a.anim === Anim.Dead) {
       this.deadT += dt;
@@ -590,18 +625,35 @@ export class CharacterModel {
         headX = -k * 0.9 - 0.1;
         lean = 0.05;
       } else if (a.anim === Anim.Lunge) {
-        // the punch's lunge: a long stride, the whole body behind the fist
+        // a slash's step in: a long stride, the body behind the blade
         rate = 28;
         thigh = [-0.95, 0.55]; knee = [0.55, 0.45]; ankle = [0.1, 0.35];
-        shoulder = [-1.55, 0.7]; shoulderZ = [0.08, 0.25]; elbow = [-0.05, -1.5];
-        lean = 0.42; twist = 0.35; headX = -0.25;
-      } else if (a.anim === Anim.Slam) {
-        // the meteor: knees drawn up, fists down and back, the body tipped into the dive
-        rate = 18;
-        thigh = [-1.35, -1.1]; knee = [1.7, 1.5]; ankle = [0.45, 0.4];
-        shoulder = [0.75, 0.75]; shoulderZ = [0.45, 0.45]; elbow = [-0.35, -0.35];
-        lean = 0.35; headX = -0.4;
-        flyPitch = 0.55;
+        shoulder = [-0.6, -1.2]; shoulderZ = [0.3, 0.3]; elbow = [-0.9, -0.3];
+        lean = 0.34; twist = 0.2; headX = -0.25;
+      } else if (a.anim === Anim.Dive) {
+        // the angel's dive: head first, wings folded back, the sword out ahead like a lance
+        rate = 16;
+        thigh = [0.06, 0.12]; knee = [0.12, 0.2]; ankle = [0.6, 0.55];
+        shoulder = [0.25, -3.0]; shoulderZ = [0.3, 0.12]; elbow = [-0.2, -0.05];
+        lean = 0.1; headX = -1.05;
+        flyPitch = 1.3;
+      } else if (a.anim === Anim.Glide) {
+        // gliding on spread wings: tipped forward, legs trailing together, arms loose and back
+        rate = 8;
+        const sd = clamp(a.side ?? 0, -1, 1);
+        const sway = Math.sin(t * 1.3 + this.gait) * 0.05;
+        thigh = [0.12 + sway, 0.2 - sway]; knee = [0.25, 0.35]; ankle = [0.5, 0.45];
+        shoulder = [0.45, 0.35]; shoulderZ = [0.35, 0.3]; elbow = [-0.35, -0.5];
+        headX = -0.75; lean = 0.05;
+        bodyRoll = -sd * 0.3;
+        flyPitch = 0.72;
+      } else if (a.anim === Anim.Beat) {
+        // beating the wings: hanging under them, legs dangling and kicking a little with each stroke
+        rate = 12;
+        const k = Math.sin(t * 9 + this.gait);
+        thigh = [-0.35 + k * 0.1, -0.1 - k * 0.1]; knee = [0.6, 0.45]; ankle = [0.35, 0.3];
+        shoulder = [-0.35, -0.5]; shoulderZ = [0.45, 0.4]; elbow = [-0.6, -0.5];
+        lean = 0.12; headX = -0.15;
       } else if (a.anim === Anim.Flash) {
         // the flash strike: stretched out flat, arms swept back, one leg trailing
         rate = 30;
@@ -720,51 +772,74 @@ export class CharacterModel {
           // the other fist comes up to guard the chin
           const guard = (i: number) => { mix(shoulder, i, -1.05); mix(elbow, i, -2.05); mix(shoulderZ, i, 0.12); };
           switch (this.actKind) {
-            case 'jab':
-              // left, straight and quick, the left shoulder leading
-              mix(shoulder, 0, -1.62); mix(elbow, 0, -0.05); mix(shoulderZ, 0, 0.04); guard(1);
-              twist -= 0.24 * w; lean += 0.08 * w;
-              break;
-            case 'cross':
-              // right, straight from the back foot with the hips turned through
-              mix(shoulder, 1, -1.62); mix(elbow, 1, -0.05); mix(shoulderZ, 1, 0.04); guard(0);
-              twist += 0.42 * w; lean += 0.16 * w; hipRoll += 0.05 * w;
-              break;
-            case 'hook': {
-              // left, the arm bent square and swung round from wide, the whole body whipping with it
-              const k = smooth(0.05, 0.6, u);
-              mix(shoulder, 0, -1.45); mix(elbow, 0, -1.55); mix(shoulderZ, 0, lerp(1.25, 0.25, k)); guard(1);
-              twist += lerp(0.3, -0.5, k) * w; bob -= 0.05 * w; lean += 0.1 * w;
+            case 'rise': {
+              // a rising cut: from low behind on the right, up across the body to high on the left
+              const k = smooth(0.06, 0.62, u);
+              mix(shoulder, 1, lerp(0.65, -2.55, k)); mix(shoulderZ, 1, lerp(0.95, -0.45, k)); mix(elbow, 1, lerp(-0.5, -0.12, k));
+              mix(shoulder, 0, -0.55); mix(shoulderZ, 0, 0.55); mix(elbow, 0, -0.9);
+              twist += lerp(0.45, -0.55, k) * w; lean += 0.12 * w; bob -= 0.07 * (1 - k) * w;
               break;
             }
-            case 'uppercut': {
-              // right: dip and load, then drive up from the legs, fist rising past the face
-              const k = smooth(0.18, 0.6, u);
-              mix(shoulder, 1, lerp(0.4, -2.65, k)); mix(elbow, 1, lerp(-1.95, -1.05, k)); mix(shoulderZ, 1, 0.1); guard(0);
-              bob += lerp(-0.16, 0.04, k) * w; lean += lerp(0.28, -0.12, k) * w; twist += 0.3 * w;
-              knee = [knee[0] + (1 - k) * 0.55 * w, knee[1] + (1 - k) * 0.55 * w];
-              thigh = [thigh[0] - (1 - k) * 0.35 * w, thigh[1] - (1 - k) * 0.35 * w];
+            case 'reverse': {
+              // the reverse cut: from high on the left back down across to low on the right
+              const k = smooth(0.06, 0.62, u);
+              mix(shoulder, 1, lerp(-2.65, 0.35, k)); mix(shoulderZ, 1, lerp(-0.6, 1.05, k)); mix(elbow, 1, lerp(-0.3, -0.15, k));
+              mix(shoulder, 0, -0.5); mix(shoulderZ, 0, 0.6); mix(elbow, 0, -0.85);
+              twist += lerp(-0.55, 0.5, k) * w; lean += 0.14 * w; hipRoll += 0.05 * w;
               break;
             }
-            case 'lift': {
-              // squat down to the floor, dig in, and heave the slab up over the head
-              const k = smooth(0.4, 0.95, u);
-              const down = 1 - k;
-              mix(shoulder, 0, lerp(-0.85, -2.85, k)); mix(shoulder, 1, lerp(-0.85, -2.85, k));
-              mix(elbow, 0, lerp(-0.2, -0.35, k)); mix(elbow, 1, lerp(-0.2, -0.35, k));
-              mix(shoulderZ, 0, 0.3); mix(shoulderZ, 1, 0.3);
-              lean += (0.75 * down - 0.1 * k) * w; bob -= 0.34 * down * w;
-              knee = [knee[0] + 1.1 * down * w, knee[1] + 1.1 * down * w];
-              thigh = [thigh[0] - 0.75 * down * w, thigh[1] - 0.75 * down * w];
-              ankle = [ankle[0] + 0.35 * down * w, ankle[1] + 0.35 * down * w];
+            case 'sweep': {
+              // the whirl: both arms out, the sword arm level, the whole runner spinning a full turn
+              mix(shoulder, 1, -1.5); mix(shoulderZ, 1, 1.4); mix(elbow, 1, -0.08);
+              mix(shoulder, 0, -1.25); mix(shoulderZ, 0, 1.2); mix(elbow, 0, -0.3);
+              lean += 0.08 * w; bob -= 0.1 * w;
+              knee = [knee[0] + 0.35 * w, knee[1] + 0.35 * w];
+              thigh = [thigh[0] - 0.2 * w, thigh[1] - 0.2 * w];
+              whirl = Math.PI * 2 * smooth(0.04, 0.86, u);
               break;
             }
-            case 'hurl': {
-              // both arms from overhead down and forward, the body folding into the throw
-              const k = smooth(0, 0.55, u);
-              mix(shoulder, 0, lerp(-3.0, -0.9, k)); mix(shoulder, 1, lerp(-3.0, -0.9, k));
-              mix(elbow, 0, -0.25); mix(elbow, 1, -0.25); mix(shoulderZ, 0, 0.22); mix(shoulderZ, 1, 0.22);
-              lean += lerp(-0.2, 0.45, k) * w; twist += 0.15 * w;
+            case 'cleave': {
+              // two hands up over the head, the blade back behind it, then all of it down through the target
+              const up = smooth(0, 0.3, u), down = smooth(0.3, 0.55, u);
+              const sx = lerp(lerp(-1.3, -3.05, up), -0.75, down);
+              mix(shoulder, 1, sx); mix(shoulder, 0, sx + 0.08);
+              mix(shoulderZ, 1, lerp(0.25, -0.22, up)); mix(shoulderZ, 0, lerp(0.25, -0.3, up));
+              mix(elbow, 1, lerp(-0.7, -0.08, down)); mix(elbow, 0, lerp(-0.8, -0.2, down));
+              lean += lerp(-0.18 * up, 0.5, down) * w; bob -= 0.2 * down * w; twist += 0.08 * w;
+              knee = [knee[0] + down * 0.65 * w, knee[1] + down * 0.65 * w];
+              thigh = [thigh[0] - down * 0.45 * w, thigh[1] - down * 0.45 * w];
+              break;
+            }
+            case 'soar': {
+              // the great beat: arms flung up, knees drawn in, then everything driven down with the wings
+              const k = smooth(0.12, 0.45, u);
+              mix(shoulder, 0, lerp(-2.8, 0.35, k)); mix(shoulder, 1, lerp(-2.8, 0.3, k));
+              mix(shoulderZ, 0, lerp(0.45, 0.9, k)); mix(shoulderZ, 1, lerp(0.45, 0.9, k));
+              mix(elbow, 0, -0.2); mix(elbow, 1, -0.2);
+              knee = [knee[0] + (1 - k) * 0.9 * w, knee[1] + (1 - k) * 0.9 * w];
+              thigh = [thigh[0] - (1 - k) * 0.6 * w, thigh[1] - (1 - k) * 0.6 * w];
+              headX -= 0.3 * (1 - k) * w;
+              break;
+            }
+            case 'dive':
+              break;
+            case 'blast': {
+              // both palms thrust out, and the kick of it rocks the runner back
+              const k = smooth(0.02, 0.2, u), rec = smooth(0.15, 0.45, u) * (1 - smooth(0.55, 1, u));
+              mix(shoulder, 0, -1.55); mix(shoulder, 1, -1.55); mix(elbow, 0, lerp(-1.5, -0.03, k)); mix(elbow, 1, lerp(-1.5, -0.03, k));
+              mix(shoulderZ, 0, 0.16); mix(shoulderZ, 1, 0.16);
+              lean += (0.14 - rec * 0.4) * w; headX += rec * 0.25 * w; bob -= rec * 0.05 * w;
+              break;
+            }
+            case 'boom': {
+              // gathered in, then thrown wide: arms out to the sides, chest out, head back
+              const k = smooth(0.1, 0.32, u);
+              mix(shoulder, 0, lerp(-1.1, -1.6, k)); mix(shoulder, 1, lerp(-1.1, -1.6, k));
+              mix(shoulderZ, 0, lerp(-0.2, 1.5, k)); mix(shoulderZ, 1, lerp(-0.2, 1.5, k));
+              mix(elbow, 0, lerp(-1.7, -0.1, k)); mix(elbow, 1, lerp(-1.7, -0.1, k));
+              lean += lerp(0.3, -0.22, k) * w; headX -= 0.3 * k * w;
+              knee = [knee[0] + (1 - k) * 0.5 * w, knee[1] + (1 - k) * 0.5 * w];
+              bob -= 0.12 * (1 - k) * w;
               break;
             }
             case 'cast':
@@ -795,10 +870,10 @@ export class CharacterModel {
     // the power's glow on the hands, flaring with each use
     if (this.hasPower) {
       this.handK = Math.max(0, this.handK - dt * 3.2);
-      const holding = this.actKind === 'hold' || this.actKind === 'lift' ? 0.6 : 0;
-      // which hand did it: the left jabs and hooks, the right crosses and uppercuts, both heave and push
-      const both = this.actKind === 'hold' || this.actKind === 'push' || this.actKind === 'lift' || this.actKind === 'hurl';
-      const right = this.actKind === 'cross' || this.actKind === 'uppercut';
+      const holding = this.actKind === 'hold' ? 0.6 : 0;
+      // which hand did it: a cast is the left's, a hold, a push and sonic force are both hands'
+      const both = this.actKind === 'hold' || this.actKind === 'push' || this.actKind === 'blast' || this.actKind === 'boom';
+      const right = false;
       for (let i = 0; i < 2; i++) {
         const h = this.hands[i];
         const k = Math.max(this.handK * (both || (i === 1) === right ? 1 : 0.4), holding);
@@ -850,9 +925,17 @@ export class CharacterModel {
       const k = clamp(this.flipK, 0, 1);
       this.spin.rotation.x = TWO_PI * (k * k * (3 - 2 * k));
     } else {
-      // flight tips the body about the hips, and eases back upright when it ends
-      const fp = this.j('flyPitch', flyPitch, flying ? 4 : 6, dt);
+      // flight (and gliding, and a dive) tips the body about the hips, and eases back upright when it ends
+      const fp = this.j('flyPitch', flyPitch, flying ? 4 : a.anim === Anim.Dive ? 12 : 6, dt);
       this.spin.rotation.x = Math.abs(fp) < 1e-4 ? 0 : fp;
+    }
+    // the angel's whirl turns the whole runner round once
+    this.spin.rotation.y = a.anim === Anim.Dead ? this.spin.rotation.y : whirl;
+
+    // the angel's wings, sword and halo
+    if (this.angel) {
+      const act = this.actKind && this.actKind !== 'hold' ? this.actKind : null;
+      this.angel.update({ dt, t, anim: a.anim, speed: sp, vy: a.vy, act, actU: act ? clamp(this.actT / ACT_TIME[act], 0, 1) : 0 });
     }
 
     // scarf trails behind with speed and flutters
@@ -937,6 +1020,8 @@ export class CharacterModel {
   }
 
   dispose() {
+    // the rig first: its feather shape is shared by every angel
+    this.setAngel(false);
     const shared = new Set(geoCache.values());
     this.root.traverse((o) => {
       const m = o as THREE.Mesh;

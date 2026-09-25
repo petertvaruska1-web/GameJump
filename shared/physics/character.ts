@@ -224,12 +224,16 @@ export const Anim = {
   Fly: 16,
   /** Gone through the portal: not on the course at all until they come back. */
   Away: 17,
-  /** A punch's lunge (kinetic force). */
+  /** A slash's step in (the angel's sword). */
   Lunge: 18,
-  /** Diving fist-first at the ground (kinetic force in the air). */
-  Slam: 19,
+  /** Diving with the wings folded (the angel's R in the air). */
+  Dive: 19,
   /** A flash strike's streak (super speed). */
   Flash: 20,
+  /** Gliding on spread wings (the angel, Space held on the way down). */
+  Glide: 21,
+  /** Just beat the wings (the angel): shown for a moment after each beat, so everyone sees it. */
+  Beat: 22,
 } as const;
 export type Anim = (typeof Anim)[keyof typeof Anim];
 
@@ -257,10 +261,12 @@ export interface MotorEvents {
   dashed: number;
   /** Took off (1) or stopped flying (-1) this step. */
   flew: number;
-  /** A slam hit the ground this step, this fast (m/s; 0 none). */
+  /** A dive hit the ground this step, this fast (m/s; 0 none). */
   slammed: number;
   /** A flash strike ended this step (from flashFrom to where the body is now). */
   flashed: boolean;
+  /** Beat the wings this step (1), or took off with one great beat (2, the soar); 0 none. */
+  beat: number;
 }
 
 export class PlayerMotor {
@@ -282,7 +288,7 @@ export class PlayerMotor {
   readonly platVel = v3();
   readonly events: MotorEvents = {
     jumped: false, landed: false, impact: 0, mantled: false, surface: '', launched: -1, zipOn: -1, zipOff: -1,
-    slid: false, hooked: -1, unhooked: false, flipped: false, dashed: 0, flew: 0, slammed: 0, flashed: false,
+    slid: false, hooked: -1, unhooked: false, flipped: false, dashed: 0, flew: 0, slammed: 0, flashed: false, beat: 0,
   };
 
   // ---------------------------------------------------------------- superpowers (the arena)
@@ -293,16 +299,28 @@ export class PlayerMotor {
   jumpScale = 1;
   /** Gravity power: holding jump on the way down floats you. */
   floaty = false;
-  /** Kinetic punch: a short lunge along the aim that owns your horizontal velocity. */
+  /**
+   * The angel's wings: Space in the air beats them (while they have the strength),
+   * holding it on the way down glides. See POW.angel.
+   */
+  wings = false;
+  wingStamina: number = POW.angel.WING_MAX;
+  /** Seconds since the last wingbeat, and gliding right now. */
+  beatT = 9;
+  gliding = false;
+  /** A slash's step in: a short lunge along the aim that owns your horizontal velocity. */
   lunging = false;
   private lungeT = 0;
   private lungeTime = 0;
   private lungeX = 0;
   private lungeZ = 0;
   private lungeSpeed = 0;
-  /** Kinetic slam: a dive at the ground. */
+  /** The angel's dive: along (slamX, slamY, slamZ) at slamSpeed until it lands. */
   slamming = false;
   private slamSpeed = 0;
+  private slamX = 0;
+  private slamY = -1;
+  private slamZ = 0;
   /** Flash strike: a straight streak at a speed no runner can reach. */
   flashing = false;
   private flashT = 0;
@@ -428,6 +446,9 @@ export class PlayerMotor {
     this.lunging = false;
     this.slamming = false;
     this.flashing = false;
+    this.wingStamina = POW.angel.WING_MAX;
+    this.beatT = 9;
+    this.gliding = false;
   }
 
   step(world: CollisionWorld, dt: number, inp: MoveInput, windX = 0, windZ = 0) {
@@ -436,7 +457,7 @@ export class PlayerMotor {
     ev.jumped = false; ev.landed = false; ev.impact = 0; ev.mantled = false;
     ev.launched = -1; ev.zipOn = -1; ev.zipOff = -1;
     ev.slid = false; ev.hooked = -1; ev.unhooked = false;
-    ev.flipped = false; ev.dashed = 0; ev.flew = 0; ev.slammed = 0; ev.flashed = false;
+    ev.flipped = false; ev.dashed = 0; ev.flew = 0; ev.slammed = 0; ev.flashed = false; ev.beat = 0;
     if (this.flipping) { this.flipT += dt; if (this.flipT >= FLIP.TIME) this.flipping = false; }
     if (this.zipCooldown > 0) this.zipCooldown -= dt;
     if (this.slideCooldown > 0) this.slideCooldown -= dt;
@@ -484,6 +505,15 @@ export class PlayerMotor {
     const boostK = this.boost ? POWER.BOOST_SPEED : 1;
     const baseSpeed = (inp.sprint ? PLAYER.SPRINT_SPEED * this.sprintScale : PLAYER.RUN_SPEED * this.runScale) * boostK;
     const v = b.vel;
+
+    // wings: their strength comes back (fast on the ground), and Space held on the way down glides
+    const A = POW.angel;
+    if (this.wings) {
+      this.beatT += dt;
+      this.wingStamina = Math.min(A.WING_MAX, this.wingStamina + (b.grounded ? A.WING_REGEN : A.WING_REGEN_AIR) * dt);
+    }
+    this.gliding = this.wings && !b.grounded && v.y < 0.5 && !!inp.jumpHeld && this.beatT > 0.12
+      && !this.grapple && !this.zip && !this.slamming && !this.dashing && !this.sliding;
 
     // A punch's lunge: like a dash, but forward, and over the moment it is thrown
     if (this.lunging) {
@@ -540,8 +570,8 @@ export class PlayerMotor {
     if (this.dashing || this.sliding || this.lunging) {
       // velocity already set by the dash / slide / lunge
     } else if (this.slamming) {
-      // diving: straight down, most of the sideways speed bled off
-      v.x -= v.x * damp(4, dt); v.z -= v.z * damp(4, dt);
+      // diving: along the dive, wings folded (no steering)
+      v.x = this.slamX * this.slamSpeed; v.z = this.slamZ * this.slamSpeed;
     } else if (b.grounded) {
       let speed = baseSpeed * mag;
       if (this.landSlow > 0) speed *= 0.8;
@@ -573,10 +603,11 @@ export class PlayerMotor {
         approach2(v, dirX * cur, dirZ * cur, LAUNCH.AIR_ACCEL * mag * dt);
       }
     } else if (mag > 1e-3) {
+      // gliding, the air carries you further and turns you quicker
       const cur = Math.hypot(v.x, v.z);
-      const speed = Math.max(baseSpeed, cur) * mag;
-      approach2(v, dirX * speed, dirZ * speed, PLAYER.AIR_ACCEL * this.accelScale * dt);
-    } else {
+      const speed = Math.max(this.gliding ? A.GLIDE_SPEED : baseSpeed, cur) * mag;
+      approach2(v, dirX * speed, dirZ * speed, PLAYER.AIR_ACCEL * this.accelScale * (this.gliding ? A.GLIDE_ACCEL : 1) * dt);
+    } else if (!this.gliding) {
       const k = 1 - PLAYER.AIR_DRAG * dt;
       v.x *= k; v.z *= k;
     }
@@ -585,13 +616,14 @@ export class PlayerMotor {
     let jumped = false;
     if (this.grapple && this.jumpBuffer > 0 && this.hookT >= GRAPPLE.RELEASE_LOCK) { this.jumpBuffer = 0; this.unhook(true); }
     // Space again while in the air: front flip, whenever you press it between
-    // take-off and landing. On the way down with the ground close the press is
-    // left alone, so it still buffers into a jump the moment you land.
-    if (this.jumpBuffer > 0 && !b.grounded && this.coyote <= 0 && !this.flipping && !this.flippedThisAir
-      && !this.zip && !this.grapple && !this.sliding && !this.dashing && !this.slamming
-      && !(v.y < -2 && world.groundBelow(b.pos.x, b.pos.y, b.pos.z, FLIP.NEAR_GROUND) < FLIP.NEAR_GROUND)) {
-      this.startFlip();
-    }
+    // take-off and landing (with wings: a wingbeat, which also pulls out of a dive).
+    // On the way down with the ground close the press is left alone, so it still
+    // buffers into a jump the moment you land.
+    const airPress = this.jumpBuffer > 0 && !b.grounded && this.coyote <= 0 && !this.zip && !this.grapple && !this.sliding && !this.dashing
+      && !(v.y < -2 && world.groundBelow(b.pos.x, b.pos.y, b.pos.z, FLIP.NEAR_GROUND) < FLIP.NEAR_GROUND);
+    if (this.wings) {
+      if (airPress && this.beatT >= A.BEAT_GAP && this.wingStamina >= A.BEAT_COST) this.beat(dirX, dirZ, mag);
+    } else if (airPress && !this.flipping && !this.flippedThisAir && !this.slamming) this.startFlip();
     const slideJumpOk = !this.sliding || this.headroom(world, 0.35);
     if (this.jumpBuffer > 0 && !this.dashing && !this.slamming && (b.grounded || this.coyote > 0) && slideJumpOk) {
       if (this.lunging) this.endLunge();
@@ -613,13 +645,16 @@ export class PlayerMotor {
     if (this.jumpCutReady && !inp.jumpHeld && v.y > 0) { v.y *= PLAYER.JUMP_CUT; this.jumpCutReady = false; }
     if (v.y <= 0) this.jumpCutReady = false;
 
-    // Gravity (a slam dives at a steady speed; the gravity power floats you down while jump is held)
-    if (this.slamming) v.y = -this.slamSpeed;
+    // Gravity (a dive goes at a steady speed; the gravity power floats you down while
+    // jump is held, and spread wings glide you down)
+    if (this.slamming) v.y = this.slamY * this.slamSpeed;
     else {
       const float = this.floaty && v.y < 0 && inp.jumpHeld && !this.grapple;
-      const g = PHYS.GRAVITY * (v.y < 0 ? PHYS.FALL_GRAVITY_MULT : 1) * (float ? POW.gravity.FLOAT : 1);
+      const g = PHYS.GRAVITY * (v.y < 0 ? PHYS.FALL_GRAVITY_MULT : 1) * (float ? POW.gravity.FLOAT : this.gliding ? 0.35 : 1);
       v.y = Math.max(v.y - g * dt, -PHYS.MAX_FALL_SPEED);
       if (float && v.y < -POW.gravity.FLOAT_MAX_FALL) v.y += (-POW.gravity.FLOAT_MAX_FALL - v.y) * damp(7, dt);
+      // spread wings catch a fast fall over a moment, then hold it at the glide
+      if (this.gliding) v.y = v.y < -A.GLIDE_FALL - 1 ? v.y + (-A.GLIDE_FALL - v.y) * damp(8, dt) : Math.max(v.y, -A.GLIDE_FALL);
     }
 
     // External (wind / knockback)
@@ -662,6 +697,12 @@ export class PlayerMotor {
       if (b.grounded && this.grappleAir) this.unhook(false);
     }
 
+    // A dive into a wall goes on straight down it
+    if (this.slamming && info.wall) {
+      const k = Math.hypot(this.slamX, this.slamZ);
+      if (k > 0.01) { this.slamX = 0; this.slamZ = 0; this.slamY = -1; }
+    }
+
     // Sliding into a wall: keep the part of the motion along it
     if (this.sliding && info.wall) {
       const hs2 = Math.hypot(v.x, v.z);
@@ -686,9 +727,9 @@ export class PlayerMotor {
     if (info.landed) {
       ev.landed = true; ev.impact = info.impact;
       if (this.slamming) {
-        // a slam lands on purpose: the shockwave is the point, not a stumble
+        // a dive lands on purpose: the burst is the point, not a stumble (and it is as hard as the dive was fast)
         this.slamming = false;
-        ev.slammed = info.impact;
+        ev.slammed = Math.max(info.impact, this.slamSpeed);
         v.x = v.z = 0;
       } else if (info.impact > PLAYER.HARD_LANDING_SPEED) this.landSlow = PLAYER.HARD_LANDING_SLOW;
       this.landAnim = Math.min(1, info.impact / 20);
@@ -887,18 +928,69 @@ export class PlayerMotor {
     if (hs > cap) { const k = cap / hs; v.x *= k; v.z *= k; }
   }
 
-  /** Meteor slam: from the air, dive straight at the ground at `speed`. */
-  startSlam(speed: number) {
+  /**
+   * The angel's dive: from the air, wings folded, along (dx, dy, dz) at `speed`
+   * until it lands (the caller keeps it pointing down). Returns whether it started.
+   */
+  startDive(dx: number, dy: number, dz: number, speed: number): boolean {
     const b = this.body;
-    if (b.grounded || !this.free) return;
+    if (b.grounded || !this.free) return false;
     if (this.zip) { this.lastZip = this.zip.id; this.zipCooldown = ZIP.REGRAB; this.zip = null; this.events.zipOff = this.lastZip; }
     if (this.grapple) this.unhook(false);
     this.dashing = false; this.flipping = false; this.launched = false; this.lunging = false;
+    // never shallower than DIVE_PITCH below level (aimed up or level, it goes that steeply along the aim)
+    const hl = Math.hypot(dx, dz), pitch = Math.min(Math.atan2(dy, hl), -POW.angel.DIVE_PITCH);
+    const hx = hl > 1e-3 ? dx / hl : 0, hz = hl > 1e-3 ? dz / hl : 0;
+    this.slamX = hx * Math.cos(pitch); this.slamY = Math.sin(pitch); this.slamZ = hz * Math.cos(pitch);
     this.slamming = true;
     this.slamSpeed = speed;
-    b.vel.y = -speed;
+    b.vel.x = this.slamX * speed; b.vel.y = this.slamY * speed; b.vel.z = this.slamZ * speed;
+    if (Math.hypot(this.slamX, this.slamZ) > 0.05) { this.yaw = Math.atan2(this.slamX, this.slamZ); this.yawVel = 0; }
     this.jumpBuffer = 0;
-    this.anim = Anim.Slam;
+    this.anim = Anim.Dive;
+    return true;
+  }
+
+  /** A wingbeat: up (harder if already climbing), a push the way the keys ask, and it costs the wings. */
+  private beat(dirX: number, dirZ: number, mag: number) {
+    const A = POW.angel, v = this.body.vel;
+    // a beat pulls out of a dive
+    if (this.slamming) this.slamming = false;
+    v.y = Math.min(A.BEAT_MAX, Math.max(v.y + A.BEAT_VY * 0.45, A.BEAT_VY));
+    if (mag > 0.1) {
+      const hs0 = Math.hypot(v.x, v.z);
+      v.x += dirX * A.BEAT_PUSH; v.z += dirZ * A.BEAT_PUSH;
+      // beating over and over never builds up more speed than a strong glide
+      const hs = Math.hypot(v.x, v.z), cap = Math.max(hs0, A.BEAT_SPEED);
+      if (hs > cap) { v.x *= cap / hs; v.z *= cap / hs; }
+    }
+    this.wingStamina -= A.BEAT_COST;
+    this.beatT = 0;
+    this.gliding = false;
+    this.jumpBuffer = 0; this.jumpCutReady = false; this.jumpedThisAir = true;
+    this.events.beat = 1;
+  }
+
+  /** The angel's R on the ground: one great beat that throws you straight up at `vy`. Returns whether it went. */
+  soar(vy: number): boolean {
+    const b = this.body;
+    if (!this.free || this.zip) return false;
+    if (this.grapple) this.unhook(false);
+    if (this.sliding) this.endSlide();
+    this.dashing = false; this.lunging = false; this.flipping = false;
+    b.vel.y = Math.max(b.vel.y, vy);
+    b.grounded = false; b.ground = null;
+    this.coyote = 0; this.jumpBuffer = 0; this.jumpCutReady = false; this.jumpedThisAir = true;
+    this.beatT = 0;
+    this.events.beat = 2;
+    return true;
+  }
+
+  /** A slash in the air: the wings hold you up for it (rising at least `vy`). */
+  airLift(vy: number) {
+    const b = this.body;
+    if (b.grounded || this.slamming || this.flying) return;
+    b.vel.y = Math.max(b.vel.y, vy);
   }
 
   /**
@@ -1235,7 +1327,7 @@ export class PlayerMotor {
   private updateAnim(hs: number, sprint: boolean) {
     const b = this.body;
     if (this.mantleActive) this.anim = Anim.Mantle;
-    else if (this.slamming) this.anim = Anim.Slam;
+    else if (this.slamming) this.anim = Anim.Dive;
     else if (this.lunging) this.anim = Anim.Lunge;
     else if (this.dashing) this.anim = this.dashSide < 0 ? Anim.DashL : Anim.DashR;
     else if (this.flipping) this.anim = Anim.Flip;
@@ -1243,6 +1335,8 @@ export class PlayerMotor {
     else if (this.grapple && !b.grounded) this.anim = Anim.Swing;
     else if (this.sliding) this.anim = Anim.Slide;
     else if (!b.grounded && this.launched && b.vel.y > 0) this.anim = Anim.Launch;
+    else if (!b.grounded && this.wings && this.beatT < 0.2) this.anim = Anim.Beat;
+    else if (this.gliding) this.anim = Anim.Glide;
     else if (!b.grounded) this.anim = b.vel.y > 0.5 ? Anim.Jump : Anim.Fall;
     else if (this.landSlow > 0) this.anim = Anim.Land;
     else if (hs > 6.8 && sprint) this.anim = Anim.Sprint;

@@ -570,6 +570,8 @@ export class Room implements EnemyHost, FightHost {
     // letting go of the sky on purpose: flight can catch you again all the way down,
     // so for a runner who can fly only the bottom of the world ends a fall
     if (p.canFly) { p.lastSupportY = y; return; }
+    // the same for the angel's wings in the arena: they can beat it back up out of the moat
+    if (this.inArena && this.fight?.fighter(p)?.kind === 'angel') { p.lastSupportY = y; return; }
     // hanging on a zip line or swinging on a grapple rope over the void is not falling
     if (L.ziplines.length && onAnyZipline(L, x, y, z)) { p.lastSupportY = y; return; }
     if (p.anim === Anim.Swing && this.nearAnchor(x, y, z)) { p.lastSupportY = y; return; }

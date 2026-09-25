@@ -11,7 +11,7 @@ import { clamp, damp, v3, type Vec3 } from '../math';
 import { makeBody, stepBody, stepCorpse, type CharBody, type StepInfo } from '../physics/character';
 import type { GroundHit, RayHit } from '../physics/world';
 import { BotKind, BotState, JunkKind } from '../protocol';
-import type { Fight, Fighter, Victim } from './fight';
+import type { Fight, Fighter } from './fight';
 
 const gh: GroundHit = { top: 0, c: null };
 const ray: RayHit = { dist: 0, c: null };
@@ -43,8 +43,8 @@ export class Bot {
   readonly maxHp: number;
   state: BotState = BotState.Flying;
   stateT = 0;
-  /** Who it is after: a runner, or one of a runner's clones. */
-  target: Victim | null = null;
+  /** The runner it is after. */
+  target: Fighter | null = null;
   heldBy: Fighter | null = null;
   /** Thrown or batted by a runner: it hurts whatever it slams into, and whoever threw it gets the credit. */
   thrownBy: Fighter | null = null;
@@ -144,10 +144,10 @@ export class Bot {
     }
   }
 
-  /** The nearest runner (or clone) it can get at (skitters cannot reach the pillar tops or the perches). */
+  /** The nearest runner it can get at (skitters cannot reach the pillar tops or the perches). */
   private pick(f: Fight) {
-    if (this.target && f.canHit(this.target) && this.stateT < 2.5 && this.state !== BotState.Hunt) return;
-    let best: Victim | null = null, bd = Infinity;
+    if (this.target && f.targetable(this.target) && this.stateT < 2.5 && this.state !== BotState.Hunt) return;
+    let best: Fighter | null = null, bd = Infinity;
     for (const q of f.victims()) {
       const dy = q.pos.y - this.pos.y;
       let d = Math.hypot(q.pos.x - this.pos.x, q.pos.z - this.pos.z) + Math.abs(dy) * 1.5;
@@ -194,11 +194,11 @@ export class Bot {
           break;
         case BotState.Strike:
           b.vel.x = this.lunge.x * S.LUNGE; b.vel.z = this.lunge.z * S.LUNGE;
-          if (T && f.canHit(T)) {
+          if (T && f.targetable(T)) {
             const dx = T.pos.x - this.pos.x, dz = T.pos.z - this.pos.z, dy = T.pos.y + 0.6 - this.pos.y;
             if (Math.hypot(dx, dz) < S.BITE && dy > -1 && dy < 2) {
               const d = Math.hypot(dx, dz) || 1;
-              f.hurtVictim(T, S.DAMAGE, 'bite', this.pos, { x: (dx / d) * S.KNOCK, y: 3, z: (dz / d) * S.KNOCK });
+              f.hurt(T, S.DAMAGE, 'bite', this.pos, { x: (dx / d) * S.KNOCK, y: 3, z: (dz / d) * S.KNOCK });
               this.set(BotState.Rest);
               break;
             }
@@ -235,7 +235,7 @@ export class Bot {
   }
 
   /** A leap onto the target's level: a ballistic arc that comes down a step short of them. */
-  private pounce(f: Fight, T: Victim): boolean {
+  private pounce(f: Fight, T: Fighter): boolean {
     const b = this.body, S = BOT.skitter;
     const dx = T.pos.x - this.pos.x, dz = T.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1;
     const lx = T.pos.x - (dx / d) * 1.4, lz = T.pos.z - (dz / d) * 1.4;
@@ -335,16 +335,10 @@ export class Junk {
   spin = 0;
   dead = false;
   born: number;
-  /** A slab of debris being heaved up by a kinetic runner: thrown at launchAt, along launchV. */
-  launchAt = 0;
-  readonly launchV = v3();
-  /** Thrown debris: it breaks apart on the first thing it hits. */
-  shatters = false;
-  private flewAt = 0;
   private readonly info: StepInfo = { landed: false, impact: 0, wall: null, dynamicHit: null };
 
   constructor(readonly id: number, readonly kind: JunkKind, x: number, y: number, z: number, t: number, readonly stand = -1) {
-    this.body = makeBody(kind === JunkKind.Shell ? 0.32 : JUNK.RADIUS, kind === JunkKind.Plate ? 0.5 : kind === JunkKind.Shell ? 0.6 : kind === JunkKind.Rock ? 0.8 : 1.1);
+    this.body = makeBody(kind === JunkKind.Shell ? 0.32 : JUNK.RADIUS, kind === JunkKind.Plate ? 0.5 : kind === JunkKind.Shell ? 0.6 : 1.1);
     this.body.pos.x = x; this.body.pos.y = y; this.body.pos.z = z;
     this.born = t;
   }
@@ -364,16 +358,6 @@ export class Junk {
 
   update(dt: number, f: Fight) {
     const b = this.body;
-    // heaved up: now it is thrown
-    if (this.heldBy && this.launchAt > 0 && f.time >= this.launchAt) {
-      const by = this.heldBy;
-      this.launchAt = 0;
-      holdPoint(by, tmp);
-      b.pos.x = tmp.x; b.pos.y = tmp.y - 0.4; b.pos.z = tmp.z;
-      this.release(this.launchV.x, this.launchV.y, this.launchV.z, by);
-      this.shatters = true;
-      this.flewAt = f.time;
-    }
     if (this.heldBy) {
       holdPoint(this.heldBy, tmp);
       b.pos.x += (tmp.x - b.pos.x) * damp(16, dt); b.pos.y += (tmp.y - 0.4 - b.pos.y) * damp(16, dt); b.pos.z += (tmp.z - b.pos.z) * damp(16, dt);
@@ -396,16 +380,12 @@ export class Junk {
         const bot = f.botAt(b.pos, b.radius + 0.25, null);
         if (bot) { f.junkHits(this, bot, pre); break; }
       }
-      // thrown debris breaks on the Warden's legs and arms too (not all of it is solid)
-      if (this.shatters && f.rockMeetsWarden(this)) { f.shatter(this); break; }
       if ((hitWall || hitFloor) && pre > 5) {
         const puppet = this.info.dynamicHit?.kind === 'puppet' || this.info.wall?.kind === 'puppet' || (this.info.landed && b.ground?.kind === 'puppet');
         f.junkImpact(this, pre, puppet);
       }
     }
     if (!this.dead && b.pos.y < f.killY) { this.dead = true; }
-    // debris that found nothing to hit breaks where it stops (or after a few seconds in the air)
-    if (!this.dead && this.shatters && ((b.grounded && Math.hypot(b.vel.x, b.vel.z) < 3) || f.time - this.flewAt > 3)) f.shatter(this);
     if (this.thrownBy && b.grounded && Math.hypot(b.vel.x, b.vel.z) < 3) this.thrownBy = null;
   }
 
@@ -456,7 +436,7 @@ export class Orb {
       } else {
         const q = f.victimAt(this.pos, R + 0.3);
         if (q) {
-          f.hurtVictim(q, BOT.wasp.DAMAGE, 'sting', this.pos, { x: this.vel.x / sp * BOT.wasp.KNOCK, y: 1.5, z: this.vel.z / sp * BOT.wasp.KNOCK });
+          f.hurt(q, BOT.wasp.DAMAGE, 'sting', this.pos, { x: this.vel.x / sp * BOT.wasp.KNOCK, y: 1.5, z: this.vel.z / sp * BOT.wasp.KNOCK });
           f.endOrb(this);
           return;
         }

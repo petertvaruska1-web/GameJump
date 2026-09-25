@@ -1,8 +1,14 @@
 // Effects in the Warden's arena: the tells and hazards of its abilities, the six
-// powers, explosions, bolts, wells and rifts. Everything is pooled and most of
-// it is a handful of draw calls: every bolt, beam edge, tether, streak and arc
-// is a camera-facing ribbon in one dynamic mesh; flashes are one billboard
-// batch; rings, markers, fireballs, wells, rifts and afterimages are small pools.
+// powers, explosions, bolts and wells. Everything is pooled and most of it is a
+// handful of draw calls: every bolt, beam edge, tether, streak, arc and
+// speedster's trail is a camera-facing ribbon in one dynamic mesh; flashes are
+// one billboard batch; the angel's sword trails are one strip mesh; rings,
+// markers, fireballs, wells, sonic waves and afterimages are small pools.
+//
+// Sonic force is drawn as the force itself travelling: rings that race out
+// along the cone at the wave's own speed and widen with it, a shimmering shell
+// of disturbed air behind the front, grit and dust thrown off the floor it
+// passes over, and an impact ring wherever the front strikes something.
 //
 // Hazards are drawn from the same numbers the server tests runners against
 // (shared/sim/warden.ts), at the synced match clock, so what you see is what
@@ -20,6 +26,8 @@ import type { CollisionWorld, RayHit } from '../../shared/physics/world';
 import type { Particles } from './Effects';
 
 const TMP = new THREE.Vector3(), TMP2 = new THREE.Vector3(), TMP3 = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0), Z_AXIS = new THREE.Vector3(0, 0, 1);
+const lerpN = (a: number, b: number, u: number) => a + (b - a) * u;
 const V = { x: 0, y: 0, z: 0 }, W = { x: 0, y: 0, z: 0 };
 const FLASH_COL = new THREE.Color();
 
@@ -99,7 +107,7 @@ class Ribbons {
   }
 }
 
-// ------------------------------------------------------------------ rings, fireballs, wells, rifts
+// ------------------------------------------------------------------ rings, fireballs, wells, sonic waves
 
 const ringFragment = /* glsl */ `
   uniform vec3 uColor; uniform float uAlpha, uInner, uTime;
@@ -170,23 +178,54 @@ const diskFragment = /* glsl */ `
     float band = smoothstep(0.32, 0.45, r) * smoothstep(1.0, 0.6, r);
     gl_FragColor = vec4(mix(vec3(0.5, 0.15, 1.1), vec3(1.2, 0.7, 1.6), s) * 1.2, band * s * 0.85 * uK);
   }`;
-const riftFragment = /* glsl */ `
-  uniform float uTime, uK;
+// a sonic ring: a bright rippling band, its inside wavering like air bent by a blast
+const sonicRingFragment = /* glsl */ `
+  uniform float uTime, uK, uSeed;
   varying vec2 vUv;
   void main() {
     vec2 p = vUv * 2.0 - 1.0;
-    p.x *= 2.2;
     float r = length(p);
-    float edge = smoothstep(1.0, 0.82, r) * smoothstep(0.55, 0.8, r);
-    float core = smoothstep(0.8, 0.0, r);
-    float flick = 0.7 + 0.3 * sin(atan(p.y, p.x) * 11.0 + uTime * 30.0);
-    vec3 col = mix(vec3(0.25, 1.7, 0.85), vec3(0.95, 2.0, 1.5), 0.5 + 0.5 * sin(uTime * 7.0 + p.y * 3.0));
-    gl_FragColor = vec4(col * (edge * flick * 1.6) + vec3(0.02, 0.0, 0.06) * core, (edge * flick + core * 0.85) * uK);
+    float a = atan(p.y, p.x);
+    float wob = 0.03 * sin(a * 9.0 + uTime * 23.0 + uSeed) + 0.02 * sin(a * 17.0 - uTime * 31.0);
+    float rr = r + wob;
+    float band = smoothstep(0.8, 0.93, rr) * smoothstep(1.0, 0.95, rr);
+    float inner = smoothstep(0.35, 0.9, rr) * step(rr, 0.94) * (0.5 + 0.5 * sin(rr * 40.0 - uTime * 50.0)) * 0.12;
+    vec3 col = mix(vec3(0.45, 1.35, 1.15), vec3(1.2, 1.95, 1.7), band);
+    gl_FragColor = vec4(col, (band * 0.85 + inner) * uK);
   }`;
+// the disturbed air behind a blast's front: a shimmering cone shell, ripples running out along it
+const coneVertex = /* glsl */ `varying vec2 vUv; varying float vRim; void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vec3 n = normalize(normalMatrix * normal); vRim = 1.0 - abs(dot(n, normalize(-mv.xyz))); gl_Position = projectionMatrix * mv; }`;
+const coneFragment = /* glsl */ `
+  uniform float uTime, uK, uLen;
+  varying vec2 vUv; varying float vRim;
+  void main() {
+    float along = vUv.y;
+    float ripple = 0.5 + 0.5 * sin((along * uLen) * 1.6 - uTime * 60.0 + sin(vUv.x * 40.0 + uTime * 9.0) * 0.6);
+    float front = smoothstep(0.7, 1.0, along);
+    float fade = smoothstep(0.0, 0.25, along);
+    float a = (ripple * 0.22 + front * 0.45) * fade * (0.3 + vRim * 0.9);
+    gl_FragColor = vec4(mix(vec3(0.4, 1.2, 1.05), vec3(1.1, 1.8, 1.6), front), a * uK);
+  }`;
+// the boom's dome: a bubble of force, brightest at its rim
+const domeFragment = /* glsl */ `
+  uniform float uTime, uK;
+  varying vec2 vUv; varying float vRim;
+  void main() {
+    float bands = 0.5 + 0.5 * sin(vUv.y * 60.0 - uTime * 40.0);
+    gl_FragColor = vec4(vec3(0.8, 1.8, 1.55) * (0.6 + bands * 0.4), pow(vRim, 2.5) * uK);
+  }`;
+// the angel's sword trail: a strip of light, hottest along the blade's edge
+const trailVertex = /* glsl */ `attribute vec4 color; varying vec4 vC; void main(){ vC = color; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const trailFragment = /* glsl */ `varying vec4 vC; void main(){ gl_FragColor = vC; }`;
 
 interface Fireball { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; age: number; life: number; r: number }
 interface WellVis { id: number; core: THREE.Mesh; disk: THREE.Mesh; field: Ring | null; pos: THREE.Vector3; vel: THREE.Vector3; t0: number; open: boolean; k: number; closing: number; follow: THREE.Vector3 | null; mine: boolean }
-interface RiftVis { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; age: number }
+interface SonicRing { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; age: number; life: number; delay: number; from: THREE.Vector3; dir: THREE.Vector3; speed: number; range: number; slope: number; flat: boolean }
+interface SonicCone { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; age: number; from: THREE.Vector3; dir: THREE.Vector3 }
+interface Dome { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; age: number; r: number }
+/** An angel's sword trail this frame: where the blade's base and tip were, newest first, and how long ago. */
+export interface SwordTrail { base: THREE.Vector3[]; tip: THREE.Vector3[]; ages: number[] }
+const SWORD_LIFE = 0.16;
 interface Bolt { pts: THREE.Vector3[]; life: number; age: number; w: number; color: [number, number, number] }
 interface Streak { a: THREE.Vector3; b: THREE.Vector3; age: number; life: number; color: [number, number, number]; w: number }
 interface Marker { id: number; mesh: THREE.Mesh; mat: THREE.ShaderMaterial; land: number; t0: number }
@@ -199,13 +238,19 @@ export class ArenaFx {
   private readonly rings: Ring[] = [];
   private readonly fireballs: Fireball[] = [];
   private readonly wells: WellVis[] = [];
-  private readonly rifts: RiftVis[] = [];
+  private readonly sonicRings: SonicRing[] = [];
+  private readonly cones: SonicCone[] = [];
+  private readonly domes: Dome[] = [];
+  private swordTrails: SwordTrail[] = [];
+  private readonly swordMesh: THREE.Mesh;
+  private readonly swordPos: Float32Array;
+  private readonly swordCol: Float32Array;
   private readonly bolts: Bolt[] = [];
   private readonly streaks: Streak[] = [];
   private readonly markers: Marker[] = [];
   private readonly ghosts: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; age: number; life: number }[] = [];
   /** Speedsters' trails this frame (set by the controller, drawn in update). */
-  private trails: { pts: THREE.Vector3[]; ages: number[]; color: [number, number, number] }[] = [];
+  private trails: { pts: THREE.Vector3[]; ages: number[]; cut?: boolean[]; color: [number, number, number] }[] = [];
   private readonly wall: THREE.Mesh;
   private readonly wallMat: THREE.ShaderMaterial;
   private readonly lane: THREE.Mesh;
@@ -246,14 +291,44 @@ export class ArenaFx {
       this.group.add(mesh);
       this.fireballs.push({ mesh, mat, age: 1, life: 0, r: 1 });
     }
-    for (let i = 0; i < 6; i++) {
-      const mat = new THREE.ShaderMaterial({ vertexShader: flatVertex, fragmentShader: riftFragment, uniforms: { uTime: { value: 0 }, uK: { value: 0 } }, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+    // sonic force: racing rings, the cone of disturbed air behind a blast's front, the boom's dome
+    for (let i = 0; i < 24; i++) {
+      const mat = new THREE.ShaderMaterial({ vertexShader: flatVertex, fragmentShader: sonicRingFragment, uniforms: { uTime: { value: 0 }, uK: { value: 0 }, uSeed: { value: i * 1.7 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+      const mesh = new THREE.Mesh(this.ringGeo, mat);
       mesh.visible = false;
       mesh.renderOrder = 10;
       this.group.add(mesh);
-      this.rifts.push({ mesh, mat, age: 1 });
+      this.sonicRings.push({ mesh, mat, age: 1, life: 1, delay: 0, from: new THREE.Vector3(), dir: new THREE.Vector3(), speed: 0, range: 0, slope: 0, flat: false });
     }
+    const cg = new THREE.CylinderGeometry(1, 0, 1, 28, 6, true);
+    cg.rotateX(Math.PI / 2); cg.translate(0, 0, 0.5);
+    for (let i = 0; i < 4; i++) {
+      const mat = new THREE.ShaderMaterial({ vertexShader: coneVertex, fragmentShader: coneFragment, uniforms: { uTime: { value: 0 }, uK: { value: 0 }, uLen: { value: 1 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+      const mesh = new THREE.Mesh(cg, mat);
+      mesh.visible = false;
+      mesh.renderOrder = 9;
+      this.group.add(mesh);
+      this.cones.push({ mesh, mat, age: 1, from: new THREE.Vector3(), dir: new THREE.Vector3() });
+    }
+    for (let i = 0; i < 3; i++) {
+      const mat = new THREE.ShaderMaterial({ vertexShader: coneVertex, fragmentShader: domeFragment, uniforms: { uTime: { value: 0 }, uK: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat);
+      mesh.visible = false;
+      mesh.renderOrder = 9;
+      this.group.add(mesh);
+      this.domes.push({ mesh, mat, age: 1, r: 1 });
+    }
+    // the angels' sword trails: one strip mesh for all of them
+    const MAXQ = 4 * 20;
+    this.swordPos = new Float32Array(MAXQ * 6 * 3);
+    this.swordCol = new Float32Array(MAXQ * 6 * 4);
+    const sg2 = new THREE.BufferGeometry();
+    sg2.setAttribute('position', new THREE.BufferAttribute(this.swordPos, 3).setUsage(THREE.DynamicDrawUsage));
+    sg2.setAttribute('color', new THREE.BufferAttribute(this.swordCol, 4).setUsage(THREE.DynamicDrawUsage));
+    this.swordMesh = new THREE.Mesh(sg2, new THREE.ShaderMaterial({ vertexShader: trailVertex, fragmentShader: trailFragment, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false }));
+    this.swordMesh.frustumCulled = false;
+    this.swordMesh.renderOrder = 12;
+    this.group.add(this.swordMesh);
     // afterimages (the flash strike, and a speedster running flat out)
     const gg = ghostMerged();
     for (let i = 0; i < 28; i++) {
@@ -368,14 +443,6 @@ export class ArenaFx {
         this.ring(p, 1, r * 1.8, 0.4, new THREE.Color(1, 2, 3.2), 0.2);
         P.burst(p.x, p.y, p.z, 60, 12, 0.5, 0.15, [0.6, 0.9, 1], 1, 6, 3);
         break;
-      case 8: // a hurled slab of floor shatters: chunks, grit and a cloud of dust
-        this.flash(p, r * 2.2, 0xffb070, 0.2);
-        this.ring(TMP.set(p.x, Math.max(this.floorY, p.y - 1) + 0.12, p.z), 0.5, r * 1.4, 0.4, new THREE.Color(1.5, 1.1, 0.7), 0.25);
-        P.burst(p.x, p.y, p.z, 70, 12, 1.1, 0.26, [0.46, 0.43, 0.4], 1, 20, 4);
-        P.burst(p.x, p.y, p.z, 40, 8, 1.4, 0.14, [0.62, 0.58, 0.52], 1, 18, 3);
-        P.burst(p.x, p.y, p.z, 18, 10, 0.4, 0.14, [1, 0.7, 0.35], 1, 10, 2);
-        P.burst(p.x, p.y + 0.4, p.z, 24, 2.6, 2.4, 1.3, [0.36, 0.34, 0.33], 0.55, -1.2, 1.2);
-        break;
       default: { // a canister or a shell: fire, a shock ring on the ground, sparks, debris and smoke
         const big = kind === 0;
         this.flash(p, r * (big ? 3.4 : 2.8), big ? 0xffa040 : 0xff6030, 0.3);
@@ -431,35 +498,6 @@ export class ArenaFx {
     this.particles.burst(b.x, b.y + 0.5, b.z, 16, 6, 0.4, 0.2, [1, 0.85, 0.4], 0.9, 6, 1);
   }
 
-  /** Teleport: a tear in space where you were and where you are, and the line torn between them. */
-  blink(a: THREE.Vector3, b: THREE.Vector3, cam: THREE.Vector3) {
-    for (const [p, s] of [[a, 1.0], [b, 1.35]] as [THREE.Vector3, number][]) {
-      const r = this.rifts.reduce((x, y) => (y.age > x.age ? y : x));
-      r.age = 0;
-      r.mesh.position.set(p.x, p.y + 1.1, p.z);
-      r.mesh.lookAt(cam.x, p.y + 1.1, cam.z);
-      r.mesh.userData.s = s;
-      r.mesh.visible = true;
-    }
-    this.streak(TMP2.copy(a).setY(a.y + 1.1), TMP3.copy(b).setY(b.y + 1.1), 0.35, [0.45, 2.2, 1.25], 0.35);
-    this.ring(TMP2.copy(b).setY(b.y + 0.1), 0.4, 3.2, 0.4, new THREE.Color(0.45, 2.1, 1.2), 0.2);
-    this.particles.burst(b.x, b.y + 1, b.z, 40, 8, 0.5, 0.18, [0.45, 1, 0.7], 1, 2, 1);
-    // what was left behind is sucked into the fold
-    for (let i = 0; i < 26; i++) {
-      const ang = Math.random() * Math.PI * 2, rr = 1.5 + Math.random() * 3;
-      const x = a.x + Math.cos(ang) * rr, y = a.y + 0.3 + Math.random() * 2, z = a.z + Math.sin(ang) * rr;
-      this.particles.emit(x, y, z, (a.x - x) * 4, (a.y + 1.1 - y) * 4, (a.z - z) * 4, 0.3, 0.14, 0.4, 1, 0.7, 1, 0, -0.3);
-    }
-  }
-
-  /** Kinetic's R: a slab torn out of the floor (cracks, grit thrown up, dust). */
-  rip(p: THREE.Vector3) {
-    this.ring(TMP.set(p.x, p.y + 0.06, p.z), 0.3, 2.6, 0.5, new THREE.Color(1.4, 0.8, 0.35), 0.35, 0.8);
-    this.particles.burst(p.x, p.y + 0.2, p.z, 36, 7, 0.9, 0.2, [0.5, 0.46, 0.42], 1, 18, 7);
-    this.particles.burst(p.x, p.y + 0.1, p.z, 20, 2.2, 1.8, 0.9, [0.4, 0.38, 0.36], 0.6, -1, 1.5);
-    this.flash(TMP.set(p.x, p.y + 0.3, p.z), 2.4, 0xffa060, 0.2);
-  }
-
   /** An afterimage of a runner at `p` turned to `yaw` (a speedster's wake). */
   afterimage(p: THREE.Vector3, yaw: number, color: [number, number, number], life = 0.34, scale = 1) {
     const g = this.ghosts.reduce((x, y) => (y.age / y.life > x.age / x.life ? y : x));
@@ -471,47 +509,176 @@ export class ArenaFx {
     g.mesh.visible = true;
   }
 
-  /** Speedsters' trails to draw this frame: points from newest to oldest, with their ages (s). */
-  setTrails(list: { pts: THREE.Vector3[]; ages: number[]; color: [number, number, number] }[]) { this.trails = list; }
+  /** Speedsters' trails to draw this frame: points from newest to oldest, their ages (s), and where the trail broke off (a stretch not to draw). */
+  setTrails(list: { pts: THREE.Vector3[]; ages: number[]; cut?: boolean[]; color: [number, number, number] }[]) { this.trails = list; }
 
-  /** Duplication: a clone destroyed (it breaks into shards of green light). */
-  cloneOut(p: THREE.Vector3) {
-    this.flash(TMP.set(p.x, p.y + 1.1, p.z), 4, 0x60ffb0, 0.25);
-    this.particles.burst(p.x, p.y + 1.1, p.z, 50, 7, 0.7, 0.2, [0.35, 1, 0.6], 1, 6, 2);
-    this.ring(TMP.set(p.x, p.y + 0.1, p.z), 0.3, 2.4, 0.35, new THREE.Color(0.4, 2.2, 1.2), 0.25);
+  // ------------------------------------------------------------------ the angel
+
+  /** Feathers shed into the air at `p`, drifting down (a wingbeat, a soar, a dive). */
+  feathers(p: THREE.Vector3, n: number, spread: number, up = 1) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, r = Math.random() * spread;
+      this.particles.emit(p.x + Math.cos(a) * r, p.y + (Math.random() - 0.3) * spread * 0.6, p.z + Math.sin(a) * r,
+        Math.cos(a) * (1 + Math.random() * 3), (Math.random() * 2 - 0.5) * up, Math.sin(a) * (1 + Math.random() * 3),
+        1.1 + Math.random() * 0.9, 0.09 + Math.random() * 0.05, 1, 0.97, 0.88, 0.85, 1.1, 0.02);
+    }
   }
 
-  /** Duplication: a clone's blow landing at `at`, thrown from its chest at `from`. */
-  cloneHit(from: THREE.Vector3, at: THREE.Vector3, rallied: boolean) {
-    this.flash(at, rallied ? 2.6 : 1.8, 0x70ffb8, 0.14);
-    this.streak(from, at, 0.12, rallied ? [0.8, 3, 1.6] : [0.5, 2.2, 1.2], rallied ? 0.35 : 0.22);
-    this.particles.burst(at.x, at.y, at.z, rallied ? 16 : 9, 6, 0.3, 0.12, [0.5, 1, 0.7], 1, 8, 1);
+  /**
+   * A sword cut in front of `p` (the chest) along `d` (flat): a crescent of light
+   * drawn along the arc the cut sweeps (0 a rising cut, 1 a reverse cut, 2 the
+   * whirl, 3 the cleave), and sparks where it lands.
+   */
+  slash(p: THREE.Vector3, d: THREE.Vector3, combo: number, hit: boolean) {
+    const rx = d.z, rz = -d.x; // the runner's right
+    const reach = combo === 3 ? POW.angel.CLEAVE_REACH : POW.angel.REACH;
+    const n = 16;
+    // the arc as angles across the front, and the height it climbs (or falls) through
+    const [a0, a1, y0, y1, r0] = combo === 0 ? [0.95, -0.95, -0.7, 0.8, 0.8] : combo === 1 ? [-0.95, 0.95, 0.8, -0.6, 0.8] : combo === 2 ? [Math.PI, -Math.PI, 0, 0, 0.9] : [0, 0, 1.9, -0.9, 0.6];
+    let px = 0, py = 0, pz = 0;
+    for (let i = 0; i <= n; i++) {
+      const u = i / n;
+      let x: number, y: number, z: number;
+      if (combo === 3) {
+        // the cleave: a vertical arc from over the head down in front
+        const ang = lerpN(-0.4, 1.9, u), rr = reach * 0.85;
+        x = p.x + d.x * Math.sin(ang) * rr; z = p.z + d.z * Math.sin(ang) * rr; y = p.y + Math.cos(ang) * rr * 0.9 - 0.2;
+      } else {
+        const ang = lerpN(a0, a1, u), rr = reach * r0;
+        x = p.x + (d.x * Math.cos(ang) + rx * Math.sin(ang)) * rr;
+        z = p.z + (d.z * Math.cos(ang) + rz * Math.sin(ang)) * rr;
+        y = p.y + lerpN(y0, y1, u);
+      }
+      if (i > 0) {
+        const k = Math.sin(u * Math.PI);
+        this.streaks.push({ a: new THREE.Vector3(px, py, pz), b: new THREE.Vector3(x, y, z), age: -u * 0.06, life: 0.22, color: [2.6, 2.1, 1.1], w: 0.55 * k + 0.08 });
+        this.streaks.push({ a: new THREE.Vector3(px, py, pz), b: new THREE.Vector3(x, y, z), age: -u * 0.06, life: 0.16, color: [3, 3, 2.6], w: 0.14 * k + 0.03 });
+      }
+      px = x; py = y; pz = z;
+    }
+    const at = TMP.copy(p).addScaledVector(d, reach * 0.7);
+    this.flash(at, hit ? 3.2 : 1.6, 0xffe6a8, 0.14);
+    if (hit) this.particles.burst(at.x, at.y, at.z, 22, 9, 0.3, 0.12, [1, 0.9, 0.6], 1, 10, 1);
+    if (combo === 2) this.ring(TMP2.set(p.x, p.y - 1.1, p.z), 0.6, reach * 1.1, 0.35, new THREE.Color(2.2, 1.9, 1.1), 0.3, 0.7);
   }
 
-  /** Duplication: every clone sent at `p`. */
-  rally(p: THREE.Vector3) {
-    this.ring(p, 0.4, 4, 0.45, new THREE.Color(0.5, 2.4, 1.3), 0.3, 1, TMP2.set(0, 1, 0));
-    this.ring(TMP.set(p.x, this.floorY + 0.1, p.z), 1, 6, 0.6, new THREE.Color(0.4, 2, 1.1), 0.22);
-    this.flash(p, 5, 0x70ffb8, 0.3);
+  /** The soar: one great wingbeat blasting the floor, feathers everywhere, a column of light. */
+  soar(p: THREE.Vector3) {
+    const R = POW.angel.SOAR_RADIUS;
+    this.ring(TMP.set(p.x, p.y + 0.08, p.z), 0.6, R * 1.2, 0.5, new THREE.Color(2.2, 1.95, 1.3), 0.4, 0.9);
+    this.ring(TMP.set(p.x, p.y + 0.15, p.z), 0.3, R * 0.75, 0.35, new THREE.Color(2.8, 2.5, 1.8), 0.25, 1);
+    this.flash(TMP.set(p.x, p.y + 1.2, p.z), 6, 0xfff0c8, 0.3);
+    this.streak(TMP.set(p.x, p.y, p.z), TMP2.set(p.x, p.y + 9, p.z), 0.35, [2.4, 2.1, 1.3], 1.6);
+    this.feathers(TMP.set(p.x, p.y + 1.4, p.z), 34, 1.6, 2);
+    this.particles.dust(p.x, p.y, p.z, 0.8);
+    // the floor's dust blown out flat
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2, s = 9 + Math.random() * 6;
+      this.particles.emit(p.x + Math.cos(a) * 0.8, p.y + 0.2, p.z + Math.sin(a) * 0.8, Math.cos(a) * s, 0.8 + Math.random(), Math.sin(a) * s, 0.55, 0.3, 0.62, 0.58, 0.52, 0.5, 2, 1.4);
+    }
   }
 
-  /** A punch: a cone of force out of the fist. */
-  punch(p: THREE.Vector3, d: THREE.Vector3, hit: boolean) {
-    this.flash(p, hit ? 3.2 : 1.8, 0xffb060, 0.16);
-    this.ring(TMP.copy(p).addScaledVector(d, 1.2), 0.3, hit ? 2.6 : 1.8, 0.22, new THREE.Color(2.2, 1.5, 0.8), 0.35, 1, d);
-    this.ring(TMP.copy(p).addScaledVector(d, 2.6), 0.2, 1.4, 0.28, new THREE.Color(1.6, 1.0, 0.5), 0.3, 0.7, d);
-    this.particles.burst(p.x + d.x, p.y + d.y, p.z + d.z, hit ? 26 : 10, 9, 0.35, 0.16, [1, 0.8, 0.5], 1, 6, 0);
-  }
-
-  /** A meteor slam lands. */
-  slam(p: THREE.Vector3, speed: number) {
-    const k = clamp(speed / POW.kinetic.SLAM_SPEED, 0.4, 1.2);
-    this.flash(TMP.copy(p).setY(p.y + 0.6), 6 * k, 0xffc070, 0.25);
-    this.ring(TMP.copy(p).setY(p.y + 0.08), 0.5, POW.kinetic.SLAM_RADIUS * 1.15, 0.45, new THREE.Color(2.4, 1.6, 0.8), 0.28);
-    this.ring(TMP.copy(p).setY(p.y + 0.12), 0.3, POW.kinetic.SLAM_RADIUS * 0.7, 0.3, new THREE.Color(3, 2.4, 1.4), 0.4);
+  /** A dive lands: a burst of light and feathers that grows with the speed of the dive. */
+  dive(p: THREE.Vector3, speed: number) {
+    const k = clamp(speed / POW.angel.DIVE_SPEED, 0.4, 1.2), R = POW.angel.DIVE_RADIUS;
+    this.flash(TMP.copy(p).setY(p.y + 0.8), 7 * k, 0xfff0c8, 0.3);
+    this.ring(TMP.copy(p).setY(p.y + 0.08), 0.5, R * 1.2, 0.5, new THREE.Color(2.6, 2.1, 1.2), 0.3);
+    this.ring(TMP.copy(p).setY(p.y + 0.12), 0.3, R * 0.7, 0.32, new THREE.Color(3, 2.7, 1.9), 0.45);
+    this.ring(TMP.copy(p).setY(p.y + 1), 0.4, R * 0.9, 0.3, new THREE.Color(2.2, 1.9, 1.2), 0.3, 0.8, TMP2.set(0, 1, 0));
+    this.streak(TMP.copy(p), TMP2.copy(p).setY(p.y + 7 * k), 0.3, [2.6, 2.2, 1.3], 1.1);
     this.particles.dust(p.x, p.y, p.z, 1);
-    this.particles.burst(p.x, p.y + 0.3, p.z, Math.round(40 * k), 11, 0.9, 0.22, [0.62, 0.58, 0.52], 0.9, 18, 5);
-    this.particles.burst(p.x, p.y + 0.3, p.z, 20, 8, 0.4, 0.14, [1, 0.8, 0.45], 1, 12, 4);
+    this.particles.burst(p.x, p.y + 0.3, p.z, Math.round(36 * k), 11, 0.8, 0.2, [0.62, 0.58, 0.52], 0.9, 18, 5);
+    this.particles.burst(p.x, p.y + 0.5, p.z, 26, 9, 0.45, 0.14, [1, 0.92, 0.65], 1, 8, 4);
+    this.feathers(TMP.copy(p).setY(p.y + 1.2), 20, 1.2, 2.5);
+  }
+
+  /** The angels' sword trails to draw this frame. */
+  setSwordTrails(list: SwordTrail[]) { this.swordTrails = list; }
+
+  // ------------------------------------------------------------------ sonic force
+
+  /**
+   * A sonic blast from `p` along `d` (or, `boom`, a ring of force all round):
+   * rings racing out at the wave's own speed, the cone of disturbed air behind
+   * the front, dust and grit thrown off the floor it passes over.
+   */
+  sonic(p: THREE.Vector3, d: THREE.Vector3, boom: boolean) {
+    const S = POW.sonic;
+    if (boom) {
+      const floor = this.floorBelow(p, 3);
+      for (let i = 0; i < 3; i++) this.sonicRing(TMP.set(p.x, i === 0 ? floor + 0.12 : p.y - 0.4 + i * 0.5, p.z), UP, S.BOOM_SPEED * (1 - i * 0.12), S.BOOM_RADIUS * (1.05 - i * 0.1), 0, true, i * 0.03);
+      const dm = this.domes.reduce((a, b) => (b.age > a.age ? b : a));
+      dm.age = 0; dm.r = S.BOOM_RADIUS;
+      dm.mesh.position.set(p.x, floor, p.z);
+      dm.mesh.visible = true;
+      this.flash(p, 9, 0xb0ffe8, 0.28);
+      // everything on the floor round it blown out flat
+      for (let i = 0; i < 60; i++) {
+        const a = Math.random() * Math.PI * 2, s = 14 + Math.random() * 12, r = 0.5 + Math.random();
+        this.particles.emit(p.x + Math.cos(a) * r, floor + 0.15 + Math.random() * 0.4, p.z + Math.sin(a) * r, Math.cos(a) * s, 1 + Math.random() * 2, Math.sin(a) * s, 0.45, 0.28, 0.6, 0.58, 0.54, 0.6, 3, 1.5);
+      }
+      this.particles.burst(p.x, p.y, p.z, 30, 10, 0.35, 0.12, [0.7, 1, 0.9], 1, 0, 0);
+      return;
+    }
+    const slope = Math.tan(S.CONE);
+    // the rings: one right at the hands, the rest racing out after it
+    for (let i = 0; i < 5; i++) this.sonicRing(p, d, S.SPEED * (1 - i * 0.07), S.RANGE, slope, false, i * 0.035);
+    const c = this.cones.reduce((a, b) => (b.age > a.age ? b : a));
+    c.age = 0; c.from.copy(p); c.dir.copy(d);
+    c.mesh.position.copy(p);
+    c.mesh.quaternion.setFromUnitVectors(Z_AXIS, d);
+    c.mesh.visible = true;
+    this.flash(TMP.copy(p).addScaledVector(d, 0.8), 3.2, 0xc8fff0, 0.16);
+    this.ring(TMP.copy(p).addScaledVector(d, 0.9), 0.2, 1.4, 0.2, new THREE.Color(1.6, 2.2, 2), 0.3, 1, d);
+    // grit and dust off the floor along the cone, blown on ahead of it
+    for (let i = 1; i <= 9; i++) {
+      const along = i * 2.1;
+      TMP.copy(p).addScaledVector(d, along);
+      const floor = this.floorBelow(TMP, 5);
+      if (!isFinite(floor) || TMP.y - floor > along * slope + 1.5) continue;
+      const w = along * slope;
+      for (let j = 0; j < 4; j++) {
+        const s = (Math.random() - 0.5) * 2 * w, sp = 16 + Math.random() * 14;
+        this.particles.emit(TMP.x + d.z * s, floor + 0.15, TMP.z - d.x * s, d.x * sp + (Math.random() - 0.5) * 3, 1 + Math.random() * 3, d.z * sp + (Math.random() - 0.5) * 3, 0.5, 0.26, 0.6, 0.57, 0.53, 0.55, 4, 1.2);
+      }
+    }
+    // a few motes of air caught in it
+    for (let i = 0; i < 18; i++) {
+      const s = 30 + Math.random() * 30;
+      const jx = (Math.random() - 0.5) * slope * 2, jy = (Math.random() - 0.5) * slope * 2, jz = (Math.random() - 0.5) * slope * 2;
+      this.particles.emit(p.x, p.y, p.z, (d.x + jx) * s, (d.y + jy) * s, (d.z + jz) * s, 0.3, 0.1, 0.75, 1, 0.92, 0.8, 0, 0.3);
+    }
+  }
+
+  private sonicRing(p: THREE.Vector3, d: THREE.Vector3, speed: number, range: number, slope: number, flat: boolean, delay: number) {
+    const r = this.sonicRings.reduce((a, b) => (b.age / b.life > a.age / a.life ? b : a));
+    r.age = -delay; r.life = range / speed + 0.08; r.delay = delay;
+    r.from.copy(p); r.dir.copy(d); r.speed = speed; r.range = range; r.slope = slope; r.flat = flat;
+    r.mesh.quaternion.setFromUnitVectors(Z_AXIS, d);
+    r.mesh.visible = false;
+  }
+
+  /** Where a sonic wave's front struck something: an impact ring facing the blast, a flash, what it knocked off. kind: 0 the Warden, 1 a bot, 2 a loose thing. */
+  impact(p: THREE.Vector3, dx: number, dz: number, kind: number, k: number) {
+    const dir = TMP2.set(dx, 0, dz);
+    if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1);
+    dir.normalize();
+    const big = kind === 0;
+    this.ring(p, 0.3, (big ? 4.2 : 2.2) * (0.6 + k * 0.4), big ? 0.35 : 0.25, new THREE.Color(1.3, 2.2, 1.9), big ? 0.5 : 0.3, 1, dir);
+    this.ring(TMP.copy(p).addScaledVector(dir, 0.6), 0.2, (big ? 2.6 : 1.4), 0.2, new THREE.Color(2.2, 2.4, 2.3), 0.2, 0.8, dir);
+    this.flash(p, big ? 5 : 2.6, 0xc8fff0, 0.14);
+    const n = big ? 26 : 12;
+    for (let i = 0; i < n; i++) {
+      const s = (big ? 8 : 6) + Math.random() * 8;
+      this.particles.emit(p.x, p.y, p.z, dir.x * s + (Math.random() - 0.5) * 6, (Math.random() - 0.2) * 5, dir.z * s + (Math.random() - 0.5) * 6, 0.35, 0.12, big ? 1 : 0.8, big ? 0.85 : 1, big ? 0.6 : 0.9, 1, 10, 0);
+    }
+  }
+
+  private readonly downHit: RayHit = { dist: 0, c: null };
+  /** The top of whatever is under `p` (within `max` metres), or -Infinity. */
+  private floorBelow(p: THREE.Vector3, max: number): number {
+    const h = this.world.raycast(p.x, p.y + 0.2, p.z, 0, -1, 0, max + 0.2, false, this.downHit);
+    return h.c ? p.y + 0.2 - h.dist : -Infinity;
   }
 
   /** Telekinesis push: a shimmering wave rolling out of the hands. */
@@ -625,15 +792,44 @@ export class ArenaFx {
       f.mat.uniforms.uK.value = k;
       f.mat.uniforms.uTime.value = t;
     }
-    for (const r of this.rifts) {
-      if (!r.mesh.visible) continue;
+    // sonic rings race out along their cone (or flat, all round), widening as they go
+    for (const r of this.sonicRings) {
+      if (r.age >= r.life) continue;
       r.age += dt;
-      const k = r.age / 0.42;
-      if (k >= 1) { r.mesh.visible = false; continue; }
-      const pop = Math.sin(Math.min(1, k * 1.6) * Math.PI) * (r.mesh.userData.s as number);
-      r.mesh.scale.set(pop * 1.5, pop * 2.8, 1);
-      r.mat.uniforms.uK.value = 1 - k * k;
+      if (r.age < 0) { r.mesh.visible = false; continue; }
+      if (r.age >= r.life) { r.mesh.visible = false; continue; }
+      const dist = Math.min(r.range, r.age * r.speed), k = dist / r.range;
+      r.mesh.visible = true;
+      if (r.flat) {
+        r.mesh.position.copy(r.from);
+        r.mesh.scale.setScalar(Math.max(0.2, dist));
+      } else {
+        r.mesh.position.copy(r.from).addScaledVector(r.dir, dist);
+        r.mesh.scale.setScalar(0.35 + dist * r.slope);
+      }
+      r.mat.uniforms.uK.value = (1 - k * k) * Math.min(1, r.age * 30) * (r.flat ? 1.1 : 0.85);
       r.mat.uniforms.uTime.value = t;
+    }
+    for (const c of this.cones) {
+      if (!c.mesh.visible) continue;
+      c.age += dt;
+      const S = POW.sonic, len = Math.min(S.RANGE, c.age * S.SPEED), k = c.age / (S.RANGE / S.SPEED + 0.15);
+      if (k >= 1) { c.mesh.visible = false; continue; }
+      const w = Math.max(0.2, len * Math.tan(S.CONE));
+      c.mesh.scale.set(w, w, Math.max(0.5, len));
+      c.mat.uniforms.uK.value = 1 - k * k;
+      c.mat.uniforms.uLen.value = len;
+      c.mat.uniforms.uTime.value = t;
+    }
+    for (const dm of this.domes) {
+      if (!dm.mesh.visible) continue;
+      dm.age += dt;
+      const S = POW.sonic, k = dm.age / (S.BOOM_RADIUS / S.BOOM_SPEED + 0.25);
+      if (k >= 1) { dm.mesh.visible = false; continue; }
+      const r = Math.min(dm.r, dm.age * S.BOOM_SPEED + 0.5);
+      dm.mesh.scale.set(r, r * 0.55, r);
+      dm.mat.uniforms.uK.value = (1 - k) * 0.9;
+      dm.mat.uniforms.uTime.value = t;
     }
     for (const g of this.ghosts) {
       if (!g.mesh.visible) continue;
@@ -643,22 +839,51 @@ export class ArenaFx {
       if (k >= 1) { g.mesh.visible = false; continue; }
       g.mat.opacity = (1 - k) * 0.55;
     }
-    // speedsters' wakes: a ribbon of light that thins and fades behind them, crackling now and then
+    // speedsters' trails: a long burning ribbon of light at chest height over a glow along the
+    // ground (the band that burns what touches it), thinning and fading as it ages, crackling
+    const life = POW.speed.TRAIL_LIFE;
     for (const tr of this.trails) {
       const pts = tr.pts, ages = tr.ages, c = tr.color;
       for (let i = 1; i < pts.length; i++) {
-        const a0 = Math.max(0, 1 - ages[i - 1] / 0.4), a1 = Math.max(0, 1 - ages[i] / 0.4);
+        if (tr.cut?.[i - 1]) continue;
+        const a0 = Math.max(0, 1 - ages[i - 1] / life), a1 = Math.max(0, 1 - ages[i] / life);
         if (a1 <= 0) break;
-        const w = 0.55 * a0 + 0.05;
-        R.seg(pts[i - 1].x, pts[i - 1].y, pts[i - 1].z, pts[i].x, pts[i].y, pts[i].z, w * 2.4, c[0] * 0.35, c[1] * 0.3, c[2] * 0.2, a1 * 0.4);
-        R.seg(pts[i - 1].x, pts[i - 1].y, pts[i - 1].z, pts[i].x, pts[i].y, pts[i].z, w * 0.7, c[0], c[1], c[2], a1);
+        const w = 0.5 * a0 + 0.12, p0 = pts[i - 1], p1 = pts[i];
+        const fl = 0.85 + Math.sin(t * 23 + i * 0.7) * 0.15;
+        R.seg(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, w * 3.2, c[0] * 0.3, c[1] * 0.25, c[2] * 0.15, a1 * 0.35 * fl);
+        R.seg(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, w * 0.8, c[0], c[1], c[2], a1 * fl);
+        R.seg(p0.x, p0.y - 0.95, p0.z, p1.x, p1.y - 0.95, p1.z, w * 1.6, c[0] * 0.5, c[1] * 0.35, c[2] * 0.15, a1 * 0.45);
       }
-      if (pts.length > 3 && Math.random() < 0.35) {
+      for (let n = 0; n < 3 && pts.length > 3; n++) {
+        if (Math.random() > 0.5) continue;
         const i = 1 + Math.floor(Math.random() * (pts.length - 2));
-        R.jag(pts[i - 1], pts[Math.min(pts.length - 1, i + 1)], 5, 0.5, 0.07, c[0] * 1.2, c[1] * 1.2, c[2] * 1.4, 0.9);
+        if (ages[i] > life * 0.8) continue;
+        R.jag(TMP.copy(pts[i - 1]).setY(pts[i - 1].y - 0.9), TMP2.copy(pts[Math.min(pts.length - 1, i + 1)]).setY(pts[i].y + 0.5), 5, 0.6, 0.07, c[0] * 1.2, c[1] * 1.2, c[2] * 1.4, 0.9);
+        if (Math.random() < 0.3) P.emit(pts[i].x, pts[i].y - 0.8 + Math.random() * 1.6, pts[i].z, (Math.random() - 0.5) * 2, 1 + Math.random() * 2, (Math.random() - 0.5) * 2, 0.4, 0.1, 1, 0.85, 0.35, 1, -1, -0.1);
       }
     }
     this.trails = [];
+    // the angels' sword trails: a strip between where the blade's base and tip have been
+    let q = 0;
+    const SP = this.swordPos, SC = this.swordCol, MAXQ = SP.length / 18;
+    const put = (o: number, v: THREE.Vector3, r: number, g: number, b: number, al: number) => { SP[o * 3] = v.x; SP[o * 3 + 1] = v.y; SP[o * 3 + 2] = v.z; SC[o * 4] = r; SC[o * 4 + 1] = g; SC[o * 4 + 2] = b; SC[o * 4 + 3] = al; };
+    for (const st of this.swordTrails) {
+      for (let i = 1; i < st.base.length && q < MAXQ; i++) {
+        const a0 = Math.max(0, 1 - st.ages[i - 1] / SWORD_LIFE), a1 = Math.max(0, 1 - st.ages[i] / SWORD_LIFE);
+        if (a0 <= 0) break;
+        const o = q * 6;
+        // the edge (the tip) burns white-gold, fading toward the hilt and with age
+        put(o, st.base[i - 1], 0.9, 0.7, 0.35, a0 * 0.15); put(o + 1, st.tip[i - 1], 2.6, 2.3, 1.5, a0 * 0.9); put(o + 2, st.base[i], 0.9, 0.7, 0.35, a1 * 0.15);
+        put(o + 3, st.base[i], 0.9, 0.7, 0.35, a1 * 0.15); put(o + 4, st.tip[i - 1], 2.6, 2.3, 1.5, a0 * 0.9); put(o + 5, st.tip[i], 2.6, 2.3, 1.5, a1 * 0.9);
+        q++;
+      }
+    }
+    const sg = this.swordMesh.geometry;
+    sg.setDrawRange(0, q * 6);
+    (sg.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+    (sg.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
+    this.swordMesh.visible = q > 0;
+    this.swordTrails = [];
     // bolts, flickering into a new shape every frame
     for (let i = this.bolts.length - 1; i >= 0; i--) {
       const b = this.bolts[i];

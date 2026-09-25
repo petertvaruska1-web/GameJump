@@ -10,9 +10,10 @@
 // later the light swallows everyone and the team stands at the arena's own
 // beacon, looking at the machine. Each runner picks a power there (1-6), the
 // Warden wakes, and from then on this class keeps the Warden, its bots, the
-// loose things, the orbs, the clones, the hazards and the powers on screen from
-// snapshots and events, and turns the local runner's clicks into powers
-// (Powers). Going down there is final: you watch the rest of the team, and when
+// loose things, the orbs, the hazards and the powers on screen from snapshots
+// and events (the angels' wings and sword trails, the speedsters' burning
+// trails, sonic waves striking home), and turns the local runner's clicks into
+// powers (Powers). Going down there is final: you watch the rest of the team, and when
 // everyone is down the fight is lost and starts over.
 //
 // The Warden is drawn INTERP_DELAY behind like any other remote thing; the
@@ -29,12 +30,13 @@ import { clamp, damp, lerp, smoothstep } from '../../shared/math';
 import type { Collider } from '../../shared/physics/world';
 import { HOLD_AHEAD, HOLD_UP, SHELL_G } from '../../shared/sim/bots';
 import { wardenParts, wardenPoint, type PartSphere } from '../../shared/sim/warden';
-import { BAct, BPart, BState, BotKind, BotState, JunkKind, PowAct, type BossSnap, type BotSnap, type C2S, type CloneSnap, type GameEvent, type JunkSnap, type PlayerSnap, type Stage } from '../../shared/protocol';
+import { Anim } from '../../shared/physics/character';
+import { BAct, BPart, BState, BotKind, BotState, JunkKind, PowAct, type BossSnap, type BotSnap, type C2S, type GameEvent, type JunkSnap, type PlayerSnap, type Stage } from '../../shared/protocol';
 import type { AudioEngine } from '../audio/Audio';
 import { InterpBuffer } from '../net/Interp';
 import type { CameraController } from '../player/CameraController';
 import type { LocalPlayer } from '../player/LocalPlayer';
-import { ArenaFx } from '../render/ArenaFx';
+import { ArenaFx, type SwordTrail } from '../render/ArenaFx';
 import { ArenaView } from '../render/ArenaView';
 import { BotView, JunkView } from '../render/BotViews';
 import { CharacterModel } from '../render/CharacterModel';
@@ -46,7 +48,7 @@ import { ArenaHud } from '../ui/ArenaHud';
 import type { UI } from '../ui/UI';
 import type { RemotePlayer } from './Actors';
 import { localDir } from '../player/LocalPlayer';
-import { COMBO, POWER_INFO, Powers, type AimTarget } from './Powers';
+import { POWER_INFO, Powers, SLASHES, type AimTarget } from './Powers';
 
 export interface ArenaHost {
   readonly scene: THREE.Scene;
@@ -84,15 +86,16 @@ const REVEAL = 2.8;
 interface BotProxy { id: number; kind: number; view: BotView; buf: InterpBuffer; pos: THREE.Vector3; yaw: number; state: number; hp: number; target: number; seen: number }
 interface JunkProxy { id: number; kind: number; view: JunkView; buf: InterpBuffer; pos: THREE.Vector3; vel: THREE.Vector3; holder: number; spin: number; seen: number }
 interface OrbVis { id: number; sprite: THREE.Sprite; p0: THREE.Vector3; v: THREE.Vector3; t0: number; pos: THREE.Vector3; turned: boolean }
-/** A clone (duplication), drawn like a runner in its owner's colours, glowing green and a little see-through. */
-interface CloneProxy { id: number; owner: number; model: CharacterModel; buf: InterpBuffer; pos: THREE.Vector3; last: THREE.Vector3; vel: THREE.Vector3; yaw: number; lastYaw: number; anim: number; hp: number; seen: number; punch: number }
-/** A speedster's wake: where its chest has been lately, newest first. */
-interface Wake { pts: THREE.Vector3[]; ages: number[]; ghostT: number }
+/** A speedster's trail: where its chest has been lately (newest first), how long ago, where it broke off. */
+interface Wake { pts: THREE.Vector3[]; ages: number[]; cut: boolean[]; ghostT: number; running: boolean }
+/** An angel's sword trail (newest first), and what its runner's animation was last frame (to hear remote wingbeats). */
+interface Blade extends SwordTrail { lastAnim: number }
 
 /** The speedster's colours: its trail, and the afterimages it sheds. */
 const SPEED_TRAIL: [number, number, number] = [2.4, 1.8, 0.45];
 const SPEED_GHOST: [number, number, number] = [1.7, 1.3, 0.35];
-const CLONE_HEX = POWER_INFO.clone.hex;
+/** How long a sword trail lingers, and how fast the blade must move to leave one. */
+const BLADE_LIFE = 0.16, BLADE_SPEED = 7;
 
 const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tmp3 = new THREE.Vector3(), fwd = new THREE.Vector3();
 const vp = { x: 0, y: 0, z: 0 };
@@ -156,10 +159,9 @@ export class Arena {
   private readonly orbPool: THREE.Sprite[] = [];
   /** Who holds which bot with telekinesis (by 'fx' grab/throw/drop). */
   private readonly holders = new Map<number, number>();
-  /** Clones out in the fight (everyone's). */
-  private readonly clones = new Map<number, CloneProxy>();
-  /** Speedsters' wakes (by runner id). */
+  /** Speedsters' trails and angels' blades (by runner id). */
   private readonly wakes = new Map<number, Wake>();
+  private readonly blades = new Map<number, Blade>();
   // the local runner
   down = false;
   private readonly targetsList: AimTarget[] = [];
@@ -182,16 +184,15 @@ export class Arena {
       world: () => this.view!.world,
       targets: () => this.targets(),
       holdPoint: (out) => this.myHoldPoint(out),
-      punch: (at, dir, hit) => this.fx?.punch(at, dir, hit),
-      slam: (at, speed) => { this.fx?.slam(at, speed); },
+      slash: (at, dir, combo, hit) => this.fx?.slash(at, dir, combo, hit),
+      soar: (at) => this.fx?.soar(at),
+      dive: (at, speed) => this.fx?.dive(at, speed),
+      sonic: (from, dir, boom) => this.fx?.sonic(from, dir, boom),
       bolt: (pts) => this.fx?.bolt(pts),
       push: (at, dir) => this.fx?.push(at, dir),
       well: (from, dir) => this.fx?.wellThrown(-1, from, dir, this.mt, true),
       flash: (from, to) => this.fx?.flashStrike(from, to),
       thrown: (from, dir) => this.fx?.streak(from, tmp.copy(from).addScaledVector(dir, 7), 0.25, [2.2, 0.6, 1.9], 0.45),
-      clones: () => { let n = 0; const me = host.meId(); for (const c of this.clones.values()) if (c.owner === me) n++; return n; },
-      rip: (at) => this.fx?.rip(at),
-      rally: (at) => this.fx?.rally(at),
       sound: (kind, k) => host.audio.arena?.power(kind, null, k ?? 1),
       shake: (k) => host.cam.addShake(k),
       fov: (deg) => host.cam.kickFov(deg),
@@ -251,8 +252,10 @@ export class Arena {
     for (const b of this.bots.values()) this.dropBot(b);
     for (const j of this.junk.values()) this.dropJunk(j);
     for (const o of this.orbs.values()) this.dropOrb(o);
-    for (const c of this.clones.values()) this.dropClone(c);
-    this.bots.clear(); this.junk.clear(); this.orbs.clear(); this.clones.clear(); this.wakes.clear();
+    this.bots.clear(); this.junk.clear(); this.orbs.clear(); this.wakes.clear(); this.blades.clear();
+    // everyone back to a plain runner
+    this.host.local()?.model.setAngel(false);
+    for (const rp of this.host.remotes()) rp.model.setAngel(false);
     this.fx?.clearAct();
     this.powers.clear(this.host.local());
     this.hud.show(false);
@@ -355,15 +358,14 @@ export class Arena {
         const c = new THREE.Color(POWER_INFO[SUPERS[k]].hex);
         const p = local.renderPos;
         h.particles.burst(p.x, p.y + 1, p.z, 40, 4, 0.7, 0.3, [c.r, c.g, c.b], 1, -1, 2);
+        local.model.setAngel(SUPERS[k] === 'angel', POWER_INFO.angel.hex);
         local.model.setPowerColor(POWER_INFO[SUPERS[k]].hex);
-        // kinetic force: bigger (the body you collide with stays a runner's)
-        local.model.root.scale.setScalar(SUPERS[k] === 'kinetic' ? POW.kinetic.SCALE : 1);
       }
       this.hps.set(id, powerHp(SUPERS[k]));
     } else {
       const rp = h.remote(id);
+      rp?.model.setAngel(SUPERS[k] === 'angel', POWER_INFO.angel.hex);
       rp?.model.setPowerColor(POWER_INFO[SUPERS[k]].hex);
-      rp?.model.root.scale.setScalar(SUPERS[k] === 'kinetic' ? POW.kinetic.SCALE : 1);
       if (rp) h.particles.burst(rp.pos.x, rp.pos.y + 1, rp.pos.z, 24, 3, 0.6, 0.25, [1, 1, 1], 0.8, -1, 2);
     }
   }
@@ -409,7 +411,7 @@ export class Arena {
     }
   }
 
-  onSnapshot(ts: number, b: BossSnap | undefined, m: BotSnap[] | undefined, j: JunkSnap[] | undefined, c?: CloneSnap[]) {
+  onSnapshot(ts: number, b: BossSnap | undefined, m: BotSnap[] | undefined, j: JunkSnap[] | undefined) {
     if (!this.inArena || !this.view) return;
     if (b) {
       this.wBuf.push(ts, [b[0], b[1], b[2], b[3]]);
@@ -452,15 +454,6 @@ export class Arena {
         p.holder = s[5]; p.spin = s[6]; p.seen = ts;
       }
     }
-    if (c) {
-      for (const s of c) {
-        let p = this.clones.get(s[0]);
-        if (!p) p = this.addClone(s[0], s[1], s[2], s[3], s[4], ts);
-        p.buf.push(ts, [s[2], s[3], s[4], s[5]]);
-        p.anim = s[6]; p.hp = s[7]; p.seen = ts;
-      }
-    }
-    for (const p of this.clones.values()) if (ts - p.seen > 0.3) { this.dropClone(p); this.clones.delete(p.id); }
     // gone from the snapshot: destroyed (its explosion came as an event) or lost over the edge
     for (const p of this.bots.values()) if (ts - p.seen > 0.3) { this.dropBot(p); this.bots.delete(p.id); }
     for (const p of this.junk.values()) if (ts - p.seen > 0.3) { this.dropJunk(p); this.junk.delete(p.id); }
@@ -582,26 +575,6 @@ export class Arena {
       case 'hurt':
         this.hurt(e);
         return true;
-      case 'clone': {
-        const p = tmp.set(e.p[0], e.p[1], e.p[2]);
-        if (e.s === 'in') {
-          const from = e.q ? tmp2.set(e.q[0], e.q[1], e.q[2]) : p;
-          this.fx?.blink(from, p, h.camera.position);
-          this.addClone(e.id, e.owner, e.p[0], e.p[1], e.p[2], mt);
-          h.audio.arena?.power('split', p, e.owner === me ? 1 : 0.6);
-        } else if (e.s === 'out') {
-          this.fx?.cloneOut(p);
-          h.audio.arena?.power('cloneOut', p, 0.8);
-          const c = this.clones.get(e.id);
-          if (c) { this.dropClone(c); this.clones.delete(e.id); }
-        } else {
-          // left behind: it steps out of thin air beside its owner
-          if (e.q) this.fx?.blink(tmp2.set(e.q[0], e.q[1], e.q[2]), p, h.camera.position);
-          const c = this.clones.get(e.id);
-          if (c) { c.buf.clear(); c.pos.copy(p); c.last.copy(p); }
-        }
-        return true;
-      }
       case 'fx':
         this.remoteFx(e.id, e.f, e.d, mt);
         return true;
@@ -609,7 +582,7 @@ export class Arena {
         const p = tmp.set(e.p[0], e.p[1], e.p[2]);
         this.fx?.explosion(p, e.r, e.c);
         const d = p.distanceTo(h.camera.position);
-        h.cam.addShake(clamp((e.r * 3) / Math.max(4, d), 0, e.c === 5 ? 0.8 : e.c === 8 ? 0.35 : 0.5));
+        h.cam.addShake(clamp((e.r * 3) / Math.max(4, d), 0, e.c === 5 ? 0.8 : 0.5));
         h.audio.arena?.boom(p, e.r, e.c);
         return true;
       }
@@ -735,32 +708,37 @@ export class Arena {
     const pos = (i: number) => new THREE.Vector3(d[i], d[i + 1], d[i + 2]);
     const hex = POWER_INFO[SUPERS[Math.max(0, this.picks.get(id) ?? 0)]].hex;
     switch (f) {
-      case PowAct.Punch:
+      case PowAct.Slash:
         if (!mine) {
           const combo = clamp(d[7] ?? 0, 0, 3) | 0;
-          fx.punch(pos(0).setY(d[1] + 1.25 + (combo === 3 ? 0.6 : 0)), combo === 3 ? pos(3).setY(1.2).normalize() : pos(3), !!d[6]);
-          rp?.model.act(COMBO[combo], hex);
-          h.audio.arena?.power('punch', pos(0), combo >= 2 ? 0.9 : 0.7);
+          fx.slash(pos(0).setY(d[1]), tmp2.set(d[3], 0, d[5]).normalize().clone(), combo, !!d[6]);
+          rp?.model.act(SLASHES[combo], hex);
+          h.audio.arena?.power('slash', pos(0), combo >= 2 ? 0.9 : 0.7);
         }
         break;
-      case PowAct.Hurl:
-        if (!mine) { fx.rip(pos(0)); rp?.model.act('lift', hex); h.audio.arena?.power('rip', pos(0), 0.8); if (rp) window.setTimeout(() => rp.model.act('hurl', hex), POW.kinetic.HURL_LIFT * 1000); }
+      case PowAct.Soar:
+        if (!mine) { fx.soar(pos(0)); rp?.model.act('soar', hex); h.audio.arena?.power('soar', pos(0), 0.8); }
         break;
-      case PowAct.Rally:
-        if (!mine) { fx.rally(pos(0)); rp?.model.act('push', hex); h.audio.arena?.power('rally', pos(0), 0.7); }
+      case PowAct.Dive:
+        if (!mine) { fx.dive(pos(0), d[3]); h.audio.arena?.power('dive', pos(0), 1); h.cam.addShake(clamp(0.5 - pos(0).distanceTo(h.camera.position) / 60, 0, 0.4)); }
         break;
-      case PowAct.CloneHit: {
-        const c = this.clones.get(d[0]);
-        const at = pos(1);
-        const from = c ? tmp2.set(c.pos.x, c.pos.y + 1.3, c.pos.z) : at;
-        fx.cloneHit(from, at, !!d[4]);
-        if (c) { c.model.act(c.punch++ % 2 ? 'cross' : 'jab', CLONE_HEX); }
-        h.audio.arena?.power('cloneHit', at, id === h.meId() ? 0.7 : 0.4);
+      case PowAct.Blast: case PowAct.Boom:
+        if (!mine) {
+          const boom = f === PowAct.Boom;
+          fx.sonic(pos(0), pos(3), boom);
+          rp?.model.act(boom ? 'boom' : 'blast', hex);
+          h.audio.arena?.power(boom ? 'boom' : 'blast', pos(0), 0.8);
+          if (boom) h.cam.addShake(clamp(0.45 - pos(0).distanceTo(h.camera.position) / 50, 0, 0.35));
+        }
+        break;
+      case PowAct.Impact: {
+        // a sonic wave struck something: its impact, and the Warden rocks with it
+        const at = pos(0), k = d[6] ?? 1;
+        fx.impact(at, d[4], d[5], d[3], k);
+        if (d[3] === 0) { this.warden?.shoved(d[4], d[5], k); h.cam.addShake(id === h.meId() ? 0.12 : 0.05); }
+        h.audio.arena?.power('impact', at, (d[3] === 0 ? 1 : 0.6) * (id === h.meId() ? 1 : 0.6));
         break;
       }
-      case PowAct.Slam:
-        if (!mine) { fx.slam(pos(0), d[3]); h.audio.arena?.power('slam', pos(0), 1); h.cam.addShake(clamp(0.5 - pos(0).distanceTo(h.camera.position) / 60, 0, 0.4)); }
-        break;
       case PowAct.Grab:
         if (d[0] === 1) this.holders.set(d[1], id);
         if (mine) this.powers.held = { kind: d[0] as 1 | 2, id: d[1], at: mt };
@@ -801,7 +779,16 @@ export class Arena {
 
   // ------------------------------------------------------------------ the local runner's hooks
 
-  slammed(speed: number) { if (this.inArena && this.host.local()) this.powers.slamLanded(this.mt, this.host.local()!, speed); }
+  slammed(speed: number) { if (this.inArena && this.host.local()) this.powers.diveLanded(this.mt, this.host.local()!, speed); }
+  /** The local angel's wings beat (1), or it soared (2: that one is drawn by the power itself). */
+  beat(kind: number) {
+    const local = this.host.local();
+    if (!this.inArena || !local || kind !== 1) return;
+    local.model.wingBeat(1);
+    const p = local.renderPos, y = local.motor.yaw;
+    this.fx?.feathers(tmp.set(p.x - Math.sin(y) * 0.4, p.y + 1.1, p.z - Math.cos(y) * 0.4), 4, 1.2, 0.5);
+    this.host.audio.arena?.power('beat', null, 1);
+  }
   flashed(from: { x: number; y: number; z: number }) { if (this.inArena && this.host.local()) this.powers.flashEnded(this.mt, this.host.local()!, from); }
 
   /** Keys the arena listens to (returns true when it used the key). */
@@ -940,8 +927,7 @@ export class Arena {
       this.tethers.push([a, b]);
     };
     for (const j of this.junk.values()) {
-      // a heaved slab of floor is carried in the hands, not held by the mind
-      if (!j.holder || j.kind === JunkKind.Rock) continue;
+      if (!j.holder) continue;
       const hp = this.handOf(j.holder, tmp3);
       if (hp) tether(hp, tmp.copy(j.pos).setY(j.pos.y + 0.4));
     }
@@ -968,8 +954,8 @@ export class Arena {
       if (this.choosing && press && !this.awake) { this.choose(this.highlight); press = false; }
       this.powers.update(mt, local, h.camera, press, hold, can && !this.locksInput && this.myPick >= 0, alt && can);
     }
-    this.updateClones(dt, renderT, time);
     this.updateWakes(dt);
+    this.updateBlades(dt);
 
     this.updateHud(dt, mt, local);
     this.updateAudio(dt, local);
@@ -1046,10 +1032,13 @@ export class Arena {
     const P = this.powers;
     if (this.myPick >= 0) {
       const heat = P.heatAt(mt);
+      const grounded = !!local && (local.motor.body.grounded || local.motor.coyote > 0);
       hud.ring(P.readiness(mt), {
         hot: P.kind === 'lightning' && (mt < P.overheatUntil || heat > 72),
-        // kinetic: one pip for the debris hurl (R); duplication: the clones out
-        pips: P.kind === 'kinetic' ? [P.hurlReadiness(mt) >= 1 ? 1 : 0, 1] : P.kind === 'clone' ? [this.powersHostClones(), POW.clone.MAX] : undefined,
+        // the angel and sonic force: one pip for R (the soar or the dive; the boom)
+        pips: P.kind === 'angel' || P.kind === 'sonic' ? [P.altReadiness(mt, grounded) >= 1 ? 1 : 0, 1] : undefined,
+        // the angel's wings: how much strength they have left
+        wing: P.kind === 'angel' && local ? P.wingStrength(local) : undefined,
       });
     }
     // the bracket round the lock
@@ -1148,49 +1137,54 @@ export class Arena {
     return { hp: ((this.hps.get(id) ?? max) / max) * 100, power };
   }
 
-  private powersHostClones() { let n = 0; const me = this.host.meId(); for (const c of this.clones.values()) if (c.owner === me) n++; return n; }
+  // ------------------------------------------------------------------ the angels
 
-  // ------------------------------------------------------------------ clones
-
-  private addClone(id: number, owner: number, x: number, y: number, z: number, ts: number): CloneProxy {
-    const had = this.clones.get(id);
-    if (had) return had;
-    const h = this.host;
-    const model = new CharacterModel((owner - 1) % 3, h.shadows);
-    model.setPowerColor(CLONE_HEX);
-    // a copy, not the runner: a green sheen, a little see-through
-    model.setPowers(false, 0.22, false);
-    model.root.position.set(x, y, z);
-    h.scene.add(model.root);
-    const p: CloneProxy = { id, owner, model, buf: new InterpBuffer(), pos: new THREE.Vector3(x, y, z), last: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw: 0, lastYaw: 0, anim: 0, hp: 100, seen: ts, punch: 0 };
-    this.clones.set(id, p);
-    return p;
-  }
-
-  private dropClone(c: CloneProxy) { this.host.scene.remove(c.model.root); c.model.dispose(); }
-
-  private updateClones(dt: number, renderT: number, time: number) {
-    for (const c of this.clones.values()) {
-      if (c.buf.sample(renderT, S4, [3])) { c.pos.set(S4[0], S4[1], S4[2]); c.yaw = S4[3]; }
-      if (dt > 0) { c.vel.subVectors(c.pos, c.last).divideScalar(dt); if (c.vel.lengthSq() > 900) c.vel.set(0, 0, 0); }
-      c.last.copy(c.pos);
-      let turn = 0;
-      if (dt > 0) { let d = c.yaw - c.lastYaw; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; turn = d / dt; }
-      c.lastYaw = c.yaw;
-      c.model.root.position.copy(c.pos);
-      c.model.root.rotation.y = c.yaw;
-      const dir = localDir(c.vel.x, c.vel.z, c.yaw);
-      c.model.update({ speed: Math.hypot(c.vel.x, c.vel.z), vy: c.vel.y, anim: c.anim, dt, turn, land: 0, t: time, fwd: dir[0], side: dir[1], vel: c.vel, grounded: Math.abs(c.vel.y) < 0.6 });
+  /** Every angel's sword leaves a trail of light while it cuts; a remote angel's wingbeats are heard and shed feathers. */
+  private updateBlades(dt: number) {
+    const h = this.host, fx = this.fx;
+    if (!fx) return;
+    const list: SwordTrail[] = [];
+    const angel = SUPERS.indexOf('angel');
+    const models: [number, CharacterModel, number, THREE.Vector3, number][] = [];
+    const local = h.local(), me = h.meId();
+    if (local && this.picks.get(me) === angel) models.push([me, local.model, local.dead ? Anim.Dead : local.anim, local.renderPos, local.motor.yaw]);
+    for (const rp of h.remotes()) if (this.picks.get(rp.id) === angel) models.push([rp.id, rp.model, rp.status === 1 ? Anim.Dead : rp.anim, rp.pos, rp.yaw]);
+    for (const [id, model, anim, pos, yaw] of models) {
+      const rig = model.angel;
+      if (!rig) continue;
+      let b = this.blades.get(id);
+      if (!b) { b = { base: [], tip: [], ages: [], lastAnim: anim }; this.blades.set(id, b); }
+      for (let i = 0; i < b.ages.length; i++) b.ages[i] += dt;
+      while (b.ages.length && b.ages[b.ages.length - 1] > BLADE_LIFE) { b.ages.pop(); b.base.pop(); b.tip.pop(); }
+      if (rig.bladeSpeed > BLADE_SPEED && anim !== Anim.Dead) {
+        const nb = b.base.length >= 20 ? b.base.pop()! : new THREE.Vector3(), nt = b.tip.length >= 20 ? b.tip.pop()! : new THREE.Vector3();
+        if (b.ages.length >= 20) b.ages.pop();
+        b.base.unshift(nb.copy(rig.bladeBase)); b.tip.unshift(nt.copy(rig.bladeTip)); b.ages.unshift(0);
+      }
+      if (b.base.length > 1) list.push(b);
+      // someone else's wings beat: a whoosh and a few feathers
+      if (id !== me && anim === Anim.Beat && b.lastAnim !== Anim.Beat) {
+        fx.feathers(tmp.set(pos.x - Math.sin(yaw) * 0.4, pos.y + 1.1, pos.z - Math.cos(yaw) * 0.4), 3, 1.2, 0.5);
+        h.audio.arena?.power('beat', pos, 0.6);
+      }
+      b.lastAnim = anim;
     }
+    fx.setSwordTrails(list);
   }
 
   // ------------------------------------------------------------------ the speedster's wake
 
-  /** Every speedster running fast leaves a ribbon of light behind it and sheds afterimages. */
+  /**
+   * Every speedster running fast lays a long ribbon of light behind it (the
+   * trail the server burns things with: a point every TRAIL_STEP metres, each
+   * lasting TRAIL_LIFE) and sheds afterimages; bots and the Warden's feet in it
+   * spit sparks.
+   */
   private updateWakes(dt: number) {
     const h = this.host, fx = this.fx;
     if (!fx) return;
-    const list: { pts: THREE.Vector3[]; ages: number[]; color: [number, number, number] }[] = [];
+    const S = POW.speed;
+    const list: { pts: THREE.Vector3[]; ages: number[]; cut: boolean[]; color: [number, number, number] }[] = [];
     const runners: [number, THREE.Vector3, THREE.Vector3, number, boolean][] = [];
     const local = h.local();
     const me = h.meId();
@@ -1198,28 +1192,61 @@ export class Arena {
     for (const rp of h.remotes()) if (this.picks.get(rp.id) === SUPERS.indexOf('speed')) runners.push([rp.id, rp.pos, rp.vel, rp.yaw, rp.status === 0]);
     for (const [id, pos, vel, yaw, alive] of runners) {
       let w = this.wakes.get(id);
-      if (!w) { w = { pts: [], ages: [], ghostT: 0 }; this.wakes.set(id, w); }
+      if (!w) { w = { pts: [], ages: [], cut: [], ghostT: 0, running: false }; this.wakes.set(id, w); }
       for (let i = 0; i < w.ages.length; i++) w.ages[i] += dt;
       const sp = Math.hypot(vel.x, vel.z);
-      if (alive && sp > POW.speed.TRAIL_SPEED) {
-        const p = w.pts.length > 24 ? w.pts.pop()! : new THREE.Vector3();
-        if (w.ages.length > 24) w.ages.pop();
-        p.set(pos.x, pos.y + 1.05, pos.z);
-        w.pts.unshift(p); w.ages.unshift(0);
+      const fast = alive && sp > S.TRAIL_SPEED;
+      if (fast) {
+        const last = w.pts[0];
+        const gap = last ? Math.hypot(pos.x - last.x, pos.y + 1.05 - last.y, pos.z - last.z) : Infinity;
+        if (gap >= S.TRAIL_STEP * 0.75) {
+          const p = w.pts.length > 200 ? w.pts.pop()! : new THREE.Vector3();
+          if (w.ages.length > 200) { w.ages.pop(); w.cut.pop(); }
+          p.set(pos.x, pos.y + 1.05, pos.z);
+          // a new stretch if it stopped for a moment or jumped (a dash): nothing is drawn across the gap
+          w.cut.unshift(!w.running || gap > 6);
+          w.pts.unshift(p); w.ages.unshift(0);
+        }
         // afterimages, closer together the faster it goes
         w.ghostT -= dt;
         if (w.ghostT <= 0) {
-          w.ghostT = clamp(0.9 / sp, 0.035, 0.09);
-          fx.afterimage(tmp.set(pos.x, pos.y, pos.z), Math.atan2(vel.x, vel.z), SPEED_GHOST, 0.3, id === me ? 1 : 1);
+          w.ghostT = clamp(1.2 / sp, 0.035, 0.09);
+          fx.afterimage(tmp.set(pos.x, pos.y, pos.z), Math.atan2(vel.x, vel.z), SPEED_GHOST, 0.3, 1);
           if (Math.random() < 0.5) h.particles.emit(pos.x, pos.y + 0.3 + Math.random() * 1.4, pos.z, -vel.x * 0.1 + (Math.random() - 0.5) * 2, Math.random() * 2, -vel.z * 0.1 + (Math.random() - 0.5) * 2, 0.3, 0.1, 1, 0.85, 0.35, 1, 0, -0.2);
         }
       }
-      // drop what has faded
-      while (w.ages.length && w.ages[w.ages.length - 1] > 0.4) { w.ages.pop(); w.pts.pop(); }
-      if (w.pts.length > 1) list.push({ pts: w.pts, ages: w.ages, color: SPEED_TRAIL });
+      w.running = fast;
+      // drop what has burned out
+      while (w.ages.length && w.ages[w.ages.length - 1] > S.TRAIL_LIFE) { w.ages.pop(); w.pts.pop(); w.cut.pop(); }
+      if (w.pts.length > 1) {
+        list.push({ pts: w.pts, ages: w.ages, cut: w.cut, color: SPEED_TRAIL });
+        // what is burning in it spits sparks (a look only: the server does the burning)
+        if (Math.random() < dt * 20) {
+          for (const b of this.bots.values()) if (this.inWake(w, b.pos.x, b.pos.y + 0.5, b.pos.z, 0.6)) h.particles.burst(b.pos.x, b.pos.y + 0.6, b.pos.z, 5, 5, 0.3, 0.1, [1, 0.8, 0.3], 1, 10, 2);
+          if (this.wSeen) {
+            wardenParts(this.wPos.x, ARENA.y, this.wPos.z, this.wYaw, this.wLift, this.parts);
+            for (const sp2 of this.parts) if (sp2.part === BPart.Leg && this.inWake(w, sp2.x, sp2.y, sp2.z, sp2.r)) h.particles.burst(sp2.x, sp2.y, sp2.z, 6, 6, 0.3, 0.1, [1, 0.8, 0.3], 1, 10, 2);
+          }
+        }
+      }
       void yaw;
     }
     fx.setTrails(list);
+  }
+
+  /** Is (x, y, z) within `r` of a speedster's trail (in its burning band)? */
+  private inWake(w: Wake, x: number, y: number, z: number, r: number): boolean {
+    const R = POW.speed.TRAIL_RADIUS + r;
+    for (let i = 1; i < w.pts.length; i++) {
+      if (w.cut[i - 1]) continue;
+      const a = w.pts[i - 1], b = w.pts[i];
+      const dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
+      const u = l2 > 1e-6 ? clamp(((x - a.x) * dx + (z - a.z) * dz) / l2, 0, 1) : 0;
+      const fy = a.y - 1.05 + (b.y - a.y) * u;
+      if (y < fy - 0.2 - r || y > fy + 2.4 + r) continue;
+      if (Math.hypot(x - (a.x + dx * u), z - (a.z + dz * u)) < R) return true;
+    }
+    return false;
   }
 }
 
