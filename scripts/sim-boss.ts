@@ -1,12 +1,13 @@
 // The Warden's fight, checked against the real Room: the beacon opening and
 // pulling the whole team through (the dead included), the arena's rules for
-// dying and coming back, each of the six powers doing what it says against
-// the Warden, its bots and the loose things, the Warden's own abilities and
-// staggers, the end of the fight, and whole fights played by headless fighters
-// with each power, solo and in teams, to show every power can win and that no
-// two fights play out alike.
+// health and going down (slow healing, no coming back, the fight lost when the
+// team is down), each of the six powers doing what it says against the Warden,
+// its bots and the loose things, the Warden's own abilities and staggers, the
+// end of the fight, and whole fights played by headless fighters with each
+// power, solo and in teams: how long each takes to bring it down, how long a
+// fighter lasts against it, and that no two fights play out alike.
 // Usage: npx tsx scripts/sim-boss.ts   (QUICK=1 skips the full fights)
-import { ARENA, BOSS, PHP, PHYS, POW, SUPERS, type SuperPower } from '../shared/constants';
+import { ARENA, BOSS, PHP, PHYS, POW, powerHp, SUPERS, type SuperPower } from '../shared/constants';
 import { getArena } from '../shared/level/arena';
 import { getLevel } from '../shared/level/map/index';
 import { rng } from '../shared/math';
@@ -124,50 +125,49 @@ const fighter = (room: Room, p: RoomPlayer) => room.fight!.fighter(p)!;
   check('a rematch starts in the arena', room.stage === 'boss' && clients.every((c) => Math.abs(c.p.pos.z - getArena().level.spawns[0][2]) < 2), `stage=${room.stage}`);
 }
 
-// ====================================================================== dying and coming back
+// ====================================================================== health, and going down for good
 
 {
+  // only one of the two chooses, so the Warden sleeps on (until WAKE_AFTER) while this is measured
   const { room, clients } = makeRoom(2, 11, true);
   const [a, b] = clients;
-  room.handle(a.p, { t: 'pick', k: 0 });
-  room.handle(b.p, { t: 'pick', k: 1 });
-  tick(room, 3);
+  room.handle(a.p, { t: 'pick', k: 1 });
+  tick(room, 1);
   const f = room.fight!;
-  // hurt a runner down to nothing
   const q = fighter(room, a.p);
   f.hurt(q, 60, 'bite', a.p.pos, { x: 1, y: 2, z: 0 });
   const hp1 = q.hp;
   tick(room, 0.05);
   check('a hit takes health, and says so', hp1 === PHP.MAX - 60 && has(a, 'hurt'), `hp=${hp1}`);
-  f.hurt(q, 60, 'bite', a.p.pos, { x: 1, y: 2, z: 0 });
+  tick(room, PHP.REGEN_DELAY + 2);
+  check('health comes back slowly (2.25 a second, a quarter of what it was)', q.hp > hp1 && q.hp <= hp1 + PHP.REGEN * 2.2 + 0.5 && PHP.REGEN === 2.25,
+    `hp ${hp1} -> ${q.hp.toFixed(1)} in 2 s after the wait`);
+  f.hurt(q, 200, 'bite', a.p.pos, { x: 1, y: 2, z: 0 });
   check('running out of health is death in the arena', a.p.status === Status.Dead && q.deaths === 1, `status=${a.p.status}`);
-  check('one death does not end the fight', room.phase === 'playing');
-  tick(room, ARENA.RESPAWN + 0.2);
-  const back = a.p.status === Status.Alive && Math.abs(a.p.pos.z - getArena().level.spawns[0][2]) < 2 && q.hp === PHP.MAX;
-  check('a fallen runner comes back at the arena beacon with full health', back && has(a, 'respawn'), `status=${a.p.status} z=${a.p.pos.z.toFixed(1)}`);
-  f.hurt(q, 50, 'bite', a.p.pos, { x: 0, y: 0, z: 0 });
-  check('just back, nothing can touch you for a moment', q.hp === PHP.MAX);
-  // both down at once: still not over
-  tick(room, ARENA.PROTECT + 0.2);
-  f.hurt(q, 200, 'stomp', a.p.pos, { x: 0, y: 0, z: 0 });
-  f.hurt(fighter(room, b.p), 200, 'stomp', b.p.pos, { x: 0, y: 0, z: 0 });
-  tick(room, 0.2);
-  check('the whole team down at once is not the end either', room.phase === 'playing' && a.p.status === Status.Dead && b.p.status === Status.Dead);
-  tick(room, ARENA.RESPAWN + 0.2);
-  check('and both come back', a.p.status === Status.Alive && b.p.status === Status.Alive);
-  // falling into the moat: death, and back at the arena beacon, not the landing pad
-  const [mx, my, mz] = [ARENA.x + 31.8, ARENA.y + 5, ARENA.z];
-  tick(room, 2.3);
-  room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [mx, my, mz] });
-  for (let i = 0; i < 50 && a.p.status === Status.Alive; i++) { now += 1 / 30; report(room, a.p, mx, my - i * 0.9, mz, { a: Anim.Fall }); room.tick(1 / 30); }
-  check('falling off the arena is a death there', a.p.status === Status.Dead && a.p.cause === 'fall', `status=${a.p.status}`);
-  tick(room, ARENA.RESPAWN + 0.2);
-  check('and you come back at the arena beacon', a.p.status === Status.Alive && Math.abs(a.p.pos.y - (ARENA.y + 5.05)) < 0.2 && Math.abs(a.p.pos.z - ARENA.z) < 60);
-  // changing power while down
-  tick(room, ARENA.PROTECT + 0.2);
-  f.hurt(q, 200, 'beam', a.p.pos, { x: 0, y: 0, z: 0 });
+  check('one runner down does not end the fight for the team', room.phase === 'playing');
+  tick(room, 6);
+  check('there is no coming back mid-fight', a.p.status === Status.Dead && !a.events.some((e) => (e.k as string) === 'respawn'));
   room.handle(a.p, { t: 'pick', k: 4 });
-  check('a runner who is down can choose a different power', q.power === 5);
+  check('nor a new power while down', q.power === 2);
+  // the last one standing falls into the moat: the fight is lost
+  const [mx, my, mz] = [ARENA.x + 31.8, ARENA.y + 1, ARENA.z];
+  room.handle(b.p, { t: 'dbg', cmd: 'tp', p: [mx, my, mz] });
+  for (let i = 0; i < 60 && b.p.status === Status.Alive; i++) { now += 1 / 30; report(room, b.p, mx, my - i * 0.9, mz, { a: Anim.Fall }); room.tick(1 / 30); }
+  check('falling into the moat is a death there', b.p.status === Status.Dead && b.p.cause === 'fall', `status=${b.p.status}`);
+  const end = b.ends[0] as Extract<S2C, { t: 'end' }> | undefined;
+  check('with the whole team down the fight is lost: the run ends, to start over', room.phase === 'ended' && !!end && !end.boss && typeof end.fight === 'number',
+    JSON.stringify(end ? { boss: end.boss, fight: end.fight } : null));
+}
+
+{
+  // solo: one death and it is over
+  const { room, clients } = makeRoom(1, 12, true);
+  const [a] = clients;
+  room.handle(a.p, { t: 'pick', k: 3 });
+  tick(room, 3);
+  room.fight!.hurt(fighter(room, a.p), 500, 'beam', a.p.pos, { x: 0, y: 0, z: 0 });
+  tick(room, 0.1);
+  check('on your own, going down ends the fight', room.phase === 'ended' && a.ends.length === 1);
 }
 
 // ====================================================================== the powers
@@ -183,6 +183,8 @@ function duel(k: SuperPower, lx: number, lz: number, seed = 21) {
   const x = ARENA.x + lx, y = ARENA.y, z = ARENA.z + lz;
   room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [x, y, z] });
   report(room, a.p, x, y, z);
+  // the power is what is being checked here: the runner itself cannot be hurt (its clones can)
+  room.handle(a.p, { t: 'dbg', cmd: 'god' });
   return { room, a, f, w, x, y, z };
 }
 
@@ -225,6 +227,37 @@ function wardenPart(room: Room, part: number): PartSphere {
   room.handle(a.p, { t: 'pow', a: PowAct.Slam, o: [core.x, core.y - 1.4, core.z], d: [0, -1, 0], p: [core.x, core.y - 1.4, core.z], v: 30, tm: room.matchTime });
   const dmg = hp2 - w.hp;
   check('kinetic: a slam landing on its back hits the core hard', dmg >= 120, `damage ${dmg}`);
+  check('kinetic: the power makes you tougher', fighter(room, a.p).hp === POW.kinetic.HP && powerHp('kinetic') === 160, `hp ${fighter(room, a.p).hp}`);
+}
+
+{
+  // kinetic: the combo's fourth punch is an uppercut that throws a bot up; the hurl tears up debris and it shatters on the Warden
+  const { room, a, f, w } = duel('kinetic', 0, -16);
+  const q = fighter(room, a.p);
+  f.launchBot(w, 0);
+  const bot = f.bots[f.bots.length - 1];
+  tick(room, 1.6, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  const bx = a.p.pos.x, bz = a.p.pos.z + 2.4;
+  bot.pos.x = bx; bot.pos.y = ARENA.y; bot.pos.z = bz; bot.v.x = bot.v.y = bot.v.z = 0;
+  q.ready = 0;
+  room.handle(a.p, { t: 'pow', a: PowAct.Punch, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], v: 3, tm: room.matchTime });
+  tick(room, 0.05);
+  const fx = a.events.filter((e) => e.k === 'fx' && e.f === PowAct.Punch).pop() as Extract<GameEvent, { k: 'fx' }> | undefined;
+  check('kinetic: an uppercut throws a bot up', bot.v.y >= POW.kinetic.UPPERCUT_LIFT - 0.5 || bot.dead, `vy=${bot.v.y.toFixed(1)} dead=${bot.dead}`);
+  check('kinetic: everyone sees which punch of the combo it was', !!fx && fx.d[7] === 3, JSON.stringify(fx?.d ?? null));
+  // the hurl: from the floor, at the hull
+  tick(room, 0.6, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  const hull = wardenPart(room, 0);
+  const hp0 = w.hp;
+  room.handle(a.p, { t: 'pow', a: PowAct.Hurl, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: aimAt(a.p.pos.x, a.p.pos.y + 2.2, a.p.pos.z, hull.x, hull.y, hull.z), tm: room.matchTime });
+  const rock = f.junk.find((j) => j.kind === JunkKind.Rock);
+  check('kinetic: R tears a slab of debris out of the floor', !!rock && rock.heldBy === q);
+  let shattered = false;
+  tick(room, 2.5, () => { shattered = shattered || a.events.some((e) => e.k === 'boom' && e.c === 8); report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z); });
+  check('kinetic: the thrown debris shatters on the Warden and hurts it', shattered && w.hp < hp0 && !f.junk.some((j) => j.kind === JunkKind.Rock), `boom=${shattered} hp ${hp0} -> ${w.hp}`);
+  const n = f.junk.length;
+  room.handle(a.p, { t: 'pow', a: PowAct.Hurl, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
+  check('kinetic: the hurl has a cool-down', f.junk.length === n);
 }
 
 {
@@ -242,6 +275,7 @@ function wardenPart(room: Room, part: number): PartSphere {
   let boomed = false;
   tick(room, 2, () => { boomed = boomed || a.events.some((e) => e.k === 'boom' && e.c === 0); report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z); });
   check('telekinesis: a thrown canister explodes on the Warden', boomed && w.hp < hp0, `boom=${boomed} hp ${hp0} -> ${w.hp}`);
+  check('telekinesis: things leave the hands 35% faster than they used to', POW.telekinesis.THROW_SPEED === 54);
   // push with nothing held turns an orb back
   f.fireOrb(f.bots[0] ?? { centre: (o: { x: number; y: number; z: number }) => { o.x = a.p.pos.x + 6; o.y = a.p.pos.y + 1.2; o.z = a.p.pos.z; return o; } } as never, fighter(room, a.p));
   const orb = f.orbs[f.orbs.length - 1];
@@ -297,31 +331,63 @@ function wardenPart(room: Room, part: number): PartSphere {
   room.tick(1 / 30);
   check('speed: a flash strike through a leg hurts the Warden', w.hp < hp0, `hp ${hp0} -> ${w.hp}`);
   check('speed: the streak itself is not taken for a teleport', a.fixes === fixes && Math.hypot(a.p.pos.x - to[0], a.p.pos.z - to[2]) < 0.1);
+  const q = fighter(room, a.p);
+  check('speed: little wait between strikes', q.flashReady - room.matchTime <= POW.speed.COOLDOWN + 0.05, `ready in ${(q.flashReady - room.matchTime).toFixed(2)} s`);
+  check('speed: each strike hurts less than it did', hp0 - w.hp <= (10 + 1.1 * 12) * 0.75 * 3 + 1, `dealt ${hp0 - w.hp}`);
+  // running at a speedster's speed is not taken for cheating
+  const fx0 = a.fixes;
+  let x = a.p.pos.x;
+  for (let i = 0; i < 30; i++) { now += 1 / 30; x += 20 / 30; report(room, a.p, x, a.p.pos.y, a.p.pos.z, { a: Anim.Sprint }); room.tick(1 / 30); }
+  check('speed: a speedster running flat out is believed', a.fixes === fx0, `fixes ${a.fixes - fx0}`);
 }
 
 {
-  // teleport: a blink onto its back bursts on the core; charges run out
-  const { room, a, w } = duel('teleport', 0, -14);
-  const hp0 = w.hp;
-  const core = wardenPart(room, 1);
-  const to: [number, number, number] = [core.x, core.y - 0.2, core.z - 1];
-  const dist = Math.hypot(to[0] - a.p.pos.x, to[1] - a.p.pos.y, to[2] - a.p.pos.z);
-  room.handle(a.p, { t: 'pow', a: PowAct.Blink, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], p: to, tm: room.matchTime });
-  now += 1 / 30;
-  report(room, a.p, to[0], to[1], to[2]);
-  room.tick(1 / 30);
-  check('teleport: a blink onto its back rips into it', w.hp < hp0 && a.fixes === 0 && Math.abs(a.p.pos.y - to[1]) < 0.1, `hp ${hp0} -> ${w.hp} dist ${dist.toFixed(1)} fixes ${a.fixes}`);
+  // duplication: four clones step out, fight on their own near their owner, rally, and can be destroyed
+  const { room, a, f, w } = duel('clone', 0, -12);
   const q = fighter(room, a.p);
-  let refused = false;
-  for (let i = 0; i < 3; i++) {
-    const p0 = [a.p.pos.x, a.p.pos.y, a.p.pos.z] as [number, number, number];
-    const p1: [number, number, number] = [p0[0] + 8, p0[1], p0[2]];
-    const fx = a.fixes;
-    room.handle(a.p, { t: 'pow', a: PowAct.Blink, o: p0, d: [1, 0, 0], p: p1, tm: room.matchTime });
-    now += 1 / 30; report(room, a.p, p1[0], p1[1], p1[2]); room.tick(1 / 30);
-    if (a.fixes > fx) refused = true;
+  let made = 0;
+  for (let i = 0; i < 6; i++) {
+    room.handle(a.p, { t: 'pow', a: PowAct.Split, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
+    made = f.clones.length;
+    tick(room, POW.clone.SPLIT_COOLDOWN + 0.05, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
   }
-  check('teleport: three charges, then it has to recharge', refused && q.charges === 0, `charges=${q.charges} refused=${refused}`);
+  check('duplication: clones step out, four at most', made === 4 && f.clones.length === 4 && has(a, 'clone'), `clones ${f.clones.length}`);
+  const hp0 = w.hp;
+  let far = 0;
+  tick(room, 8, () => { report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z); for (const c of f.clones) far = Math.max(far, Math.hypot(c.pos.x - a.p.pos.x, c.pos.z - a.p.pos.z)); });
+  const byClones = hp0 - w.hp;
+  check('duplication: the clones go for the Warden on their own', byClones > 0 && a.events.some((e) => e.k === 'fx' && e.f === PowAct.CloneHit), `dealt ${byClones}`);
+  check('duplication: they never stray far from their owner', far <= POW.clone.REGROUP, `farthest ${far.toFixed(1)} m`);
+  // rally at the Warden (topped up to four first: any lost in the fight are replaced by a click)
+  for (let i = 0; i < 4 && f.clones.filter((c) => !c.dead).length < 4; i++) {
+    room.handle(a.p, { t: 'pow', a: PowAct.Split, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
+    tick(room, POW.clone.SPLIT_COOLDOWN + 0.05, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  }
+  const leg = wardenPart(room, 4);
+  room.handle(a.p, { t: 'pow', a: PowAct.Split, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tg: [0, 0, leg.part], tm: room.matchTime });
+  tick(room, 0.05);
+  check('duplication: with four out, a click rallies them at the target', f.clones.length === 4 && f.clones.every((c) => c.rallyUntil > room.matchTime) && a.events.some((e) => e.k === 'fx' && e.f === PowAct.Rally),
+    `clones ${f.clones.length}, leg ${Math.hypot(leg.x - a.p.pos.x, leg.z - a.p.pos.z).toFixed(1)} m away, rally ${f.clones.map((c) => (c.rallyUntil - room.matchTime).toFixed(1)).join(",")} fx ${a.events.filter((e) => e.k === "fx").map((e) => (e as any).f).join("")}`);
+  // they are hit by what hits runners
+  const c0 = f.clones[0];
+  f.hurtVictim(c0, POW.clone.HP + 1, 'stomp', c0.pos, { x: 0, y: 0, z: 0 });
+  tick(room, 0.05);
+  check('duplication: a clone can be destroyed', c0.dead && f.clones.length === 3 && a.events.some((e) => e.k === 'clone' && e.s === 'out'));
+  // a clone left far behind steps out beside its owner again
+  const c1 = f.clones[0];
+  c1.pos.x = a.p.pos.x + 25; c1.pos.z = a.p.pos.z;
+  tick(room, 0.1, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  check('duplication: a clone left behind reappears at its owner\'s side', Math.hypot(c1.pos.x - a.p.pos.x, c1.pos.z - a.p.pos.z) < 5, `${Math.hypot(c1.pos.x - a.p.pos.x, c1.pos.z - a.p.pos.z).toFixed(1)} m`);
+  // bots hunt clones too
+  f.launchBot(w, 0);
+  const bot = f.bots[f.bots.length - 1];
+  tick(room, 3, () => report(room, a.p, a.p.pos.x, a.p.pos.y, a.p.pos.z));
+  check('duplication: bots fight the clones as well as the runner', bot.dead || bot.target !== null, `target ${bot.target?.id}`);
+  // the owner goes down: the clones go with it
+  room.handle(a.p, { t: 'dbg', cmd: 'god' });
+  f.hurt(q, 999, 'beam', a.p.pos, { x: 0, y: 0, z: 0 });
+  tick(room, 0.05);
+  check('duplication: when the owner goes down its clones vanish', f.clones.every((c) => c.dead));
 }
 
 // ====================================================================== the Warden's own rules
@@ -404,6 +470,7 @@ class Brain {
   private strafeT = 0;
   kind: SuperPower;
   presses = 0;
+  god = false;
   constructor(readonly room: Room, readonly c: Client, kind: SuperPower, readonly r: () => number) {
     this.kind = kind;
     const f = room.fight!;
@@ -433,17 +500,21 @@ class Brain {
   /** One server tick: think, run the controller at 120 Hz, report like a client. */
   tick(dt: number) {
     const room = this.room, f = room.fight!, p = this.c.p, m = this.m, b = m.body;
-    // back at the beacon after going down
     for (const e of this.c.events.splice(0)) {
-      if (e.k === 'respawn' && e.id === p.id) { m.spawn(e.p[0], e.p[1], e.p[2], 0); this.apply(this.kind); }
       if (e.k === 'hurt' && e.id === p.id && e.v) { b.ext.x += e.v[0]; b.ext.z += e.v[2]; if (e.v[1] > 0) { b.vel.y = Math.max(b.vel.y, e.v[1]); b.grounded = false; } }
       if (e.k === 'death' && e.id === p.id) this.hold = 0;
     }
     if (p.status !== Status.Alive) return;
+    // measuring damage (it cannot be hurt): thrown off the floor, it climbs back on instead of falling to its death
+    if (this.god && b.pos.y < ARENA.y - 2) {
+      const x = ARENA.x + (b.pos.x - ARENA.x) * 0.8, z = ARENA.z + (b.pos.z - ARENA.z) * 0.8;
+      m.spawn(x, ARENA.y + 0.05, z, 0); this.apply(this.kind);
+      room.handle(p, { t: 'dbg', cmd: 'tp', p: [x, ARENA.y + 0.05, z] });
+    }
     const w = f.warden, t = room.matchTime;
     const inp: MoveInput = { x: 0, z: 0, sprint: true, jumpHeld: false, jumpPressed: false, aimYaw: 0 };
     // --- where to be: at the power's range from the Warden, circling it
-    const want = this.kind === 'kinetic' ? 6 : this.kind === 'speed' ? 9 : this.kind === 'teleport' ? 12 : 16;
+    const want = this.kind === 'kinetic' ? 6 : this.kind === 'speed' ? 9 : this.kind === 'clone' ? 8 : 16;
     const dx = w.x - b.pos.x, dz = w.z - b.pos.z, d = Math.hypot(dx, dz) || 1;
     this.strafeT -= dt;
     if (this.strafeT <= 0) { this.strafe = this.r() < 0.5 ? -1 : 1; this.strafeT = 2 + this.r() * 3; }
@@ -491,6 +562,8 @@ class Brain {
 
   private flashDir: [number, number, number] = [0, 0, 1];
   private flashV = 0;
+  private combo = 0;
+  private lastPunch = -9;
 
   private send(a: number, d: [number, number, number], tg?: [number, number, number], p?: [number, number, number], v?: number, o?: [number, number, number]) {
     const b = this.m.body;
@@ -521,7 +594,17 @@ class Brain {
     switch (this.kind) {
       case 'kinetic': {
         const s = this.target(POW.kinetic.REACH + 1.5);
-        if (s && t >= q.ready && b.grounded) { const d = aim(s); this.m.startLunge(d[0], d[2], POW.kinetic.LUNGE_SPEED, POW.kinetic.LUNGE_TIME); this.send(PowAct.Punch, d); }
+        if (s && t >= q.ready && b.grounded) {
+          const d = aim(s);
+          this.combo = t - this.lastPunch < POW.kinetic.COMBO ? (this.combo + 1) % 4 : 0;
+          this.lastPunch = t;
+          this.m.startLunge(d[0], d[2], POW.kinetic.LUNGE_SPEED, POW.kinetic.LUNGE_TIME);
+          this.send(PowAct.Punch, d, undefined, undefined, this.combo);
+          break;
+        }
+        // out of reach: heave a slab of floor at it
+        const far = this.target(30);
+        if (!s && far && t >= q.hurlReady && b.grounded) this.send(PowAct.Hurl, aimAt(chest.x, chest.y + 1.2, chest.z, far.x, far.y, far.z));
         break;
       }
       case 'telekinesis': {
@@ -566,22 +649,11 @@ class Brain {
         }
         break;
       }
-      case 'teleport': {
-        if (q.charges < 1 || t < this.hold) break;
-        // blink to its back, or behind it
-        const core = wardenPoint(w.x, ARENA.y, w.z, w.yaw, 0, w.lift + 1.75, -2.5, { x: 0, y: 0, z: 0 });
-        const d = Math.hypot(core.x - b.pos.x, core.y - b.pos.y, core.z - b.pos.z);
-        let to: [number, number, number];
-        if (d < POW.teleport.RANGE - 1 && w.lift > 5) to = [core.x, core.y, core.z];
-        else {
-          const bx = w.x - Math.sin(w.yaw) * 9, bz = w.z - Math.cos(w.yaw) * 9;
-          const dd = Math.hypot(bx - b.pos.x, bz - b.pos.z);
-          if (dd > POW.teleport.RANGE - 1) break;
-          to = [bx, ARENA.y + 0.02, bz];
-        }
-        this.send(PowAct.Blink, aimAt(b.pos.x, b.pos.y, b.pos.z, to[0], to[1], to[2]), undefined, to);
-        this.m.blink(to[0], to[1], to[2]);
-        this.hold = t + 1.1;
+      case 'clone': {
+        const mine = f.clones.filter((c) => c.owner === q && !c.dead).length;
+        if (mine < POW.clone.MAX) { if (t >= q.ready) this.send(PowAct.Split, [0, 0, 1]); break; }
+        const s = this.target(POW.clone.RALLY_RANGE);
+        if (s && t >= q.rallyReady) this.send(PowAct.Rally, aim(s), [0, 0, s.part]);
         break;
       }
     }
@@ -589,11 +661,17 @@ class Brain {
   }
 }
 
-function fightOut(powers: SuperPower[], seed: number, limit = 600) {
+/**
+ * A whole fight. `god`: the fighters cannot be hurt, which measures how long each
+ * power takes to bring the Warden down; without it, how long they last against it.
+ */
+function fightOut(powers: SuperPower[], seed: number, limit = 900, god = false) {
   const { room, clients } = makeRoom(powers.length, seed, true);
   clients.forEach((c, i) => room.handle(c.p, { t: 'pick', k: SUPERS.indexOf(powers[i]) }));
+  if (god) for (const c of clients) room.handle(c.p, { t: 'dbg', cmd: 'god' });
   const r = rng(seed * 17 + 3);
   const brains = clients.map((c, i) => new Brain(room, c, powers[i], r));
+  for (const b of brains) b.god = god;
   const acts: number[] = [];
   let lastAct = -1, lastState = -1;
   const sequence: string[] = [];
@@ -611,36 +689,47 @@ function fightOut(powers: SuperPower[], seed: number, limit = 600) {
   }
   const fs = room.fight!.fighters;
   return {
-    won: room.phase === 'ended', t, hp: w().hp, max: w().maxHp,
-    deaths: fs.reduce((s, q) => s + q.deaths, 0), bots: fs.reduce((s, q) => s + q.bots, 0),
+    won: room.phase === 'ended' && !w().alive, lost: room.phase === 'ended' && w().alive, t, hp: w().hp, max: w().maxHp,
+    deaths: fs.reduce((s, q) => s + q.deaths, 0), bots: fs.reduce((s, q) => s + q.bots, 0), causes: fs.map((q) => q.p.cause ?? '-').join('/'),
     damage: fs.map((q) => Math.round(q.damage)), acts, sequence: sequence.join(''), staggers, maxBots,
     cap: room.fight!.botCap(),
   };
 }
 
 if (!QUICK) {
-  console.log('\nwhole fights (headless fighters, fair not good):');
-  const times: Record<string, number[]> = {};
+  console.log('\nwhole fights (headless fighters with perfect aim, fair not good):');
+  console.log('time to bring it down (they cannot be hurt):');
+  const ttk: number[] = [];
   for (const k of SUPERS) {
     for (const seed of [1, 2]) {
-      const r = fightOut([k], seed);
-      (times[k] ??= []).push(r.t);
-      console.log(`  ${k.padEnd(11)} seed ${seed}: ${r.won ? 'won' : 'NOT WON'} in ${r.t.toFixed(0)} s, deaths ${r.deaths}, bots destroyed ${r.bots}, staggers ${r.staggers}, most bots at once ${r.maxBots}/${r.cap}, hp left ${r.hp}/${r.max}, opening ${r.sequence}`);
-      check(`solo ${k} can defeat the Warden (seed ${seed})`, r.won, `t=${r.t.toFixed(0)} hp=${r.hp}`);
+      const r = fightOut([k], seed, 900, true);
+      ttk.push(r.t);
+      console.log(`  ${k.padEnd(11)} seed ${seed}: ${r.won ? 'down' : 'NOT DOWN'} in ${r.t.toFixed(0)} s, bots destroyed ${r.bots}, staggers ${r.staggers}, most bots at once ${r.maxBots}/${r.cap}, hp left ${r.hp}/${r.max}, opening ${r.sequence}`);
+      check(`solo ${k} can bring the Warden down (seed ${seed})`, r.won, `t=${r.t.toFixed(0)} hp=${r.hp}`);
+      check(`solo ${k}: a long fight, not a two-minute one`, r.t >= 180, `t=${r.t.toFixed(0)}`);
       check(`solo ${k}: the bots never outnumber the cap`, r.maxBots <= r.cap, `most ${r.maxBots}, cap ${r.cap}`);
     }
   }
+  const lo = Math.min(...ttk), hi = Math.max(...ttk);
+  check('no power is far faster or slower than the rest', hi / lo < 1.8, `from ${lo.toFixed(0)} s to ${hi.toFixed(0)} s`);
+  console.log('how long a fighter lasts when it can be hurt (going down is final):');
+  let survived = 0;
+  for (const k of SUPERS) {
+    const r = fightOut([k], 3, 900, false);
+    if (!r.lost) survived++;
+    console.log(`  ${k.padEnd(11)}: ${r.won ? `won in ${r.t.toFixed(0)} s` : r.lost ? `went down (${r.causes}) after ${r.t.toFixed(0)} s, Warden at ${Math.round((r.hp / r.max) * 100)}%` : `still standing at ${r.t.toFixed(0)} s`}`);
+  }
+  check('the Warden is a real danger: fair fighters mostly go down', survived <= 3, `${survived} of 6 made it`);
   // no two fights play alike: the Warden's opening moves differ between seeds
   const openings = new Set<string>();
-  for (let s = 10; s < 16; s++) openings.add(fightOut(['lightning'], s, 45).sequence);
+  for (let s = 10; s < 16; s++) openings.add(fightOut(['lightning'], s, 45, true).sequence);
   check('no two fights open the same way', openings.size >= 4, [...openings].join(' | '));
-  for (const team of [['kinetic', 'lightning'], ['telekinesis', 'gravity', 'teleport']] as SuperPower[][]) {
-    const r = fightOut(team, 4);
-    console.log(`  team ${team.join('+')}: ${r.won ? 'won' : 'NOT WON'} in ${r.t.toFixed(0)} s, deaths ${r.deaths}, damage ${r.damage.join('/')}, most bots ${r.maxBots}/${r.cap}, opening ${r.sequence}`);
-    check(`a team of ${team.length} (${team.join(', ')}) can defeat the Warden`, r.won, `t=${r.t.toFixed(0)}`);
+  for (const team of [['kinetic', 'lightning'], ['telekinesis', 'gravity', 'clone']] as SuperPower[][]) {
+    const r = fightOut(team, 4, 900, true);
+    console.log(`  team ${team.join('+')}: ${r.won ? 'down' : 'NOT DOWN'} in ${r.t.toFixed(0)} s, damage ${r.damage.join('/')}, most bots ${r.maxBots}/${r.cap}, opening ${r.sequence}`);
+    check(`a team of ${team.length} (${team.join(', ')}) can bring the Warden down`, r.won, `t=${r.t.toFixed(0)}`);
     check(`every runner in the team of ${team.length} gets their hits in`, r.damage.every((d) => d > 0), r.damage.join('/'));
   }
-  void times;
 }
 
 console.log(fails ? `${fails} check(s) failed` : 'all boss checks passed');

@@ -249,10 +249,10 @@ export class UI {
       <h3>The Warden</h3>
       <ul>
         <li>The beacon on the Spire is a door. Reach it and the whole team is pulled through into the storm, where the Warden guards the way on: a four-legged war machine that launches bots.</li>
-        <li>Pick one power with <kbd>1</kbd>-<kbd>6</kbd> and use it with the <kbd>Left mouse</kbd> button. Everything you could do on the course still works: sprint, slide, dash, grapple the anchors, ride the zip lines, climb onto its back.</li>
-        <li><b>Kinetic Force</b> punches (in the air: a meteor slam) · <b>Telekinesis</b> grabs and throws bots, canisters, plates and its own shells · <b>Lightning</b> chains bolts while held · <b>Gravity</b> throws a crushing well and lets you float · <b>Super Speed</b> flash-strikes through everything in a line · <b>Teleport</b> blinks to the crosshair, tearing space.</li>
+        <li>Pick one power with <kbd>1</kbd>-<kbd>6</kbd> before it wakes, and use it with the <kbd>Left mouse</kbd> button. Everything you could do on the course still works: sprint, slide, dash, grapple the anchors, ride the zip lines, climb onto its back.</li>
+        <li><b>Kinetic Force</b> makes you bigger and tougher: a combo of punches (jab, cross, hook, uppercut), a meteor slam in the air, and <kbd>R</kbd> to tear up debris and hurl it · <b>Telekinesis</b> grabs and throws bots, canisters, plates and its own shells · <b>Lightning</b> chains bolts while held · <b>Gravity</b> throws a crushing well and lets you float · <b>Super Speed</b> runs half again as fast and flash-strikes through everything in a line, again and again · <b>Duplication</b> splits off up to four clones that fight beside you (with four out, a click sends them all at your target).</li>
         <li>Its core on its back and its eye while it charges the beam take more damage. Break its poise and it staggers; charge it into a conductor pillar and it crashes. Down to half and it goes into overdrive.</li>
-        <li>You can be knocked down. You come back at the arena's beacon a few seconds later, and can change your power while you wait.</li>
+        <li>Health comes back slowly, and going down is final: you watch your team, and if everyone is down the fight is lost and starts over.</li>
       </ul>
       <h3>Routes</h3>
       <p>Three main routes split and rejoin. The safer-looking one may be much longer; the fast one may have brutal jumps or open sightlines. Teammates can split up — anyone who dies keeps watching the others.</p>`;
@@ -636,11 +636,11 @@ export class UI {
       : f.prevBest !== null ? `Your best: <b>${fmtTime(f.prevBest)}</b>` : '';
     const stat = (v: string, l: string) => `<div><b>${v}</b><span>${l}</span></div>`;
     const o = el(`<div class="screen center interactive"><div class="panel results-panel">
-      <h2>${f.won ? 'The Warden is down' : 'The fight is over'}</h2>
+      <h2>${f.won ? 'The Warden is down' : 'The Warden stands'}</h2>
       <div class="fight-card">
         <div class="fight-title">${esc(me && me.power !== undefined && me.power >= 0 ? POWER_INFO[SUPERS[me.power]].name : 'The fight')}</div>
         <div class="fight-stats">
-          ${stat(fmtTime(f.time), 'Fight')}
+          ${stat(fmtTime(f.time), f.won ? 'Fight' : 'You lasted')}
           ${me ? stat((me.damage ?? 0).toLocaleString(), 'Damage') : ''}
           ${me ? stat(String(me.bots ?? 0), 'Bots') : ''}
           ${me ? stat(String(me.deaths ?? 0), 'Times down') : ''}
@@ -652,7 +652,7 @@ export class UI {
       ${solo ? '' : `<table class="results">${rows}</table>`}
       ${isHost ? '' : '<p class="hint">Waiting for the host…</p>'}
       <div class="row between"><button class="btn small danger" data-a="leave">Leave</button>${isHost
-        ? `<span class="row"><button class="btn small" data-a="lobby">Lobby</button><button class="btn small" data-a="again">Run the course</button><button class="btn primary" data-a="boss">Fight again <kbd>R</kbd></button></span>`
+        ? `<span class="row"><button class="btn small" data-a="lobby">Lobby</button><button class="btn small" data-a="again">Run the course</button><button class="btn primary" data-a="boss">${f.won ? 'Fight again' : 'Start over'} <kbd>R</kbd></button></span>`
         : ''}</div>
     </div></div>`);
     this.root.appendChild(o);
@@ -735,6 +735,8 @@ export function causeText(c?: string) {
     case 'shot': return 'Shot down';
     case 'flyer': return 'Taken by a drone';
     case 'laser': return 'Hit a laser';
+    case 'warden': return 'Crushed by the Warden';
+    case 'bot': return 'Taken by its bots';
     default: return 'Dead';
   }
 }

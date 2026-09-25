@@ -551,14 +551,14 @@ export class Warden {
         const r = stompRing(d, t);
         if (r < 0) { this.finish(f, 0.3); return BOSS.LIFT; }
         const S = BOSS.STOMP;
-        for (const q of f.fighters) {
-          if (!f.targetable(q) || this.struck.has(q.id)) continue;
-          const h = q.p.pos.y - floorY;
+        for (const q of f.victims()) {
+          if (this.struck.has(q.id)) continue;
+          const h = q.pos.y - floorY;
           if (h > S.HEIGHT || h < -0.5) continue; // jumped it, or up on something
-          const dx = q.p.pos.x - d[0], dz = q.p.pos.z - d[1], dist = Math.hypot(dx, dz) || 1;
+          const dx = q.pos.x - d[0], dz = q.pos.z - d[1], dist = Math.hypot(dx, dz) || 1;
           if (Math.abs(dist - r) > S.BAND / 2 + 0.34) continue;
           this.struck.add(q.id);
-          f.hurt(q, S.DAMAGE, 'stomp', { x: d[0], y: floorY, z: d[1] }, { x: (dx / dist) * S.KNOCK, y: S.LIFT, z: (dz / dist) * S.KNOCK });
+          f.hurtVictim(q, S.DAMAGE, 'stomp', { x: d[0], y: floorY, z: d[1] }, { x: (dx / dist) * S.KNOCK, y: S.LIFT, z: (dz / dist) * S.KNOCK });
         }
         f.ringPush(d[0], d[1], r, S.BAND);
         return BOSS.LIFT;
@@ -614,14 +614,14 @@ export class Warden {
           }
         }
         // anything in its path is trampled
-        for (const q of f.fighters) {
-          if (!f.targetable(q) || this.struck.has(q.id)) continue;
-          const rx = q.p.pos.x - this.x, rz = q.p.pos.z - this.z;
+        for (const q of f.victims()) {
+          if (this.struck.has(q.id)) continue;
+          const rx = q.pos.x - this.x, rz = q.pos.z - this.z;
           const along = rx * fx + rz * fz, lat = -rx * fz + rz * fx;
-          if (along < -1 || along > 6.5 || Math.abs(lat) > C.WIDTH / 2 + 0.4 || q.p.pos.y - floorY > this.lift + 1) continue;
+          if (along < -1 || along > 6.5 || Math.abs(lat) > C.WIDTH / 2 + 0.4 || q.pos.y - floorY > this.lift + 1) continue;
           this.struck.add(q.id);
           const side = lat >= 0 ? 1 : -1;
-          f.hurt(q, C.DAMAGE, 'charge', { x: this.x, y: floorY, z: this.z },
+          f.hurtVictim(q, C.DAMAGE, 'charge', { x: this.x, y: floorY, z: this.z },
             { x: -fz * side * C.KNOCK + fx * 6, y: C.LIFT, z: fx * side * C.KNOCK + fz * 6 });
         }
         f.trample(this.x, this.z, fx, fz, C.WIDTH);
@@ -640,10 +640,10 @@ export class Warden {
         if (isNaN(a)) return BOSS.LIFT;
         const prev = isNaN(this.prevSwipe.a) ? d[0] - d[1] * 2.1 : this.prevSwipe.a;
         this.prevSwipe.a = a;
-        for (const q of f.fighters) {
-          if (!f.targetable(q) || this.struck.has(q.id)) continue;
-          const dx = q.p.pos.x - this.x, dz = q.p.pos.z - this.z, r = Math.hypot(dx, dz);
-          const h = q.p.pos.y - floorY;
+        for (const q of f.victims()) {
+          if (this.struck.has(q.id)) continue;
+          const dx = q.pos.x - this.x, dz = q.pos.z - this.z, r = Math.hypot(dx, dz);
+          const h = q.pos.y - floorY;
           if (r < S.R0 || r > S.R1 || h < S.Y0 - 1.75 || h > S.Y1) continue;
           const ang = Math.atan2(dx, dz);
           // did the arm pass over them in this step (or is it on them now)?
@@ -653,7 +653,7 @@ export class Warden {
           this.struck.add(q.id);
           // flung round the way the arm was going, and out
           const tx = Math.cos(ang) * d[1], tz = -Math.sin(ang) * d[1];
-          f.hurt(q, S.DAMAGE, 'swipe', { x: this.x, y: floorY + h, z: this.z },
+          f.hurtVictim(q, S.DAMAGE, 'swipe', { x: this.x, y: floorY + h, z: this.z },
             { x: tx * S.KNOCK + (dx / r) * 6, y: 5, z: tz * S.KNOCK + (dz / r) * 6 });
         }
         return BOSS.LIFT;
@@ -661,10 +661,10 @@ export class Warden {
       case BAct.Shock: {
         if (t < d[0]) return BOSS.LIFT;
         const S = BOSS.SHOCK;
-        for (const q of f.fighters) {
-          if (!f.targetable(q) || !f.onWarden(q)) continue;
-          const dx = q.p.pos.x - this.x, dz = q.p.pos.z - this.z, r = Math.hypot(dx, dz) || 1;
-          f.hurt(q, S.DAMAGE, 'shock', this.point(0, 1.7, 0, tmp), { x: (dx / r) * S.KNOCK, y: S.LIFT, z: (dz / r) * S.KNOCK });
+        for (const q of f.victims()) {
+          if (!f.ridesWarden(q)) continue;
+          const dx = q.pos.x - this.x, dz = q.pos.z - this.z, r = Math.hypot(dx, dz) || 1;
+          f.hurtVictim(q, S.DAMAGE, 'shock', this.point(0, 1.7, 0, tmp), { x: (dx / r) * S.KNOCK, y: S.LIFT, z: (dz / r) * S.KNOCK });
         }
         f.emit({ k: 'boom', p: [Math.round(this.x * 100) / 100, Math.round((floorY + this.lift + 1.7) * 100) / 100, Math.round(this.z * 100) / 100], r: 5, c: 6 });
         this.finish(f, 0.2);

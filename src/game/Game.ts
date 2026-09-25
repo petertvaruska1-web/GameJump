@@ -460,7 +460,7 @@ export class Game {
       case 'snap':
         this.onSnapshot(m.ts, m.p, m.e);
         this.arena.onPlayers(m.p);
-        this.arena.onSnapshot(m.ts, m.b, m.m, m.j);
+        this.arena.onSnapshot(m.ts, m.b, m.m, m.j, m.c);
         break;
       case 'ev':
         for (const e of m.e) this.onEvent(e);
@@ -476,7 +476,8 @@ export class Game {
         this.ui.closePause();
         this.paused = false;
         {
-          const fight = m.boss && m.fight !== undefined ? this.recordFight(m.fight) : undefined;
+          // a fight won is measured against the best; a fight lost is shown for what it was
+          const fight = m.fight === undefined ? undefined : m.boss ? this.recordFight(m.fight) : { won: false, time: m.fight, prevBest: this.fightBest(), best: false };
           window.setTimeout(() => {
             if (this.mode === 'results') this.ui.results(m.results, this.meId, this.hostId === this.meId, m.duration, this.runSummary ?? undefined, fight);
           }, m.boss ? 900 : 1800);
@@ -842,10 +843,15 @@ export class Game {
       this.heaven.closePortal();
     }
     if (e.k === 'arena') { this.localDeathShown = false; this.deathCam = 0; this.spectate = 0; this.lastHud = ''; this.ui.bottom(''); this.ui.clearBig(); }
-    // past the beacon, going down is not the end of the run
+    // past the beacon, going down is as final as on the course: you watch your team, and if nobody is left the fight starts over
     if (e.k === 'death' && this.arena.inArena) {
-      if (e.id === this.meId) this.arena.localDown(e);
-      else {
+      if (e.id === this.meId) {
+        if (!this.localDeathShown) {
+          this.localDeathShown = true;
+          this.deathCam = this.time;
+          this.arena.localDown(e, this.aliveRemotes());
+        }
+      } else {
         this.ui.toast(`${this.playerName(e.id)} is down`);
         this.audio.otherDied();
         if (e.cause !== 'fall') this.effects.particles.burst(e.p[0], e.p[1] + 1, e.p[2], 40, 6, 0.8, 0.35, [1, 0.45, 0.3], 1, 5);
@@ -853,7 +859,7 @@ export class Game {
       this.lastHud = '';
       return;
     }
-    if (this.arena.onEvent(e, this.matchTime)) { if (e.k === 'pick' || e.k === 'respawn' || e.k === 'hurt') this.lastHud = ''; return; }
+    if (this.arena.onEvent(e, this.matchTime)) { if (e.k === 'pick' || e.k === 'hurt') this.lastHud = ''; return; }
     switch (e.k) {
       case 'death': {
         if (e.id === this.meId && this.local) {
@@ -1001,6 +1007,10 @@ export class Game {
     this.runSummary = { progress: this.runProgress, area, escaped, cause, time, prevBest: rec.prev, further: rec.further, faster: rec.faster, assisted };
   }
 
+  private fightBest(): number | null {
+    try { const v = Number(localStorage.getItem(FIGHT_BEST_KEY)); return v > 0 && isFinite(v) ? v : null; } catch { return null; }
+  }
+
   /** The Warden fell: this fight's time against this browser's best. */
   private recordFight(time: number): FightSummary {
     let prev: number | null = null;
@@ -1061,7 +1071,7 @@ export class Game {
       this.conn?.send(this.arenaShown ? { t: 'start', stage: 'boss' } : { t: 'start' });
       return;
     }
-    if (this.mode === 'playing' && this.local && !this.arenaShown && (this.local.dead || this.local.finished) && (code === 'Space' || code === 'KeyE')) this.nextSpectate();
+    if (this.mode === 'playing' && this.local && (this.local.dead || this.local.finished) && (code === 'Space' || code === 'KeyE')) this.nextSpectate();
   }
 
   private openPause() {
@@ -1221,7 +1231,8 @@ export class Game {
     // the arena first: a power that moves the runner moves it in this very frame
     const canAct = !this.paused && !this.debug.freeCam && this.input.locked;
     this.arena.wheel(this.input.wheel);
-    this.arena.update(dt, this.time, mt, canAct && this.input.mouseLeftPressed, canAct && this.input.mouseLeftDown, canAct);
+    // R: kinetic force's debris hurl (on the results screen R is a rematch, handled in onKey)
+    this.arena.update(dt, this.time, mt, canAct && this.input.mouseLeftPressed, canAct && this.input.mouseLeftDown, canAct, canAct && this.input.wasPressed('KeyR'));
     if (local) local.update(dt, move, room ? room.world : this.activeWorld, mt);
     if (this.arenaShown) { /* no portal, no Viktor past the beacon */ }
     else if (room) {
@@ -1367,7 +1378,7 @@ export class Game {
     if (ended && this.time - this.deathCam > (local.finished ? 3 : 2.4)) {
       const target = this.spectateTarget();
       if (target) {
-        this.cam.update(dt, { pos: target.pos, vel: target.vel, grounded: true, sprinting: false }, this.world, mt);
+        this.cam.update(dt, { pos: target.pos, vel: target.vel, grounded: true, sprinting: false, shoulder: this.arenaShown ? 0.55 : 0, far: this.arenaShown ? 1.3 : 0 }, camWorld, mt);
         this.ui.bottom(`Spectating ${target.name}${this.aliveRemotes() > 1 ? ' — Space: next' : ''}`);
         return;
       }

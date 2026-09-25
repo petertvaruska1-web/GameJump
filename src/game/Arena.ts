@@ -10,8 +10,10 @@
 // later the light swallows everyone and the team stands at the arena's own
 // beacon, looking at the machine. Each runner picks a power there (1-6), the
 // Warden wakes, and from then on this class keeps the Warden, its bots, the
-// loose things, the orbs, the hazards and the powers on screen from snapshots
-// and events, and turns the local runner's clicks into powers (Powers).
+// loose things, the orbs, the clones, the hazards and the powers on screen from
+// snapshots and events, and turns the local runner's clicks into powers
+// (Powers). Going down there is final: you watch the rest of the team, and when
+// everyone is down the fight is lost and starts over.
 //
 // The Warden is drawn INTERP_DELAY behind like any other remote thing; the
 // hazards it makes are pure functions of the event numbers, drawn at the match
@@ -20,14 +22,14 @@
 // can stand on its back and ride it.
 
 import * as THREE from 'three';
-import { ARENA, BOSS, NET, PHP, SUPERS } from '../../shared/constants';
+import { ARENA, BOSS, NET, PHP, POW, powerHp, SUPERS } from '../../shared/constants';
 import { getArena, type ArenaData } from '../../shared/level/arena';
 import type { LevelData } from '../../shared/level/types';
 import { clamp, damp, lerp, smoothstep } from '../../shared/math';
 import type { Collider } from '../../shared/physics/world';
 import { HOLD_AHEAD, HOLD_UP, SHELL_G } from '../../shared/sim/bots';
 import { wardenParts, wardenPoint, type PartSphere } from '../../shared/sim/warden';
-import { BAct, BPart, BState, BotKind, BotState, JunkKind, PowAct, type BossSnap, type BotSnap, type C2S, type GameEvent, type JunkSnap, type PlayerSnap, type Stage } from '../../shared/protocol';
+import { BAct, BPart, BState, BotKind, BotState, JunkKind, PowAct, type BossSnap, type BotSnap, type C2S, type CloneSnap, type GameEvent, type JunkSnap, type PlayerSnap, type Stage } from '../../shared/protocol';
 import type { AudioEngine } from '../audio/Audio';
 import { InterpBuffer } from '../net/Interp';
 import type { CameraController } from '../player/CameraController';
@@ -35,6 +37,7 @@ import type { LocalPlayer } from '../player/LocalPlayer';
 import { ArenaFx } from '../render/ArenaFx';
 import { ArenaView } from '../render/ArenaView';
 import { BotView, JunkView } from '../render/BotViews';
+import { CharacterModel } from '../render/CharacterModel';
 import type { Particles } from '../render/Effects';
 import type { Materials } from '../render/Materials';
 import { PortalView } from '../render/PortalView';
@@ -42,7 +45,8 @@ import { WardenModel } from '../render/WardenModel';
 import { ArenaHud } from '../ui/ArenaHud';
 import type { UI } from '../ui/UI';
 import type { RemotePlayer } from './Actors';
-import { POWER_INFO, Powers, type AimTarget } from './Powers';
+import { localDir } from '../player/LocalPlayer';
+import { COMBO, POWER_INFO, Powers, type AimTarget } from './Powers';
 
 export interface ArenaHost {
   readonly scene: THREE.Scene;
@@ -80,6 +84,15 @@ const REVEAL = 2.8;
 interface BotProxy { id: number; kind: number; view: BotView; buf: InterpBuffer; pos: THREE.Vector3; yaw: number; state: number; hp: number; target: number; seen: number }
 interface JunkProxy { id: number; kind: number; view: JunkView; buf: InterpBuffer; pos: THREE.Vector3; vel: THREE.Vector3; holder: number; spin: number; seen: number }
 interface OrbVis { id: number; sprite: THREE.Sprite; p0: THREE.Vector3; v: THREE.Vector3; t0: number; pos: THREE.Vector3; turned: boolean }
+/** A clone (duplication), drawn like a runner in its owner's colours, glowing green and a little see-through. */
+interface CloneProxy { id: number; owner: number; model: CharacterModel; buf: InterpBuffer; pos: THREE.Vector3; last: THREE.Vector3; vel: THREE.Vector3; yaw: number; lastYaw: number; anim: number; hp: number; seen: number; punch: number }
+/** A speedster's wake: where its chest has been lately, newest first. */
+interface Wake { pts: THREE.Vector3[]; ages: number[]; ghostT: number }
+
+/** The speedster's colours: its trail, and the afterimages it sheds. */
+const SPEED_TRAIL: [number, number, number] = [2.4, 1.8, 0.45];
+const SPEED_GHOST: [number, number, number] = [1.7, 1.3, 0.35];
+const CLONE_HEX = POWER_INFO.clone.hex;
 
 const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tmp3 = new THREE.Vector3(), fwd = new THREE.Vector3();
 const vp = { x: 0, y: 0, z: 0 };
@@ -143,10 +156,12 @@ export class Arena {
   private readonly orbPool: THREE.Sprite[] = [];
   /** Who holds which bot with telekinesis (by 'fx' grab/throw/drop). */
   private readonly holders = new Map<number, number>();
+  /** Clones out in the fight (everyone's). */
+  private readonly clones = new Map<number, CloneProxy>();
+  /** Speedsters' wakes (by runner id). */
+  private readonly wakes = new Map<number, Wake>();
   // the local runner
   down = false;
-  private downAt = 0;
-  private readonly corpse = new THREE.Vector3();
   private readonly targetsList: AimTarget[] = [];
   private targetsFrame = -1;
   private frame = 0;
@@ -173,8 +188,10 @@ export class Arena {
       push: (at, dir) => this.fx?.push(at, dir),
       well: (from, dir) => this.fx?.wellThrown(-1, from, dir, this.mt, true),
       flash: (from, to) => this.fx?.flashStrike(from, to),
-      blink: (from, to) => this.fx?.blink(from, to, host.camera.position),
       thrown: (from, dir) => this.fx?.streak(from, tmp.copy(from).addScaledVector(dir, 7), 0.25, [2.2, 0.6, 1.9], 0.45),
+      clones: () => { let n = 0; const me = host.meId(); for (const c of this.clones.values()) if (c.owner === me) n++; return n; },
+      rip: (at) => this.fx?.rip(at),
+      rally: (at) => this.fx?.rally(at),
       sound: (kind, k) => host.audio.arena?.power(kind, null, k ?? 1),
       shake: (k) => host.cam.addShake(k),
       fov: (deg) => host.cam.kickFov(deg),
@@ -207,8 +224,8 @@ export class Arena {
   get inArena() { return this.stage === 'boss'; }
   get level(): LevelData { return this.data.level; }
   get world() { return this.view?.world ?? null; }
-  /** The arrival shot, or watching your body while you are down. */
-  get ownsCamera() { return this.inArena && (this.revealT >= 0 || this.down); }
+  /** The arrival shot (going down is watched like on the course: your body, then your team). */
+  get ownsCamera() { return this.inArena && this.revealT >= 0; }
   /** Arriving: the keys wait for the camera. */
   get locksInput() { return this.inArena && this.revealT >= 0 && this.revealT < REVEAL - 0.8; }
 
@@ -234,7 +251,8 @@ export class Arena {
     for (const b of this.bots.values()) this.dropBot(b);
     for (const j of this.junk.values()) this.dropJunk(j);
     for (const o of this.orbs.values()) this.dropOrb(o);
-    this.bots.clear(); this.junk.clear(); this.orbs.clear();
+    for (const c of this.clones.values()) this.dropClone(c);
+    this.bots.clear(); this.junk.clear(); this.orbs.clear(); this.clones.clear(); this.wakes.clear();
     this.fx?.clearAct();
     this.powers.clear(this.host.local());
     this.hud.show(false);
@@ -338,10 +356,14 @@ export class Arena {
         const p = local.renderPos;
         h.particles.burst(p.x, p.y + 1, p.z, 40, 4, 0.7, 0.3, [c.r, c.g, c.b], 1, -1, 2);
         local.model.setPowerColor(POWER_INFO[SUPERS[k]].hex);
+        // kinetic force: bigger (the body you collide with stays a runner's)
+        local.model.root.scale.setScalar(SUPERS[k] === 'kinetic' ? POW.kinetic.SCALE : 1);
       }
+      this.hps.set(id, powerHp(SUPERS[k]));
     } else {
       const rp = h.remote(id);
       rp?.model.setPowerColor(POWER_INFO[SUPERS[k]].hex);
+      rp?.model.root.scale.setScalar(SUPERS[k] === 'kinetic' ? POW.kinetic.SCALE : 1);
       if (rp) h.particles.burst(rp.pos.x, rp.pos.y + 1, rp.pos.z, 24, 3, 0.6, 0.25, [1, 1, 1], 0.8, -1, 2);
     }
   }
@@ -349,9 +371,8 @@ export class Arena {
   /** The runner asked for power `i` (a key or a card). */
   private choose(i: number) {
     if (!this.inArena || i < 0 || i >= SUPERS.length) return;
-    const local = this.host.local();
-    if (this.awake && local && !local.dead) {
-      if (!this.tipShown) { this.tipShown = true; this.host.ui.toast('Your power can be changed while you are down'); }
+    if (this.awake) {
+      if (!this.tipShown) { this.tipShown = true; this.host.ui.toast('Your power is set once the Warden is awake'); }
       return;
     }
     this.highlight = i;
@@ -388,7 +409,7 @@ export class Arena {
     }
   }
 
-  onSnapshot(ts: number, b: BossSnap | undefined, m: BotSnap[] | undefined, j: JunkSnap[] | undefined) {
+  onSnapshot(ts: number, b: BossSnap | undefined, m: BotSnap[] | undefined, j: JunkSnap[] | undefined, c?: CloneSnap[]) {
     if (!this.inArena || !this.view) return;
     if (b) {
       this.wBuf.push(ts, [b[0], b[1], b[2], b[3]]);
@@ -431,6 +452,15 @@ export class Arena {
         p.holder = s[5]; p.spin = s[6]; p.seen = ts;
       }
     }
+    if (c) {
+      for (const s of c) {
+        let p = this.clones.get(s[0]);
+        if (!p) p = this.addClone(s[0], s[1], s[2], s[3], s[4], ts);
+        p.buf.push(ts, [s[2], s[3], s[4], s[5]]);
+        p.anim = s[6]; p.hp = s[7]; p.seen = ts;
+      }
+    }
+    for (const p of this.clones.values()) if (ts - p.seen > 0.3) { this.dropClone(p); this.clones.delete(p.id); }
     // gone from the snapshot: destroyed (its explosion came as an event) or lost over the edge
     for (const p of this.bots.values()) if (ts - p.seen > 0.3) { this.dropBot(p); this.bots.delete(p.id); }
     for (const p of this.junk.values()) if (ts - p.seen > 0.3) { this.dropJunk(p); this.junk.delete(p.id); }
@@ -552,9 +582,26 @@ export class Arena {
       case 'hurt':
         this.hurt(e);
         return true;
-      case 'respawn':
-        this.respawned(e.id, e.p);
+      case 'clone': {
+        const p = tmp.set(e.p[0], e.p[1], e.p[2]);
+        if (e.s === 'in') {
+          const from = e.q ? tmp2.set(e.q[0], e.q[1], e.q[2]) : p;
+          this.fx?.blink(from, p, h.camera.position);
+          this.addClone(e.id, e.owner, e.p[0], e.p[1], e.p[2], mt);
+          h.audio.arena?.power('split', p, e.owner === me ? 1 : 0.6);
+        } else if (e.s === 'out') {
+          this.fx?.cloneOut(p);
+          h.audio.arena?.power('cloneOut', p, 0.8);
+          const c = this.clones.get(e.id);
+          if (c) { this.dropClone(c); this.clones.delete(e.id); }
+        } else {
+          // left behind: it steps out of thin air beside its owner
+          if (e.q) this.fx?.blink(tmp2.set(e.q[0], e.q[1], e.q[2]), p, h.camera.position);
+          const c = this.clones.get(e.id);
+          if (c) { c.buf.clear(); c.pos.copy(p); c.last.copy(p); }
+        }
         return true;
+      }
       case 'fx':
         this.remoteFx(e.id, e.f, e.d, mt);
         return true;
@@ -562,7 +609,7 @@ export class Arena {
         const p = tmp.set(e.p[0], e.p[1], e.p[2]);
         this.fx?.explosion(p, e.r, e.c);
         const d = p.distanceTo(h.camera.position);
-        h.cam.addShake(clamp((e.r * 3) / Math.max(4, d), 0, e.c === 5 ? 0.8 : 0.5));
+        h.cam.addShake(clamp((e.r * 3) / Math.max(4, d), 0, e.c === 5 ? 0.8 : e.c === 8 ? 0.35 : 0.5));
         h.audio.arena?.boom(p, e.r, e.c);
         return true;
       }
@@ -662,41 +709,21 @@ export class Arena {
     h.particles.burst(p.x, p.y + 1.1, p.z, 18, 5, 0.4, 0.15, [1, 0.35, 0.3], 1, 8, 1);
   }
 
-  /** The local runner is down (the 'death' event): back at the beacon in a few seconds. */
-  localDown(e: Extract<GameEvent, { k: 'death' }>) {
+  /** The local runner is down (the 'death' event). In the arena that is final: the team fights on, or the fight is lost. */
+  localDown(e: Extract<GameEvent, { k: 'death' }>, teammates: number) {
     const h = this.host;
     const local = h.local();
     if (!local || local.dead) return;
     local.die(e.v);
     local.doomed = false;
     this.down = true;
-    this.downAt = this.time;
-    this.corpse.set(e.p[0], e.p[1], e.p[2]);
     this.hps.set(h.meId(), 0);
     h.cam.addShake(0.8);
     h.audio.death(e.cause);
-    const txt = e.cause === 'fall' ? 'You fell' : e.cause === 'bot' ? 'Swarmed' : 'Down';
-    h.ui.big(txt, 'danger mid', 'Back at the beacon in a moment', 2.6);
+    const txt = e.cause === 'fall' ? 'You fell' : e.cause === 'bot' ? 'Swarmed' : 'Crushed';
+    h.ui.big(txt, 'danger mid', teammates > 0 ? 'You are out of the fight · watch your team' : 'The Warden stands · start over', 3);
     h.particles.burst(e.p[0], e.p[1] + 1, e.p[2], 50, 7, 0.9, 0.35, [1, 0.45, 0.25], 1, 5);
     this.powers.held = null;
-  }
-
-  private respawned(id: number, p: [number, number, number]) {
-    const h = this.host;
-    this.hps.set(id, PHP.MAX);
-    this.fx?.flash(tmp.set(p[0], p[1] + 1.2, p[2]), 5, 0x7fd8ff, 0.4);
-    h.particles.burst(p[0], p[1] + 1, p[2], 40, 4, 0.8, 0.3, [0.55, 0.85, 1], 1, -1, 2);
-    if (id !== h.meId()) { const rp = h.remote(id); rp?.place(p[0], p[1], p[2], this.data.level.spawnYaw); return; }
-    const local = h.local();
-    if (!local) return;
-    local.spawn(p[0], p[1], p[2], this.data.level.spawnYaw);
-    local.frozen = false;
-    this.down = false;
-    this.powers.set(this.myPick, local);
-    h.cam.reset(local.renderPos, this.data.level.spawnYaw);
-    h.ui.clearBig();
-    h.ui.bottom('');
-    h.audio.arena?.respawn();
   }
 
   /** Someone used a power: draw it (the user's own was drawn when it happened; only what the server adds is drawn here). */
@@ -709,8 +736,28 @@ export class Arena {
     const hex = POWER_INFO[SUPERS[Math.max(0, this.picks.get(id) ?? 0)]].hex;
     switch (f) {
       case PowAct.Punch:
-        if (!mine) { fx.punch(pos(0).setY(d[1] + 1.25), pos(3), !!d[6]); rp?.model.act('punch', hex); h.audio.arena?.power('punch', pos(0), 0.7); }
+        if (!mine) {
+          const combo = clamp(d[7] ?? 0, 0, 3) | 0;
+          fx.punch(pos(0).setY(d[1] + 1.25 + (combo === 3 ? 0.6 : 0)), combo === 3 ? pos(3).setY(1.2).normalize() : pos(3), !!d[6]);
+          rp?.model.act(COMBO[combo], hex);
+          h.audio.arena?.power('punch', pos(0), combo >= 2 ? 0.9 : 0.7);
+        }
         break;
+      case PowAct.Hurl:
+        if (!mine) { fx.rip(pos(0)); rp?.model.act('lift', hex); h.audio.arena?.power('rip', pos(0), 0.8); if (rp) window.setTimeout(() => rp.model.act('hurl', hex), POW.kinetic.HURL_LIFT * 1000); }
+        break;
+      case PowAct.Rally:
+        if (!mine) { fx.rally(pos(0)); rp?.model.act('push', hex); h.audio.arena?.power('rally', pos(0), 0.7); }
+        break;
+      case PowAct.CloneHit: {
+        const c = this.clones.get(d[0]);
+        const at = pos(1);
+        const from = c ? tmp2.set(c.pos.x, c.pos.y + 1.3, c.pos.z) : at;
+        fx.cloneHit(from, at, !!d[4]);
+        if (c) { c.model.act(c.punch++ % 2 ? 'cross' : 'jab', CLONE_HEX); }
+        h.audio.arena?.power('cloneHit', at, id === h.meId() ? 0.7 : 0.4);
+        break;
+      }
       case PowAct.Slam:
         if (!mine) { fx.slam(pos(0), d[3]); h.audio.arena?.power('slam', pos(0), 1); h.cam.addShake(clamp(0.5 - pos(0).distanceTo(h.camera.position) / 60, 0, 0.4)); }
         break;
@@ -749,9 +796,6 @@ export class Arena {
       case PowAct.Flash:
         if (!mine) { fx.flashStrike(pos(0), pos(3)); h.audio.arena?.power('flash', pos(3), 0.7); }
         break;
-      case PowAct.Blink:
-        if (!mine) { fx.blink(pos(0), pos(3), h.camera.position); h.audio.arena?.power('blink', pos(3), 0.7); rp?.place(d[3], d[4], d[5], rp.yaw); }
-        break;
     }
   }
 
@@ -775,8 +819,8 @@ export class Arena {
     this.host.audio.click();
   }
 
-  /** Choosing a power right now (on arrival, before picking; or while down). */
-  get choosing() { return this.inArena && ((!this.awake && this.myPick < 0) || this.down); }
+  /** Choosing a power right now (on arrival, before picking). */
+  get choosing() { return this.inArena && !this.awake && this.myPick < 0; }
 
   // ------------------------------------------------------------------ per frame
 
@@ -826,7 +870,7 @@ export class Arena {
    * Every frame. `press`/`hold`: the power button this frame; `can`: the runner
    * may act (not paused, not in a menu).
    */
-  update(dt: number, time: number, mt: number, press: boolean, hold: boolean, can: boolean) {
+  update(dt: number, time: number, mt: number, press: boolean, hold: boolean, can: boolean, alt = false) {
     this.frame++;
     this.time = time;
     this.mt = mt;
@@ -896,7 +940,8 @@ export class Arena {
       this.tethers.push([a, b]);
     };
     for (const j of this.junk.values()) {
-      if (!j.holder) continue;
+      // a heaved slab of floor is carried in the hands, not held by the mind
+      if (!j.holder || j.kind === JunkKind.Rock) continue;
       const hp = this.handOf(j.holder, tmp3);
       if (hp) tether(hp, tmp.copy(j.pos).setY(j.pos.y + 0.4));
     }
@@ -921,13 +966,10 @@ export class Arena {
     // the local runner's power
     if (local && !local.dead) {
       if (this.choosing && press && !this.awake) { this.choose(this.highlight); press = false; }
-      this.powers.update(mt, local, h.camera, press, hold, can && !this.locksInput && this.myPick >= 0);
+      this.powers.update(mt, local, h.camera, press, hold, can && !this.locksInput && this.myPick >= 0, alt && can);
     }
-    // down: counting the seconds back
-    if (this.down) {
-      const left = Math.max(0, ARENA.RESPAWN - (time - this.downAt));
-      h.ui.bottom(left > 0.05 ? `Back at the beacon in ${left.toFixed(1)} s` : '');
-    }
+    this.updateClones(dt, renderT, time);
+    this.updateWakes(dt);
 
     this.updateHud(dt, mt, local);
     this.updateAudio(dt, local);
@@ -986,16 +1028,6 @@ export class Arena {
       // a key or a click skips it
       return;
     }
-    if (this.down && local) {
-      // circle slowly over the body, the Warden in the frame
-      const t = this.time - this.downAt;
-      const a = t * 0.3 + Math.atan2(this.wPos.x - this.corpse.x, this.wPos.z - this.corpse.z) + Math.PI;
-      const b = local.renderPos;
-      tmp.set(b.x + Math.sin(a) * 8, b.y + 5 + t * 0.6, b.z + Math.cos(a) * 8);
-      cam.position.lerp(tmp, damp(2, dt));
-      tmp2.set(b.x, b.y + 1, b.z).lerp(tmp3.set(this.wPos.x, ARENA.y + 6, this.wPos.z), 0.35);
-      cam.lookAt(tmp2);
-    }
   }
 
   /** Skip the arrival shot. */
@@ -1008,14 +1040,16 @@ export class Arena {
       overdrive: (this.wFlags & 1) !== 0, staggered: this.wState === BState.Stagger, dormant: this.wState === BState.Dormant || this.wState === BState.Waking,
     });
     hud.tick(dt);
-    const hp = this.hps.get(h.meId()) ?? PHP.MAX;
-    hud.meView(this.myPick, local && local.dead ? 0 : hp);
+    const max = powerHp(this.myPick >= 0 ? SUPERS[this.myPick] : null);
+    const hp = this.hps.get(h.meId()) ?? max;
+    hud.meView(this.myPick, local && local.dead ? 0 : hp, max);
     const P = this.powers;
     if (this.myPick >= 0) {
       const heat = P.heatAt(mt);
       hud.ring(P.readiness(mt), {
         hot: P.kind === 'lightning' && (mt < P.overheatUntil || heat > 72),
-        pips: P.kind === 'teleport' ? [P.chargeState(mt)[0], 3] : undefined,
+        // kinetic: one pip for the debris hurl (R); duplication: the clones out
+        pips: P.kind === 'kinetic' ? [P.hurlReadiness(mt) >= 1 ? 1 : 0, 1] : P.kind === 'clone' ? [this.powersHostClones(), POW.clone.MAX] : undefined,
       });
     }
     // the bracket round the lock
@@ -1039,9 +1073,7 @@ export class Arena {
     // the cards
     if (this.choosing) {
       const wake = Math.max(0, this.wakeBy - mt);
-      const note = this.down ? 'Keep it, or press 1-6 for another'
-        : `Press 1-6, or scroll and click · it wakes in ${Math.ceil(wake)} s`;
-      hud.selectView({ current: this.highlight, chosen: this.down && this.highlight === this.myPick, compact: this.down, note });
+      hud.selectView({ current: this.highlight, chosen: false, compact: false, note: `Press 1-6, or scroll and click · it wakes in ${Math.ceil(wake)} s` });
     } else if (!this.awake && this.myPick >= 0) {
       const waiting = [...this.hps.keys()].some((id) => !this.picks.has(id));
       hud.selectView({ current: this.myPick, chosen: true, compact: true, note: waiting ? 'Waiting for the others · 1-6 to change' : '1-6 to change · it is waking' });
@@ -1108,10 +1140,86 @@ export class Arena {
     return `warden ${st} hp ${Math.round(this.wHp)}/${this.maxHp} poise ${Math.round(this.wPoise)} act ${this.act.a} · bots ${this.bots.size} junk ${this.junk.size} orbs ${this.orbs.size} · ${this.myPick >= 0 ? SUPERS[this.myPick] : 'no power'}`;
   }
 
-  /** Health and power for the roster. */
+  /** Health (as a share of the most it can be, 0..100) and power, for the roster. */
   info(id: number): { hp: number; power: number } | null {
     if (!this.inArena) return null;
-    return { hp: this.hps.get(id) ?? PHP.MAX, power: this.picks.get(id) ?? -1 };
+    const power = this.picks.get(id) ?? -1;
+    const max = powerHp(power >= 0 ? SUPERS[power] : null);
+    return { hp: ((this.hps.get(id) ?? max) / max) * 100, power };
+  }
+
+  private powersHostClones() { let n = 0; const me = this.host.meId(); for (const c of this.clones.values()) if (c.owner === me) n++; return n; }
+
+  // ------------------------------------------------------------------ clones
+
+  private addClone(id: number, owner: number, x: number, y: number, z: number, ts: number): CloneProxy {
+    const had = this.clones.get(id);
+    if (had) return had;
+    const h = this.host;
+    const model = new CharacterModel((owner - 1) % 3, h.shadows);
+    model.setPowerColor(CLONE_HEX);
+    // a copy, not the runner: a green sheen, a little see-through
+    model.setPowers(false, 0.22, false);
+    model.root.position.set(x, y, z);
+    h.scene.add(model.root);
+    const p: CloneProxy = { id, owner, model, buf: new InterpBuffer(), pos: new THREE.Vector3(x, y, z), last: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw: 0, lastYaw: 0, anim: 0, hp: 100, seen: ts, punch: 0 };
+    this.clones.set(id, p);
+    return p;
+  }
+
+  private dropClone(c: CloneProxy) { this.host.scene.remove(c.model.root); c.model.dispose(); }
+
+  private updateClones(dt: number, renderT: number, time: number) {
+    for (const c of this.clones.values()) {
+      if (c.buf.sample(renderT, S4, [3])) { c.pos.set(S4[0], S4[1], S4[2]); c.yaw = S4[3]; }
+      if (dt > 0) { c.vel.subVectors(c.pos, c.last).divideScalar(dt); if (c.vel.lengthSq() > 900) c.vel.set(0, 0, 0); }
+      c.last.copy(c.pos);
+      let turn = 0;
+      if (dt > 0) { let d = c.yaw - c.lastYaw; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; turn = d / dt; }
+      c.lastYaw = c.yaw;
+      c.model.root.position.copy(c.pos);
+      c.model.root.rotation.y = c.yaw;
+      const dir = localDir(c.vel.x, c.vel.z, c.yaw);
+      c.model.update({ speed: Math.hypot(c.vel.x, c.vel.z), vy: c.vel.y, anim: c.anim, dt, turn, land: 0, t: time, fwd: dir[0], side: dir[1], vel: c.vel, grounded: Math.abs(c.vel.y) < 0.6 });
+    }
+  }
+
+  // ------------------------------------------------------------------ the speedster's wake
+
+  /** Every speedster running fast leaves a ribbon of light behind it and sheds afterimages. */
+  private updateWakes(dt: number) {
+    const h = this.host, fx = this.fx;
+    if (!fx) return;
+    const list: { pts: THREE.Vector3[]; ages: number[]; color: [number, number, number] }[] = [];
+    const runners: [number, THREE.Vector3, THREE.Vector3, number, boolean][] = [];
+    const local = h.local();
+    const me = h.meId();
+    if (local && this.picks.get(me) === SUPERS.indexOf('speed')) runners.push([me, local.renderPos, local.renderVel, local.motor.yaw, !local.dead]);
+    for (const rp of h.remotes()) if (this.picks.get(rp.id) === SUPERS.indexOf('speed')) runners.push([rp.id, rp.pos, rp.vel, rp.yaw, rp.status === 0]);
+    for (const [id, pos, vel, yaw, alive] of runners) {
+      let w = this.wakes.get(id);
+      if (!w) { w = { pts: [], ages: [], ghostT: 0 }; this.wakes.set(id, w); }
+      for (let i = 0; i < w.ages.length; i++) w.ages[i] += dt;
+      const sp = Math.hypot(vel.x, vel.z);
+      if (alive && sp > POW.speed.TRAIL_SPEED) {
+        const p = w.pts.length > 24 ? w.pts.pop()! : new THREE.Vector3();
+        if (w.ages.length > 24) w.ages.pop();
+        p.set(pos.x, pos.y + 1.05, pos.z);
+        w.pts.unshift(p); w.ages.unshift(0);
+        // afterimages, closer together the faster it goes
+        w.ghostT -= dt;
+        if (w.ghostT <= 0) {
+          w.ghostT = clamp(0.9 / sp, 0.035, 0.09);
+          fx.afterimage(tmp.set(pos.x, pos.y, pos.z), Math.atan2(vel.x, vel.z), SPEED_GHOST, 0.3, id === me ? 1 : 1);
+          if (Math.random() < 0.5) h.particles.emit(pos.x, pos.y + 0.3 + Math.random() * 1.4, pos.z, -vel.x * 0.1 + (Math.random() - 0.5) * 2, Math.random() * 2, -vel.z * 0.1 + (Math.random() - 0.5) * 2, 0.3, 0.1, 1, 0.85, 0.35, 1, 0, -0.2);
+        }
+      }
+      // drop what has faded
+      while (w.ages.length && w.ages[w.ages.length - 1] > 0.4) { w.ages.pop(); w.pts.pop(); }
+      if (w.pts.length > 1) list.push({ pts: w.pts, ages: w.ages, color: SPEED_TRAIL });
+      void yaw;
+    }
+    fx.setTrails(list);
   }
 }
 

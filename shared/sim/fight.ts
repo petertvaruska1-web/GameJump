@@ -9,17 +9,23 @@
 // what it did ('pow'), and this decides what that hit. Aimed hits are judged
 // against where the target was on that client's screen (clamped to the last
 // 0.35 s), so a fast-moving Warden cannot dodge a bolt that visibly struck it.
+//
+// Going down in the arena is final: a runner who runs out of health (or falls)
+// stays down and watches, and when the whole team is down the fight is lost.
+// Everything that hurts runners also hurts their clones (duplication): the
+// Warden's attacks, bots and orbs go for "victims", runners and clones alike.
 
-import { ARENA, BOSS, BOT, JUNK, NET, PHP, PLAYER, POW, SLIDE, SUPERS, type SuperPower } from '../constants';
+import { ARENA, BOSS, BOT, JUNK, NET, PHP, PLAYER, POW, powerHp, SLIDE, SUPERS, type SuperPower } from '../constants';
 import type { ArenaData } from '../level/arena';
 import { clamp, v3, type Vec3 } from '../math';
 import { Anim } from '../physics/character';
 import type { Collider, CollisionWorld, RayHit } from '../physics/world';
 import {
   BotKind, BotState, BState, JunkKind, PowAct, Status,
-  type BossSnap, type BotSnap, type C2S, type DeathCause, type GameEvent, type HurtSrc, type JunkSnap,
+  type BossSnap, type BotSnap, type C2S, type CloneSnap, type DeathCause, type GameEvent, type HurtSrc, type JunkSnap,
 } from '../protocol';
 import { Bot, holdPoint, Junk, Orb, SHELL_G, Well } from './bots';
+import { Clone } from './clones';
 import type { RoomPlayer } from './room';
 import { botCap, HIVE, MUZZLE, Warden, wardenPoint, type PartSphere } from './warden';
 
@@ -29,8 +35,6 @@ export interface FightHost {
   emit(ev: GameEvent): void;
   /** A runner's health ran out (or it fell): the room kills it the usual way. */
   killRunner(p: RoomPlayer, cause: DeathCause, from: Vec3 | null): void;
-  /** Back on its feet at the arena's beacon. */
-  respawnRunner(p: RoomPlayer, at: [number, number, number]): void;
   /** The Warden is destroyed and the dust has settled: the run is won. */
   won(): void;
   rand(): number;
@@ -42,11 +46,16 @@ export class Fighter {
   /** Index into SUPERS plus one (0: not chosen yet). */
   power = 0;
   hurtAt = -99;
-  respawnAt = 0;
   protectUntil = 0;
   /** Mid-blink: nothing touches you. */
   phaseUntil = 0;
   deaths = 0;
+  /** Kinetic: the next debris hurl; duplication: the next rally. */
+  hurlReady = 0;
+  rallyReady = 0;
+  /** Duplication: which slot the next clone takes. */
+  nextSlot = 0;
+  readonly isClone = false;
   damage = 0;
   bots = 0;
   /** Seconds standing on the Warden's back. */
@@ -62,8 +71,6 @@ export class Fighter {
   heatAt = 0;
   overheatUntil = 0;
   bolts = 0;
-  charges: number = POW.teleport.CHARGES;
-  chargeAt = 0;
   held: { kind: 1 | 2; id: number; at: number } | null = null;
   private crushAcc = 0;
   /** A power just moved this runner further than running could: accepted up to `allow` metres until `allowUntil`. */
@@ -71,6 +78,10 @@ export class Fighter {
   allowUntil = 0;
   constructor(readonly p: RoomPlayer) {}
   get id() { return this.p.id; }
+  get pos() { return this.p.pos; }
+  get vel() { return this.p.vel; }
+  /** Sliding (the beam's height test). */
+  get low() { return this.p.anim === Anim.Slide; }
   get kind(): SuperPower | null { return this.power ? SUPERS[this.power - 1] : null; }
   /** Crush damage owed to a bot held with telekinesis, in whole points. */
   crush(dt: number): number { this.crushAcc += POW.telekinesis.CRUSH * dt; const n = Math.floor(this.crushAcc); this.crushAcc -= n; return n; }
@@ -98,6 +109,9 @@ function segCapsule(s0: Vec3, s1: Vec3, p: Vec3, h: number): number {
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const p3 = (v: Vec3): [number, number, number] => [r2(v.x), r2(v.y), r2(v.z)];
 
+/** Anything the Warden and its bots go after: a runner, or one of a runner's clones. */
+export type Victim = Fighter | Clone;
+
 export class Fight {
   readonly warden: Warden;
   readonly fighters: Fighter[] = [];
@@ -105,6 +119,7 @@ export class Fight {
   junk: Junk[] = [];
   orbs: Orb[] = [];
   wells: Well[] = [];
+  clones: Clone[] = [];
   time = 0;
   readonly arrivedAt: number;
   readonly wakeBy: number;
@@ -112,6 +127,8 @@ export class Fight {
   private nextJunk = 1;
   private nextOrb = 1;
   private nextWell = 1;
+  /** Clone ids start high, so a clone and a runner never share one (struck sets, bot targets). */
+  private nextClone = 1000;
   /** Canisters waiting to come back to their stands (stand -> time). */
   private readonly restock = new Map<number, number>();
   /** Explosions waiting a beat (chain reactions ripple instead of going off all at once). */
@@ -162,16 +179,38 @@ export class Fight {
   /** Standing on the Warden's back (or its head). */
   onWarden(q: Fighter) { return q.p.ground === this.arena.hull || q.p.ground === this.arena.head; }
 
+  /** Runners (that can be hit right now) and their clones. */
+  victims(): Victim[] {
+    const out: Victim[] = [];
+    for (const q of this.fighters) if (this.targetable(q)) out.push(q);
+    for (const c of this.clones) if (!c.dead) out.push(c);
+    return out;
+  }
+
+  canHit(v: Victim) { return v.isClone ? !(v as Clone).dead : this.targetable(v as Fighter); }
+
+  /** Hurt a runner or a clone. */
+  hurtVictim(v: Victim, n: number, src: HurtSrc, from: Vec3, knock: Vec3) {
+    if (v.isClone) (v as Clone).hurt(this, n, knock);
+    else this.hurt(v as Fighter, n, src, from, knock);
+  }
+
+  /** Riding the Warden's back, runner or clone. */
+  ridesWarden(v: Victim) { return v.isClone ? (v as Clone).riding(this) : this.onWarden(v as Fighter); }
+
   // ------------------------------------------------------------------ the runners
 
-  /** Runner `p` chose a power. Free to change it before the Warden wakes, and while down. */
+  /** Runner `p` chose a power. Free to change it until the Warden wakes. */
   pick(p: RoomPlayer, k: number) {
     const q = this.fighter(p);
-    if (!q || k < 0 || k >= SUPERS.length || p.status === Status.Left) return;
-    if (this.awake && q.power && p.status === Status.Alive) return;
+    if (!q || k < 0 || k >= SUPERS.length || p.status !== Status.Alive) return;
+    if (this.awake && q.power) return;
     this.dropHeld(q);
+    this.dropClones(q);
     q.power = k + 1;
-    q.heat = 0; q.overheatUntil = 0; q.chain = 0; q.charges = POW.teleport.CHARGES; q.ready = 0;
+    q.heat = 0; q.overheatUntil = 0; q.chain = 0; q.ready = 0; q.hurlReady = 0; q.rallyReady = 0;
+    // kinetic force makes you bigger and tougher: the health comes with the power
+    q.hp = powerHp(q.kind);
     this.emit({ k: 'pick', id: p.id, power: k });
   }
 
@@ -188,29 +227,82 @@ export class Fight {
     }
   }
 
-  /** The room says this runner died (hurt, or fell off): it will be back at the beacon shortly. */
+  /** The room says this runner died (hurt, or fell off). It stays down: in the arena that is final. */
   died(p: RoomPlayer) {
     const q = this.fighter(p);
     if (!q) return;
     q.deaths++;
     q.hp = 0;
-    q.respawnAt = this.time + ARENA.RESPAWN;
     q.rideT = 0;
     this.dropHeld(q);
+    this.dropClones(q);
   }
 
-  private spawnPoint(q: Fighter): [number, number, number] {
-    const s = this.arena.level.spawns;
-    return s[Math.max(0, this.fighters.indexOf(q)) % s.length];
+  // ------------------------------------------------------------------ duplication
+
+  private clonesOf(q: Fighter) { return this.clones.filter((c) => c.owner === q && !c.dead); }
+
+  /** A clone is destroyed. */
+  killClone(c: Clone) {
+    if (c.dead) return;
+    c.dead = true;
+    this.emit({ k: 'clone', id: c.id, owner: c.owner.id, s: 'out', p: p3(c.pos) });
+  }
+
+  private dropClones(q: Fighter) { for (const c of this.clonesOf(q)) this.killClone(c); }
+
+  /** A new copy of the runner steps out beside it (with all four out: a rally at what it points at). */
+  private split(q: Fighter, tg: unknown) {
+    const C = POW.clone, t = this.time;
+    const mine = this.clonesOf(q);
+    if (mine.length >= C.MAX) { this.rally(q, tg); return; }
+    if (t < q.ready - 0.06) return;
+    q.ready = t + C.SPLIT_COOLDOWN;
+    // the slot nobody holds
+    const used = new Set(mine.map((c) => c.slot));
+    let slot = q.nextSlot % C.MAX;
+    for (let i = 0; i < C.MAX && used.has(slot); i++) slot = (slot + 1) % C.MAX;
+    q.nextSlot = slot + 1;
+    const o = q.p.pos, side = slot % 2 ? 1 : -1;
+    const rx = -Math.cos(q.p.yaw) * side, rz = Math.sin(q.p.yaw) * side;
+    let x = o.x + rx * 1.3, z = o.z + rz * 1.3, y = o.y;
+    if (!this.world.isSpaceFree(x, y + 0.05, z, PLAYER.RADIUS, PLAYER.HEIGHT)) { x = o.x; z = o.z; }
+    const c = new Clone(this.nextClone++, q, slot, x, y, z, t);
+    c.body.vel.x = rx * 4; c.body.vel.z = rz * 4;
+    this.clones.push(c);
+    this.emit({ k: 'clone', id: c.id, owner: q.id, s: 'in', p: [r2(x), r2(y), r2(z)], q: p3(o) });
+  }
+
+  /** All of a runner's clones go for one target, harder, for a few seconds. */
+  private rally(q: Fighter, tg: unknown) {
+    const C = POW.clone, t = this.time;
+    if (t < q.rallyReady - 0.06 || !Array.isArray(tg) || tg.length !== 3) return;
+    const [kind, id, part] = tg as number[];
+    let at: Vec3 | null = null;
+    if (kind === 0 && this.warden.alive) {
+      const s = this.warden.partsAt(this, t).find((x) => x.part === part);
+      if (s) at = v3(s.x, s.y, s.z);
+    } else if (kind === 1) {
+      const bot = this.bots.find((x) => x.id === id && !x.dead);
+      if (bot) at = bot.centre(v3());
+    }
+    if (!at || Math.hypot(at.x - q.p.pos.x, at.z - q.p.pos.z) > C.RALLY_RANGE) return;
+    q.rallyReady = t + C.RALLY_COOLDOWN;
+    for (const c of this.clonesOf(q)) {
+      c.rallyUntil = t + C.RALLY_TIME;
+      c.rallyBot = kind === 1 ? id : 0;
+      c.rallyPart = kind === 0 ? part : -1;
+    }
+    this.emit({ k: 'fx', id: q.id, f: PowAct.Rally, d: [r2(at.x), r2(at.y), r2(at.z)] });
   }
 
   /** Everyone pushed away from `at` (no damage): runners, bots and loose things. */
   shove(at: Vec3, radius: number, knock: number, lift: number) {
-    for (const q of this.fighters) {
-      const dx = q.p.pos.x - at.x, dz = q.p.pos.z - at.z, d = Math.hypot(dx, dz);
-      if (d > radius || !this.targetable(q)) continue;
+    for (const q of this.victims()) {
+      const dx = q.pos.x - at.x, dz = q.pos.z - at.z, d = Math.hypot(dx, dz);
+      if (d > radius) continue;
       const k = 1 - (d / radius) * 0.5, n = d > 0.01 ? 1 / d : 0;
-      this.hurt(q, 0, 'blast', at, { x: dx * n * knock * k, y: lift * k, z: dz * n * knock * k });
+      this.hurtVictim(q, 0, 'blast', at, { x: dx * n * knock * k, y: lift * k, z: dz * n * knock * k });
     }
     for (const bot of this.bots) {
       const dx = bot.pos.x - at.x, dz = bot.pos.z - at.z, d = Math.hypot(dx, dz);
@@ -243,6 +335,7 @@ export class Fight {
     }
     for (const q of this.fighters) this.tickFighter(q, dt);
     w.update(dt, this);
+    for (const c of this.clones) c.update(dt, this);
     if (w.actAt !== this.ringAct) { this.ringAct = w.actAt; this.ringHit.clear(); }
     for (const bot of this.bots) bot.update(dt, this);
     for (const j of this.junk) j.update(dt, this);
@@ -257,6 +350,7 @@ export class Fight {
     this.junk = this.junk.filter((x) => !x.dead);
     this.orbs = this.orbs.filter((x) => !x.dead);
     this.wells = this.wells.filter((x) => !x.dead);
+    this.clones = this.clones.filter((x) => !x.dead);
     for (const [stand, at] of this.restock) if (t >= at) { this.restock.delete(stand); this.stock(stand); }
     // the machine is down: once its last explosions are over, the run is won
     const dying = w.dyingFor(t);
@@ -265,17 +359,9 @@ export class Fight {
 
   private tickFighter(q: Fighter, dt: number) {
     const t = this.time, p = q.p;
-    if (p.status === Status.Dead && q.respawnAt > 0 && t >= q.respawnAt) {
-      q.respawnAt = 0;
-      q.hp = PHP.MAX;
-      q.protectUntil = t + ARENA.PROTECT;
-      q.heat = 0; q.overheatUntil = 0; q.chain = 0; q.charges = POW.teleport.CHARGES;
-      this.host.respawnRunner(p, this.spawnPoint(q));
-      this.emit({ k: 'respawn', id: p.id, p: this.spawnPoint(q) });
-      return;
-    }
     if (p.status !== Status.Alive) { q.rideT = 0; return; }
-    if (q.hp < PHP.MAX && t - q.hurtAt > PHP.REGEN_DELAY) q.hp = Math.min(PHP.MAX, q.hp + PHP.REGEN * dt);
+    const max = powerHp(q.kind);
+    if (q.hp < max && t - q.hurtAt > PHP.REGEN_DELAY) q.hp = Math.min(max, q.hp + PHP.REGEN * dt);
     q.rideT = this.onWarden(q) ? q.rideT + dt : 0;
     // a held thing is crushed (a bot), and let go of after a while
     if (q.held) {
@@ -285,8 +371,6 @@ export class Fight {
       }
       if (q.held && t - q.held.at > POW.telekinesis.HOLD) this.dropHeld(q);
     }
-    // teleport charges come back one at a time
-    while (q.charges < POW.teleport.CHARGES && t >= q.chargeAt) { q.charges++; q.chargeAt += POW.teleport.RECHARGE; }
   }
 
   // ------------------------------------------------------------------ the Warden
@@ -356,13 +440,12 @@ export class Fight {
     this.world.raycast(a.x, a.y, a.z, dir.x, dir.y, dir.z, 90, false, ray);
     const len = ray.c ? ray.dist : 90;
     b.x = a.x + dir.x * len; b.y = a.y + dir.y * len; b.z = a.z + dir.z * len;
-    for (const q of this.fighters) {
-      if (!this.targetable(q)) continue;
+    for (const q of this.victims()) {
       if (t - (burned.get(q.id) ?? -99) < B.GRACE) continue;
-      const h = q.p.anim === Anim.Slide ? SLIDE.HEIGHT : PLAYER.HEIGHT;
-      if (segCapsule(a, b, q.p.pos, h) > PLAYER.RADIUS + 0.22) continue;
+      const h = q.low ? SLIDE.HEIGHT : PLAYER.HEIGHT;
+      if (segCapsule(a, b, q.pos, h) > PLAYER.RADIUS + 0.22) continue;
       burned.set(q.id, t);
-      this.hurt(q, B.DAMAGE, 'beam', eye, { x: dir.x * B.KNOCK, y: 2, z: dir.z * B.KNOCK });
+      this.hurtVictim(q, B.DAMAGE, 'beam', eye, { x: dir.x * B.KNOCK, y: 2, z: dir.z * B.KNOCK });
     }
     for (const bot of this.bots) {
       if (bot.state === BotState.Flying || t - (this.scorched.get(bot.id) ?? -99) < 0.3) continue;
@@ -477,18 +560,18 @@ export class Fight {
     this.emit({ k: 'bdie', id: bot.id, p: p3(bot.centre(a)), by: by ? by.id : 0 });
   }
 
-  botSees(bot: Bot, q: Fighter) {
+  botSees(bot: Bot, q: Victim) {
     bot.centre(a);
-    c.x = q.p.pos.x; c.y = q.p.pos.y + 1.2; c.z = q.p.pos.z;
+    c.x = q.pos.x; c.y = q.pos.y + 1.2; c.z = q.pos.z;
     return this.world.lineOfSight(a, c);
   }
 
-  fireOrb(bot: Bot, T: Fighter) {
+  fireOrb(bot: Bot, T: Victim) {
     const S = BOT.wasp;
     bot.centre(a);
-    const d0 = Math.hypot(T.p.pos.x - a.x, T.p.pos.y + 1.1 - a.y, T.p.pos.z - a.z);
+    const d0 = Math.hypot(T.pos.x - a.x, T.pos.y + 1.1 - a.y, T.pos.z - a.z);
     const fl = d0 / S.SHOT_SPEED;
-    const tx = T.p.pos.x + T.p.vel.x * fl * 0.45, ty = T.p.pos.y + 1.1, tz = T.p.pos.z + T.p.vel.z * fl * 0.45;
+    const tx = T.pos.x + T.vel.x * fl * 0.45, ty = T.pos.y + 1.1, tz = T.pos.z + T.vel.z * fl * 0.45;
     const dx = tx - a.x, dy = ty - a.y, dz = tz - a.z, d = Math.hypot(dx, dy, dz) || 1;
     const o = new Orb(this.nextOrb++, bot.id, a.x, a.y, a.z, (dx / d) * S.SHOT_SPEED, (dy / d) * S.SHOT_SPEED, (dz / d) * S.SHOT_SPEED, this.time);
     this.orbs.push(o);
@@ -518,10 +601,10 @@ export class Fight {
     return null;
   }
 
-  fighterAt(at: Vec3, r: number): Fighter | null {
-    for (const q of this.fighters) {
-      if (!this.targetable(q)) continue;
-      const p = q.p.pos, h = q.p.anim === Anim.Slide ? SLIDE.HEIGHT : PLAYER.HEIGHT;
+  /** The runner or clone whose body is within `r` of a point. */
+  victimAt(at: Vec3, r: number): Victim | null {
+    for (const q of this.victims()) {
+      const p = q.pos, h = q.low ? SLIDE.HEIGHT : PLAYER.HEIGHT;
       const cy = clamp(at.y, p.y + 0.2, p.y + h - 0.2);
       if (Math.hypot(at.x - p.x, at.y - cy, at.z - p.z) < r + PLAYER.RADIUS) return q;
     }
@@ -555,12 +638,13 @@ export class Fight {
 
   shellTouches(j: Junk): boolean {
     j.centre(a);
-    return this.fighterAt(a, 0.5) !== null || this.botAt(a, 0.4, null) !== null || (this.nearestPart(a)?.d ?? 9) < 0.2;
+    return this.victimAt(a, 0.5) !== null || this.botAt(a, 0.4, null) !== null || (this.nearestPart(a)?.d ?? 9) < 0.2;
   }
 
   /** A thrown or batted thing hit something hard. */
   junkImpact(j: Junk, speed: number, puppet: boolean) {
     if (j.dead) return;
+    if (j.kind === JunkKind.Rock) { if (j.shatters) this.shatter(j); return; }
     if (j.kind === JunkKind.Canister) {
       if (j.thrownBy || speed > JUNK.HIT_SPEED) this.explode(j, j.thrownBy);
       return;
@@ -577,6 +661,7 @@ export class Fight {
 
   /** A flying thing ran into a bot. */
   junkHits(j: Junk, bot: Bot, speed: number) {
+    if (j.kind === JunkKind.Rock) { this.shatter(j); return; }
     if (j.kind !== JunkKind.Plate) { this.explode(j, j.thrownBy); return; }
     const k = clamp(speed / POW.telekinesis.THROW_SPEED, 0.4, 1);
     this.hitBot(bot, POW.telekinesis.BOT_HIT * k, j.thrownBy, j.vel.x * 0.5, 5, j.vel.z * 0.5, 1);
@@ -598,12 +683,11 @@ export class Fight {
     this.emit({ k: 'boom', p: p3(e), r: R, c: canister ? 0 : 1 });
     if (canister && j.stand >= 0) this.restock.set(j.stand, this.time + JUNK.RESPAWN);
     if (hostile) {
-      for (const q of this.fighters) {
-        if (!this.targetable(q)) continue;
-        const d = Math.hypot(q.p.pos.x - e.x, q.p.pos.y + 0.9 - e.y, q.p.pos.z - e.z);
+      for (const q of this.victims()) {
+        const d = Math.hypot(q.pos.x - e.x, q.pos.y + 0.9 - e.y, q.pos.z - e.z);
         if (d > R + PLAYER.RADIUS) continue;
         const k = 1 - 0.5 * clamp(d / R, 0, 1), n = d > 0.01 ? 1 / d : 0;
-        this.hurt(q, BOSS.MORTAR.DAMAGE * k, 'mortar', e, { x: (q.p.pos.x - e.x) * n * BOSS.MORTAR.KNOCK * k, y: 5, z: (q.p.pos.z - e.z) * n * BOSS.MORTAR.KNOCK * k });
+        this.hurtVictim(q, BOSS.MORTAR.DAMAGE * k, 'mortar', e, { x: (q.pos.x - e.x) * n * BOSS.MORTAR.KNOCK * k, y: 5, z: (q.pos.z - e.z) * n * BOSS.MORTAR.KNOCK * k });
       }
     }
     const dmg = canister ? JUNK.CANISTER_DAMAGE : BOSS.MORTAR.DAMAGE;
@@ -633,6 +717,46 @@ export class Fight {
       o.body.grounded = false;
     }
     for (const o of this.orbs) if (Math.hypot(o.pos.x - e.x, o.pos.y - e.y, o.pos.z - e.z) < R) this.endOrb(o);
+  }
+
+  /** A slab of debris thrown by a kinetic runner breaks apart on impact, hurting everything round it. */
+  shatter(j: Junk) {
+    if (j.dead) return;
+    j.dead = true;
+    const K = POW.kinetic, R = K.HURL_RADIUS, by = j.thrownBy;
+    j.centre(e);
+    this.emit({ k: 'boom', p: p3(e), r: R, c: 8 });
+    for (const bot of this.bots) {
+      if (bot.state === BotState.Flying || bot.state === BotState.Held) continue;
+      bot.centre(c);
+      const d = Math.hypot(c.x - e.x, c.y - e.y, c.z - e.z);
+      if (d > R + bot.radius) continue;
+      const k = 1 - 0.5 * clamp(d / R, 0, 1), n = d > 0.01 ? 1 / d : 0;
+      this.hitBot(bot, K.HURL_BOT * k, by, (c.x - e.x) * n * K.HURL_KNOCK * k, 6 * k, (c.z - e.z) * n * K.HURL_KNOCK * k, 0.8);
+    }
+    const hit = this.nearestPart(e);
+    if (hit && hit.d < R) {
+      const k = 1 - 0.5 * clamp(hit.d / R, 0, 1);
+      this.hitWarden(by, K.HURL_DAMAGE * k, hit.part.part, e, K.HURL_POISE * k);
+    }
+    for (const o of this.junk) {
+      if (o === j || o.dead || o.heldBy) continue;
+      o.centre(c);
+      const d = Math.hypot(c.x - e.x, c.y - e.y, c.z - e.z);
+      if (d > R + 0.6) continue;
+      if (o.kind === JunkKind.Canister && !this.booms.some((bm) => bm.j === o)) { this.booms.push({ j: o, at: this.time + 0.1, by }); continue; }
+      const n = d > 0.01 ? 1 / d : 0;
+      o.vel.x += (c.x - e.x) * n * 7; o.vel.y += 5; o.vel.z += (c.z - e.z) * n * 7;
+      o.body.grounded = false;
+    }
+    for (const o of this.orbs) if (Math.hypot(o.pos.x - e.x, o.pos.y - e.y, o.pos.z - e.z) < R) this.endOrb(o);
+  }
+
+  /** Is a flying slab of debris touching the Warden (parts are not all solid colliders)? */
+  rockMeetsWarden(j: Junk): boolean {
+    j.centre(e);
+    const hit = this.nearestPart(e);
+    return !!hit && hit.d < 0.35;
   }
 
   // ------------------------------------------------------------------ gravity wells
@@ -760,13 +884,15 @@ export class Fight {
     const tr = num(m.tm) ? clamp((m.tm as number) - NET.INTERP_DELAY, t - 0.35, t) : t;
     const dest = Array.isArray(m.p) && m.p.length === 3 && m.p.every(num) ? v3(m.p[0], m.p[1], m.p[2]) : null;
     switch (m.a) {
-      case PowAct.Punch: if (q.kind === 'kinetic') this.punch(q, o, d, tr); break;
+      case PowAct.Punch: if (q.kind === 'kinetic') this.punch(q, o, d, tr, num(m.v) ? (m.v as number) | 0 : 0); break;
+      case PowAct.Hurl: if (q.kind === 'kinetic') this.hurl(q, o, d); break;
       case PowAct.Slam: if (q.kind === 'kinetic') this.slam(q, dest ?? o, num(m.v) ? (m.v as number) : 0, tr); break;
       case PowAct.Grab: case PowAct.Throw: case PowAct.Push: if (q.kind === 'telekinesis') this.telekinesis(q, m.a, o, d, m.tg); break;
       case PowAct.Bolt: if (q.kind === 'lightning') this.bolt(q, o, d, m.tg, tr); break;
       case PowAct.Well: if (q.kind === 'gravity') this.well(q, o, d); break;
       case PowAct.Flash: if (q.kind === 'speed' && dest) this.flash(q, o, dest, num(m.v) ? (m.v as number) : 0, tr); break;
-      case PowAct.Blink: if (q.kind === 'teleport' && dest) this.blink(q, o, dest, tr); break;
+      case PowAct.Split: if (q.kind === 'clone') this.split(q, m.tg); break;
+      case PowAct.Rally: if (q.kind === 'clone') this.rally(q, m.tg); break;
     }
   }
 
@@ -819,10 +945,16 @@ export class Fight {
     this.emit({ k: 'orb', id: o.id, p: p3(o.pos), v: p3(o.vel), t: r2(this.time) });
   }
 
-  private punch(q: Fighter, o: Vec3, d: Vec3, tr: number) {
+  /**
+   * A punch. `combo` is where in the combo it came (0 jab, 1 cross, 2 hook, 3
+   * uppercut): the hook throws what it hits sideways, the uppercut throws it up
+   * and rocks the Warden harder.
+   */
+  private punch(q: Fighter, o: Vec3, d: Vec3, tr: number, combo: number) {
     const K = POW.kinetic, t = this.time;
     if (t < q.ready - 0.06) return;
     q.ready = t + K.COOLDOWN;
+    combo = clamp(combo, 0, 3);
     d.y = clamp(d.y, -0.5, 0.6);
     const l = Math.hypot(d.x, d.y, d.z) || 1;
     d.x /= l; d.y /= l; d.z /= l;
@@ -830,8 +962,11 @@ export class Fight {
     // the lunge carries the fist a couple of metres before it lands
     a.x += d.x * 0.8; a.z += d.z * 0.8;
     let hit = 0;
+    const hl = Math.hypot(d.x, d.z) || 1;
+    const side = combo === 2 ? K.HOOK_SIDE : 0, up = combo === 3 ? K.UPPERCUT_LIFT : K.LIFT, fwdK = combo === 3 ? 0.45 : 1;
+    const kx = d.x * K.KNOCK * fwdK + (d.z / hl) * side, kz = d.z * K.KNOCK * fwdK - (d.x / hl) * side;
     const part = this.inCone(a, d, K.REACH + 1.2, K.CONE, tr, (kind, x) => {
-      if (kind === 'bot') { hit = 1; this.hitBot(x as Bot, K.BOT_DAMAGE, q, d.x * K.KNOCK, K.LIFT, d.z * K.KNOCK, 0.8); }
+      if (kind === 'bot') { hit = 1; this.hitBot(x as Bot, K.BOT_DAMAGE, q, kx, up, kz, 0.8); }
       else if (kind === 'junk') {
         const j = x as Junk;
         j.vel.x = d.x * K.BAT_SPEED; j.vel.y = d.y * K.BAT_SPEED + 3; j.vel.z = d.z * K.BAT_SPEED;
@@ -839,8 +974,26 @@ export class Fight {
         hit = 1;
       } else { this.turnOrb(x as Orb, q, 34); hit = 1; }
     });
-    if (part) { hit = 1; this.hitWarden(q, K.DAMAGE, part.part, v3(part.x, part.y, part.z), K.POISE); }
-    this.emit({ k: 'fx', id: q.id, f: PowAct.Punch, d: [r2(a.x), r2(a.y), r2(a.z), r2(d.x), r2(d.y), r2(d.z), hit] });
+    if (part) { hit = 1; this.hitWarden(q, K.DAMAGE, part.part, v3(part.x, part.y, part.z), K.POISE * (combo === 3 ? 1.6 : 1)); }
+    this.emit({ k: 'fx', id: q.id, f: PowAct.Punch, d: [r2(a.x), r2(a.y), r2(a.z), r2(d.x), r2(d.y), r2(d.z), hit, combo] });
+  }
+
+  /** Kinetic's R: tear a slab out of the floor under you, heave it up, and throw it along the aim. */
+  private hurl(q: Fighter, o: Vec3, d: Vec3) {
+    const K = POW.kinetic, t = this.time;
+    if (t < q.hurlReady - 0.06) return;
+    // only from something to tear it out of
+    const hl = Math.hypot(d.x, d.z) || 1;
+    const gx = o.x + (d.x / hl) * 1.2, gz = o.z + (d.z / hl) * 1.2;
+    const g = this.world.groundBelow(gx, o.y + 0.6, gz, 2.2);
+    if (!isFinite(g)) return;
+    q.hurlReady = t + K.HURL_COOLDOWN;
+    const gy = o.y + 0.6 - g;
+    const j = this.addJunk(JunkKind.Rock, gx, gy, gz);
+    j.heldBy = q;
+    j.launchAt = t + K.HURL_LIFT;
+    j.launchV.x = d.x * K.HURL_SPEED; j.launchV.y = d.y * K.HURL_SPEED + 2; j.launchV.z = d.z * K.HURL_SPEED;
+    this.emit({ k: 'fx', id: q.id, f: PowAct.Hurl, d: [r2(gx), r2(gy), r2(gz), j.id] });
   }
 
   private slam(q: Fighter, at: Vec3, v: number, tr: number) {
@@ -1020,7 +1173,7 @@ export class Fight {
     for (const bot of this.bots) {
       bot.centre(c);
       const d = Math.hypot(c.x - e.x, c.z - e.z);
-      if (d < 10) this.hitBot(bot, 30, q, 0, 6, 0, 1);
+      if (d < 10) this.hitBot(bot, L.THUNDER_BOT, q, 0, 6, 0, 1);
     }
   }
 
@@ -1081,72 +1234,15 @@ export class Fight {
     this.emit({ k: 'fx', id: q.id, f: PowAct.Flash, d: [r2(o.x), r2(o.y), r2(o.z), r2(to.x), r2(to.y), r2(to.z), hit] });
   }
 
-  private blink(q: Fighter, o: Vec3, to: Vec3, tr: number) {
-    const B = POW.teleport, t = this.time;
-    const dist = Math.hypot(to.x - o.x, to.y - o.y, to.z - o.z);
-    if (dist > B.RANGE + 2) return;
-    // a charge must be there (a little early is forgiven: clocks drift)
-    let charges = q.charges;
-    if (charges < 1 && t >= q.chargeAt - 0.2) charges = 1;
-    if (charges < 1) return;
-    if (q.charges >= B.CHARGES) q.chargeAt = t + B.RECHARGE;
-    q.charges = Math.max(0, charges - 1);
-    if (q.charges < B.CHARGES && q.chargeAt <= t) q.chargeAt = t + B.RECHARGE;
-    q.allow = dist + 1.5; q.allowUntil = t + 0.7;
-    q.phaseUntil = t + B.PHASE;
-    this.chest(o, a); this.chest(to, b);
-    // where you left folds in on itself
-    for (const bot of this.bots) {
-      if (bot.state === BotState.Flying || bot.state === BotState.Held) continue;
-      bot.centre(c);
-      const dx = a.x - c.x, dz = a.z - c.z, dd = Math.hypot(dx, c.y - a.y, dz);
-      if (dd < B.ORIGIN_RADIUS && dd > 0.1) this.hitBot(bot, B.ORIGIN_DAMAGE, q, (dx / dd) * B.ORIGIN_PULL, 3, (dz / dd) * B.ORIGIN_PULL, 0.6);
-      // the line you tore through space cuts whatever was on it
-      else if (segDist(c.x, c.y, c.z, a, b) < B.LINE_WIDTH + bot.radius && Math.hypot(c.x - b.x, c.y - b.y, c.z - b.z) > B.BURST_RADIUS) this.hitBot(bot, B.LINE_DAMAGE, q, 0, 4, 0, 0.6);
-    }
-    // and where you arrive bursts outward
-    for (const bot of this.bots) {
-      if (bot.state === BotState.Flying || bot.state === BotState.Held || bot.dead) continue;
-      bot.centre(c);
-      const dx = c.x - b.x, dz = c.z - b.z, dd = Math.hypot(dx, c.y - b.y, dz);
-      if (dd > B.BURST_RADIUS + bot.radius) continue;
-      const n = dd > 0.1 ? 1 / dd : 0;
-      this.hitBot(bot, B.BURST, q, dx * n * B.KNOCK, 6, dz * n * B.KNOCK, 0.8);
-    }
-    for (const j of this.junk) {
-      if (j.heldBy) continue;
-      j.centre(c);
-      const dd = Math.hypot(c.x - b.x, c.y - b.y, c.z - b.z);
-      if (dd > B.BURST_RADIUS + 0.6) continue;
-      if (j.kind === JunkKind.Canister) { this.explode(j, q); continue; }
-      const n = dd > 0.1 ? 1 / dd : 0;
-      j.vel.x += (c.x - b.x) * n * 8; j.vel.y += 6; j.vel.z += (c.z - b.z) * n * 8; j.body.grounded = false;
-    }
-    const w = this.warden;
-    if (w.alive) {
-      let best: PartSphere | null = null, bd = Infinity;
-      for (const s of w.partsAt(this, tr)) {
-        const dd = Math.hypot(s.x - b.x, s.y - b.y, s.z - b.z) - s.r;
-        if (dd < B.BURST_RADIUS && dd < bd) { bd = dd; best = s; }
-      }
-      if (best) {
-        // arriving behind it rips harder
-        const fx = Math.sin(w.yaw), fz = Math.cos(w.yaw), rx = b.x - w.x, rz = b.z - w.z, rl = Math.hypot(rx, rz) || 1;
-        const behind = (rx * fx + rz * fz) / rl < -0.35;
-        this.hitWarden(q, B.BOSS_BURST * (behind ? B.BACKSTAB : 1), best.part, b, B.POISE);
-      }
-    }
-    this.emit({ k: 'fx', id: q.id, f: PowAct.Blink, d: [r2(o.x), r2(o.y), r2(o.z), r2(to.x), r2(to.y), r2(to.z)] });
-  }
-
   // ------------------------------------------------------------------ snapshots
 
-  snapshot(): { b: BossSnap; m: BotSnap[]; j: JunkSnap[] } {
+  snapshot(): { b: BossSnap; m: BotSnap[]; j: JunkSnap[]; c: CloneSnap[] } {
     const w = this.warden, t = this.time;
     const b: BossSnap = [r2(w.x), r2(w.z), r2(w.yaw), r2(w.lift), w.state, Math.round(w.hp), w.act, r2(w.actTime(t)), w.target ? w.target.id : 0, Math.round(w.poise), w.flags(this)];
     const m: BotSnap[] = this.bots.map((x) => [x.id, x.kind, r2(x.pos.x), r2(x.pos.y), r2(x.pos.z), r2(x.yaw), x.state, Math.round((x.hp / x.maxHp) * 100), x.target ? x.target.id : 0]);
     const j: JunkSnap[] = this.junk.map((x) => [x.id, x.kind, r2(x.pos.x), r2(x.pos.y), r2(x.pos.z), x.heldBy ? x.heldBy.id : 0, r2(x.spin)]);
-    return { b, m, j };
+    const cl: CloneSnap[] = this.clones.filter((x) => !x.dead).map((x) => [x.id, x.owner.id, r2(x.pos.x), r2(x.pos.y), r2(x.pos.z), r2(x.yaw), x.anim, Math.round((Math.max(0, x.hp) / POW.clone.HP) * 100)]);
+    return { b, m, j, c: cl };
   }
 }
 

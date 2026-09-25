@@ -20,8 +20,10 @@
 // In the Warden's arena a runner's power shows on the body: the hands glow in
 // its colour, a punch lunges fist-first, a meteor slam dives knees-first, a
 // flash strike stretches the runner out flat, and the arms act out every use
-// (a cast, a two-handed telekinetic hold, a throw, a push) laid over whatever
-// the legs are doing, so it reads at a glance what everyone is up to.
+// (a boxer's combo of jab, cross, hook and uppercut, a cast, a two-handed
+// telekinetic hold, a throw, a push, heaving a slab out of the floor and
+// hurling it) laid over whatever the legs are doing, so it reads at a glance
+// what everyone is up to.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -53,10 +55,11 @@ export interface AnimInput {
 
 type Joint = THREE.Group;
 
-/** A power's arm movement, laid over the rest of the pose. */
-export type ActKind = 'punch' | 'cast' | 'hold' | 'throw' | 'push';
+/** A power's arm movement, laid over the rest of the pose (the left arm is index 0). */
+export type ActKind = 'jab' | 'cross' | 'hook' | 'uppercut' | 'cast' | 'hold' | 'throw' | 'push' | 'lift' | 'hurl';
 /** How long each one plays (a hold lasts until it is thrown or let go). */
-const ACT_TIME: Record<ActKind, number> = { punch: 0.34, cast: 0.26, hold: 4.6, throw: 0.36, push: 0.38 };
+const ACT_TIME: Record<ActKind, number> = { jab: 0.26, cross: 0.3, hook: 0.38, uppercut: 0.44, cast: 0.26, hold: 4.6, throw: 0.36, push: 0.38, lift: 0.36, hurl: 0.4 };
+const smooth = (a: number, b: number, x: number) => { const k = clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
 
 let handTex: THREE.Texture | null = null;
 /** A white glow the hands are tinted with. */
@@ -714,12 +717,56 @@ export class CharacterModel {
           const u = this.actT / dur;
           const w = this.actKind === 'hold' ? Math.min(1, this.actT / 0.1) * Math.min(1, (1 - u) / 0.05) : Math.min(1, this.actT / 0.04) * Math.min(1, (1 - u) / 0.5);
           const mix = (arr: number[], i: number, v: number) => { arr[i] = lerp(arr[i], v, w); };
+          // the other fist comes up to guard the chin
+          const guard = (i: number) => { mix(shoulder, i, -1.05); mix(elbow, i, -2.05); mix(shoulderZ, i, 0.12); };
           switch (this.actKind) {
-            case 'punch':
-              mix(shoulder, 0, -1.6); mix(elbow, 0, -0.05); mix(shoulderZ, 0, 0.06);
-              mix(shoulder, 1, 0.55); mix(elbow, 1, -1.5);
-              twist += 0.3 * w; lean += 0.12 * w;
+            case 'jab':
+              // left, straight and quick, the left shoulder leading
+              mix(shoulder, 0, -1.62); mix(elbow, 0, -0.05); mix(shoulderZ, 0, 0.04); guard(1);
+              twist -= 0.24 * w; lean += 0.08 * w;
               break;
+            case 'cross':
+              // right, straight from the back foot with the hips turned through
+              mix(shoulder, 1, -1.62); mix(elbow, 1, -0.05); mix(shoulderZ, 1, 0.04); guard(0);
+              twist += 0.42 * w; lean += 0.16 * w; hipRoll += 0.05 * w;
+              break;
+            case 'hook': {
+              // left, the arm bent square and swung round from wide, the whole body whipping with it
+              const k = smooth(0.05, 0.6, u);
+              mix(shoulder, 0, -1.45); mix(elbow, 0, -1.55); mix(shoulderZ, 0, lerp(1.25, 0.25, k)); guard(1);
+              twist += lerp(0.3, -0.5, k) * w; bob -= 0.05 * w; lean += 0.1 * w;
+              break;
+            }
+            case 'uppercut': {
+              // right: dip and load, then drive up from the legs, fist rising past the face
+              const k = smooth(0.18, 0.6, u);
+              mix(shoulder, 1, lerp(0.4, -2.65, k)); mix(elbow, 1, lerp(-1.95, -1.05, k)); mix(shoulderZ, 1, 0.1); guard(0);
+              bob += lerp(-0.16, 0.04, k) * w; lean += lerp(0.28, -0.12, k) * w; twist += 0.3 * w;
+              knee = [knee[0] + (1 - k) * 0.55 * w, knee[1] + (1 - k) * 0.55 * w];
+              thigh = [thigh[0] - (1 - k) * 0.35 * w, thigh[1] - (1 - k) * 0.35 * w];
+              break;
+            }
+            case 'lift': {
+              // squat down to the floor, dig in, and heave the slab up over the head
+              const k = smooth(0.4, 0.95, u);
+              const down = 1 - k;
+              mix(shoulder, 0, lerp(-0.85, -2.85, k)); mix(shoulder, 1, lerp(-0.85, -2.85, k));
+              mix(elbow, 0, lerp(-0.2, -0.35, k)); mix(elbow, 1, lerp(-0.2, -0.35, k));
+              mix(shoulderZ, 0, 0.3); mix(shoulderZ, 1, 0.3);
+              lean += (0.75 * down - 0.1 * k) * w; bob -= 0.34 * down * w;
+              knee = [knee[0] + 1.1 * down * w, knee[1] + 1.1 * down * w];
+              thigh = [thigh[0] - 0.75 * down * w, thigh[1] - 0.75 * down * w];
+              ankle = [ankle[0] + 0.35 * down * w, ankle[1] + 0.35 * down * w];
+              break;
+            }
+            case 'hurl': {
+              // both arms from overhead down and forward, the body folding into the throw
+              const k = smooth(0, 0.55, u);
+              mix(shoulder, 0, lerp(-3.0, -0.9, k)); mix(shoulder, 1, lerp(-3.0, -0.9, k));
+              mix(elbow, 0, -0.25); mix(elbow, 1, -0.25); mix(shoulderZ, 0, 0.22); mix(shoulderZ, 1, 0.22);
+              lean += lerp(-0.2, 0.45, k) * w; twist += 0.15 * w;
+              break;
+            }
             case 'cast':
               mix(shoulder, 0, -1.75); mix(elbow, 0, -0.12); mix(shoulderZ, 0, 0.02);
               twist += 0.18 * w;
@@ -748,10 +795,13 @@ export class CharacterModel {
     // the power's glow on the hands, flaring with each use
     if (this.hasPower) {
       this.handK = Math.max(0, this.handK - dt * 3.2);
-      const holding = this.actKind === 'hold' ? 0.6 : 0;
+      const holding = this.actKind === 'hold' || this.actKind === 'lift' ? 0.6 : 0;
+      // which hand did it: the left jabs and hooks, the right crosses and uppercuts, both heave and push
+      const both = this.actKind === 'hold' || this.actKind === 'push' || this.actKind === 'lift' || this.actKind === 'hurl';
+      const right = this.actKind === 'cross' || this.actKind === 'uppercut';
       for (let i = 0; i < 2; i++) {
         const h = this.hands[i];
-        const k = Math.max(this.handK * (i === 0 || this.actKind === 'hold' || this.actKind === 'push' ? 1 : 0.4), holding);
+        const k = Math.max(this.handK * (both || (i === 1) === right ? 1 : 0.4), holding);
         (h.material as THREE.SpriteMaterial).opacity = (0.45 + k * 0.55) * (0.85 + Math.sin(t * 17 + i * 2) * 0.15) * (1 - this.cloakK);
         h.scale.setScalar(0.32 + k * 0.5);
       }

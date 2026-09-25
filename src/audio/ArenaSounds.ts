@@ -4,8 +4,9 @@
 // the whine of the eye charging, cannons, sirens, the groan when it staggers and
 // the long collapse when it falls. The powers: each has its own voice (a thump
 // with a crack for kinetic, a glassy pull for telekinesis, dry zaps for
-// lightning, a sub drop for gravity, a tearing rush for speed, a "fwip" for
-// teleport). And the fight around them: metal ringing where hits land, a tick
+// lightning, a sub drop for gravity, a tearing rush for speed, a shimmering
+// split for duplication, and a grinding crack as a kinetic runner tears a slab
+// out of the floor). And the fight around them: metal ringing where hits land, a tick
 // for your own hits, bots, orbs, explosions, the storm. Under it all runs the
 // battle music (BattleMusic), driven by how hard the fight is going.
 
@@ -88,10 +89,33 @@ export class ArenaSounds {
         A.tone(d, { type: 'sine', f0: 1400, f1: 260, gain: 0.1 * g, decay: 0.2 });
         A.tone(d, { type: 'sine', f0: 80, f1: 40, gain: 0.25 * g, decay: 0.25 });
         break;
-      case 'blink':
-        A.tone(d, { type: 'sine', f0: 1800, f1: 180, gain: 0.14 * g, decay: 0.16 });
-        A.noiseHit(d, { type: 'highpass', freq: 1800, gain: 0.14 * g, decay: 0.12 });
-        A.tone(d, { type: 'triangle', f0: 220, f1: 880, gain: 0.06 * g, decay: 0.2, delay: 0.05 });
+      case 'rip':
+        // concrete tearing: a low crack, grinding grit, a thump as it comes free
+        A.noiseHit(d, { type: 'lowpass', freq: 900, freqEnd: 250, gain: 0.45 * g, attack: 0.01, decay: 0.35 });
+        A.noiseHit(d, { type: 'bandpass', freq: 2600, q: 1.5, gain: 0.18 * g, decay: 0.25, rate: 0.6 });
+        A.tone(d, { type: 'sine', f0: 80, f1: 40, gain: 0.35 * g, decay: 0.3, delay: 0.12 });
+        break;
+      case 'hurl':
+        A.noiseHit(d, { type: 'bandpass', freq: 500, freqEnd: 1600, q: 1, gain: 0.3 * g, attack: 0.03, decay: 0.3 });
+        A.tone(d, { type: 'sine', f0: 150, f1: 70, gain: 0.3 * g, decay: 0.25 });
+        break;
+      case 'split':
+        // a shimmer that splits in two, like a chord coming apart
+        A.tone(d, { type: 'sine', f0: 660, f1: 520, gain: 0.08 * g, decay: 0.35 });
+        A.tone(d, { type: 'sine', f0: 660, f1: 840, gain: 0.08 * g, decay: 0.35 });
+        A.noiseHit(d, { type: 'bandpass', freq: 3000, freqEnd: 900, q: 2, gain: 0.12 * g, attack: 0.02, decay: 0.25 });
+        break;
+      case 'cloneOut':
+        A.noiseHit(d, { type: 'highpass', freq: 2200, gain: 0.2 * g, decay: 0.2 });
+        [880, 740, 587].forEach((f, i) => A.tone(d, { type: 'triangle', f0: f, gain: 0.05 * g, decay: 0.2, delay: i * 0.05 }));
+        break;
+      case 'cloneHit':
+        A.tone(d, { type: 'sine', f0: 240, f1: 90, gain: 0.18 * g, decay: 0.12, vary: 0.1 });
+        A.noiseHit(d, { type: 'bandpass', freq: 1800, q: 1.5, gain: 0.1 * g, decay: 0.07, vary: 0.2 });
+        break;
+      case 'rally':
+        [440, 554, 659, 880].forEach((f, i) => A.tone(d, { type: 'sawtooth', f0: f, gain: 0.04 * g, decay: 0.3, delay: i * 0.04, lp: 2500 }));
+        A.noiseHit(d, { type: 'bandpass', freq: 800, freqEnd: 2400, q: 1, gain: 0.18 * g, attack: 0.05, decay: 0.3 });
         break;
     }
   }
@@ -282,6 +306,13 @@ export class ArenaSounds {
     if (c === 6) {
       for (let i = 0; i < 4; i++) A.noiseHit(s.dest, { type: 'highpass', freq: 2500, gain: 0.2 * g, decay: 0.08, delay: i * 0.03 });
       A.tone(s.dest, { type: 'sawtooth', f0: 120, f1: 40, gain: 0.3 * g, decay: 0.5, lp: 900 });
+      return;
+    }
+    if (c === 8) {
+      // a slab of floor breaking apart: a crack, then rubble raining down
+      A.noiseHit(s.dest, { type: 'highpass', freq: 1600, gain: 0.3 * g, decay: 0.08 });
+      A.noiseHit(s.dest, { type: 'lowpass', freq: 700, freqEnd: 150, gain: 0.5 * g, decay: 0.5 });
+      for (let i = 0; i < 5; i++) A.noiseHit(s.dest, { type: 'bandpass', freq: 1200 + Math.random() * 1500, q: 3, gain: 0.08 * g, decay: 0.06, delay: 0.1 + i * 0.07 + Math.random() * 0.05 });
       return;
     }
     A.noiseHit(s.dest, { type: 'lowpass', freq: 1100, freqEnd: 120, gain: 0.55 * g, decay: 0.5 + k * 0.5 });

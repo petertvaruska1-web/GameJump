@@ -203,7 +203,9 @@ export class ArenaFx {
   private readonly bolts: Bolt[] = [];
   private readonly streaks: Streak[] = [];
   private readonly markers: Marker[] = [];
-  private readonly ghosts: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; age: number }[] = [];
+  private readonly ghosts: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; age: number; life: number }[] = [];
+  /** Speedsters' trails this frame (set by the controller, drawn in update). */
+  private trails: { pts: THREE.Vector3[]; ages: number[]; color: [number, number, number] }[] = [];
   private readonly wall: THREE.Mesh;
   private readonly wallMat: THREE.ShaderMaterial;
   private readonly lane: THREE.Mesh;
@@ -252,14 +254,14 @@ export class ArenaFx {
       this.group.add(mesh);
       this.rifts.push({ mesh, mat, age: 1 });
     }
-    // afterimages
+    // afterimages (the flash strike, and a speedster running flat out)
     const gg = ghostMerged();
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 28; i++) {
       const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.3, 0.5), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
       const mesh = new THREE.Mesh(gg, mat);
       mesh.visible = false;
       this.group.add(mesh);
-      this.ghosts.push({ mesh, mat, age: 1 });
+      this.ghosts.push({ mesh, mat, age: 1, life: 0.38 });
     }
     // the stomp's wave: a wall of force as high as you must jump to clear it
     this.wallMat = new THREE.ShaderMaterial({
@@ -366,6 +368,14 @@ export class ArenaFx {
         this.ring(p, 1, r * 1.8, 0.4, new THREE.Color(1, 2, 3.2), 0.2);
         P.burst(p.x, p.y, p.z, 60, 12, 0.5, 0.15, [0.6, 0.9, 1], 1, 6, 3);
         break;
+      case 8: // a hurled slab of floor shatters: chunks, grit and a cloud of dust
+        this.flash(p, r * 2.2, 0xffb070, 0.2);
+        this.ring(TMP.set(p.x, Math.max(this.floorY, p.y - 1) + 0.12, p.z), 0.5, r * 1.4, 0.4, new THREE.Color(1.5, 1.1, 0.7), 0.25);
+        P.burst(p.x, p.y, p.z, 70, 12, 1.1, 0.26, [0.46, 0.43, 0.4], 1, 20, 4);
+        P.burst(p.x, p.y, p.z, 40, 8, 1.4, 0.14, [0.62, 0.58, 0.52], 1, 18, 3);
+        P.burst(p.x, p.y, p.z, 18, 10, 0.4, 0.14, [1, 0.7, 0.35], 1, 10, 2);
+        P.burst(p.x, p.y + 0.4, p.z, 24, 2.6, 2.4, 1.3, [0.36, 0.34, 0.33], 0.55, -1.2, 1.2);
+        break;
       default: { // a canister or a shell: fire, a shock ring on the ground, sparks, debris and smoke
         const big = kind === 0;
         this.flash(p, r * (big ? 3.4 : 2.8), big ? 0xffa040 : 0xff6030, 0.3);
@@ -407,8 +417,10 @@ export class ArenaFx {
     const yaw = Math.atan2(d.x, d.z), pitch = -Math.asin(clamp(d.y / len, -1, 1));
     const n = Math.min(this.ghosts.length, Math.max(3, Math.round(len / 2.2)));
     for (let i = 0; i < n; i++) {
-      const g = this.ghosts.reduce((x, y) => (y.age > x.age ? y : x));
-      g.age = -i * 0.018;
+      const g = this.ghosts.reduce((x, y) => (y.age / y.life > x.age / x.life ? y : x));
+      g.age = -i * 0.018; g.life = 0.38;
+      g.mat.color.setRGB(1.6, 1.3, 0.5);
+      g.mesh.scale.setScalar(1);
       g.mesh.position.lerpVectors(a, b, (i + 0.5) / n);
       g.mesh.rotation.set(pitch * 0.5, yaw, 0, 'YXZ');
       g.mesh.visible = true;
@@ -430,7 +442,7 @@ export class ArenaFx {
       r.mesh.visible = true;
     }
     this.streak(TMP2.copy(a).setY(a.y + 1.1), TMP3.copy(b).setY(b.y + 1.1), 0.35, [0.45, 2.2, 1.25], 0.35);
-    this.ring(TMP2.copy(b).setY(b.y + 0.1), 0.4, POW.teleport.BURST_RADIUS, 0.4, new THREE.Color(0.45, 2.1, 1.2), 0.2);
+    this.ring(TMP2.copy(b).setY(b.y + 0.1), 0.4, 3.2, 0.4, new THREE.Color(0.45, 2.1, 1.2), 0.2);
     this.particles.burst(b.x, b.y + 1, b.z, 40, 8, 0.5, 0.18, [0.45, 1, 0.7], 1, 2, 1);
     // what was left behind is sucked into the fold
     for (let i = 0; i < 26; i++) {
@@ -438,6 +450,49 @@ export class ArenaFx {
       const x = a.x + Math.cos(ang) * rr, y = a.y + 0.3 + Math.random() * 2, z = a.z + Math.sin(ang) * rr;
       this.particles.emit(x, y, z, (a.x - x) * 4, (a.y + 1.1 - y) * 4, (a.z - z) * 4, 0.3, 0.14, 0.4, 1, 0.7, 1, 0, -0.3);
     }
+  }
+
+  /** Kinetic's R: a slab torn out of the floor (cracks, grit thrown up, dust). */
+  rip(p: THREE.Vector3) {
+    this.ring(TMP.set(p.x, p.y + 0.06, p.z), 0.3, 2.6, 0.5, new THREE.Color(1.4, 0.8, 0.35), 0.35, 0.8);
+    this.particles.burst(p.x, p.y + 0.2, p.z, 36, 7, 0.9, 0.2, [0.5, 0.46, 0.42], 1, 18, 7);
+    this.particles.burst(p.x, p.y + 0.1, p.z, 20, 2.2, 1.8, 0.9, [0.4, 0.38, 0.36], 0.6, -1, 1.5);
+    this.flash(TMP.set(p.x, p.y + 0.3, p.z), 2.4, 0xffa060, 0.2);
+  }
+
+  /** An afterimage of a runner at `p` turned to `yaw` (a speedster's wake). */
+  afterimage(p: THREE.Vector3, yaw: number, color: [number, number, number], life = 0.34, scale = 1) {
+    const g = this.ghosts.reduce((x, y) => (y.age / y.life > x.age / x.life ? y : x));
+    g.age = 0; g.life = life;
+    g.mesh.position.copy(p);
+    g.mesh.rotation.set(0.25, yaw, 0, 'YXZ');
+    g.mesh.scale.setScalar(scale);
+    g.mat.color.setRGB(color[0], color[1], color[2]);
+    g.mesh.visible = true;
+  }
+
+  /** Speedsters' trails to draw this frame: points from newest to oldest, with their ages (s). */
+  setTrails(list: { pts: THREE.Vector3[]; ages: number[]; color: [number, number, number] }[]) { this.trails = list; }
+
+  /** Duplication: a clone destroyed (it breaks into shards of green light). */
+  cloneOut(p: THREE.Vector3) {
+    this.flash(TMP.set(p.x, p.y + 1.1, p.z), 4, 0x60ffb0, 0.25);
+    this.particles.burst(p.x, p.y + 1.1, p.z, 50, 7, 0.7, 0.2, [0.35, 1, 0.6], 1, 6, 2);
+    this.ring(TMP.set(p.x, p.y + 0.1, p.z), 0.3, 2.4, 0.35, new THREE.Color(0.4, 2.2, 1.2), 0.25);
+  }
+
+  /** Duplication: a clone's blow landing at `at`, thrown from its chest at `from`. */
+  cloneHit(from: THREE.Vector3, at: THREE.Vector3, rallied: boolean) {
+    this.flash(at, rallied ? 2.6 : 1.8, 0x70ffb8, 0.14);
+    this.streak(from, at, 0.12, rallied ? [0.8, 3, 1.6] : [0.5, 2.2, 1.2], rallied ? 0.35 : 0.22);
+    this.particles.burst(at.x, at.y, at.z, rallied ? 16 : 9, 6, 0.3, 0.12, [0.5, 1, 0.7], 1, 8, 1);
+  }
+
+  /** Duplication: every clone sent at `p`. */
+  rally(p: THREE.Vector3) {
+    this.ring(p, 0.4, 4, 0.45, new THREE.Color(0.5, 2.4, 1.3), 0.3, 1, TMP2.set(0, 1, 0));
+    this.ring(TMP.set(p.x, this.floorY + 0.1, p.z), 1, 6, 0.6, new THREE.Color(0.4, 2, 1.1), 0.22);
+    this.flash(p, 5, 0x70ffb8, 0.3);
   }
 
   /** A punch: a cone of force out of the fist. */
@@ -584,10 +639,26 @@ export class ArenaFx {
       if (!g.mesh.visible) continue;
       g.age += dt;
       if (g.age < 0) { g.mat.opacity = 0; continue; }
-      const k = g.age / 0.38;
+      const k = g.age / g.life;
       if (k >= 1) { g.mesh.visible = false; continue; }
       g.mat.opacity = (1 - k) * 0.55;
     }
+    // speedsters' wakes: a ribbon of light that thins and fades behind them, crackling now and then
+    for (const tr of this.trails) {
+      const pts = tr.pts, ages = tr.ages, c = tr.color;
+      for (let i = 1; i < pts.length; i++) {
+        const a0 = Math.max(0, 1 - ages[i - 1] / 0.4), a1 = Math.max(0, 1 - ages[i] / 0.4);
+        if (a1 <= 0) break;
+        const w = 0.55 * a0 + 0.05;
+        R.seg(pts[i - 1].x, pts[i - 1].y, pts[i - 1].z, pts[i].x, pts[i].y, pts[i].z, w * 2.4, c[0] * 0.35, c[1] * 0.3, c[2] * 0.2, a1 * 0.4);
+        R.seg(pts[i - 1].x, pts[i - 1].y, pts[i - 1].z, pts[i].x, pts[i].y, pts[i].z, w * 0.7, c[0], c[1], c[2], a1);
+      }
+      if (pts.length > 3 && Math.random() < 0.35) {
+        const i = 1 + Math.floor(Math.random() * (pts.length - 2));
+        R.jag(pts[i - 1], pts[Math.min(pts.length - 1, i + 1)], 5, 0.5, 0.07, c[0] * 1.2, c[1] * 1.2, c[2] * 1.4, 0.9);
+      }
+    }
+    this.trails = [];
     // bolts, flickering into a new shape every frame
     for (let i = this.bolts.length - 1; i >= 0; i--) {
       const b = this.bolts[i];

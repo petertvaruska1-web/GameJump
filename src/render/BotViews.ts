@@ -186,7 +186,28 @@ const JUNK_MAT = {
   plate: new THREE.MeshStandardMaterial({ color: 0xc89a2c, roughness: 0.6, metalness: 0.4 }),
   plateBack: new THREE.MeshStandardMaterial({ color: 0x33393f, roughness: 0.6, metalness: 0.6 }),
   shell: new THREE.MeshStandardMaterial({ color: 0x3a3f46, roughness: 0.45, metalness: 0.8 }),
+  rock: new THREE.MeshStandardMaterial({ color: 0x5a5650, roughness: 0.95, metalness: 0.05, flatShading: true }),
+  rockTop: new THREE.MeshStandardMaterial({ color: 0x3d4148, roughness: 0.7, metalness: 0.4, flatShading: true }),
 };
+
+/** A slab torn out of the forge floor: a jagged lump of concrete with a plate of the floor still on it. */
+function rockGeometry(seed: number): THREE.BufferGeometry {
+  const g = new THREE.IcosahedronGeometry(0.62, 1);
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  let r = seed * 9301 + 49297;
+  const rnd = () => { r = (r * 9301 + 49297) % 233280; return r / 233280; };
+  const seen = new Map<string, number>();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    // shared corners move together, so the lump stays closed
+    const key = `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
+    let k = seen.get(key);
+    if (k === undefined) { k = 0.72 + rnd() * 0.5; seen.set(key, k); }
+    pos.setXYZ(i, x * k * 1.25, y * k * 0.72, z * k);
+  }
+  g.computeVertexNormals();
+  return g;
+}
 
 export class JunkView {
   readonly root = new THREE.Group();
@@ -211,6 +232,19 @@ export class JunkView {
       this.glow.position.y = 1.3;
       this.glow.scale.setScalar(1.2);
       this.root.add(this.glow);
+    } else if (kind === JunkKind.Rock) {
+      const body = new THREE.Mesh(rockGeometry(Math.floor(Math.random() * 1000)), JUNK_MAT.rock);
+      body.castShadow = shadows;
+      body.position.y = 0.42;
+      this.root.add(body);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.12, 0.85), JUNK_MAT.rockTop);
+      top.position.y = 0.82; top.rotation.y = 0.3; top.castShadow = shadows;
+      this.root.add(top);
+      // the torn edge still glows with the forge's heat
+      this.lamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 0.9, 0.25), toneMapped: false });
+      const seam = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.05, 4, 10), this.lamp);
+      seam.rotation.x = Math.PI / 2; seam.position.y = 0.74;
+      this.root.add(seam);
     } else if (kind === JunkKind.Plate) {
       put(bag, new THREE.BoxGeometry(1.9, 0.12, 1.3), JUNK_MAT.plate, 0, 0.18, 0);
       put(bag, new THREE.BoxGeometry(1.7, 0.12, 1.1), JUNK_MAT.plateBack, 0, 0.07, 0);
@@ -242,7 +276,7 @@ export class JunkView {
       this.root.rotation.set(spin * 0.9, spin * 0.4, spin * 0.2);
     }
     if (this.lamp) {
-      const k = this.kind === JunkKind.Canister ? 0.6 + 0.4 * Math.sin(t * (held ? 14 : 4)) : 1;
+      const k = this.kind === JunkKind.Canister ? 0.6 + 0.4 * Math.sin(t * (held ? 14 : 4)) : this.kind === JunkKind.Rock ? 0.6 + 0.2 * Math.sin(t * 9) : 1;
       this.lamp.color.setRGB(3 * k, 1.2 * k, 0.3 * k);
       if (this.glow) (this.glow.material as THREE.SpriteMaterial).opacity = 0.35 + 0.4 * k;
     }

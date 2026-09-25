@@ -13,7 +13,7 @@
 //   overlay       the six powers to choose from, when you arrive and while you
 //                 are down (a compact row then, with the time until you are back)
 
-import { PHP, SUPERS } from '../../shared/constants';
+import { SUPERS } from '../../shared/constants';
 import { POWER_INFO } from '../game/Powers';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -25,7 +25,7 @@ export const POWER_ICON: Record<string, string> = {
   lightning: '<path d="M28 2 L10 27 L22 27 L17 46 L38 18 L26 18 L32 2 Z" fill="currentColor"/>',
   gravity: '<circle cx="24" cy="24" r="6" fill="currentColor"/><path d="M24 6 A18 18 0 0 1 42 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/><path d="M42 24 A18 18 0 0 1 24 42" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0.7"/><path d="M24 42 A18 18 0 0 1 6 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/><path d="M6 24 A18 18 0 0 1 24 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.35"/>',
   speed: '<path d="M6 10 L20 24 L6 38 L12 38 L26 24 L12 10 Z M20 10 L34 24 L20 38 L26 38 L40 24 L26 10 Z" fill="currentColor"/><rect x="0" y="22" width="6" height="4" fill="currentColor" opacity="0.6"/>',
-  teleport: '<ellipse cx="14" cy="24" rx="6" ry="15" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="4 3"/><ellipse cx="34" cy="24" rx="7" ry="17" fill="none" stroke="currentColor" stroke-width="3.5"/><path d="M16 24 L30 24 M26 19 L31 24 L26 29" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
+  clone: '<circle cx="24" cy="10" r="5.5" fill="currentColor"/><path d="M15 44 L17 24 Q24 18 31 24 L33 44 Z" fill="currentColor"/><circle cx="10" cy="15" r="4" fill="currentColor" opacity="0.55"/><path d="M3 44 L5 28 Q10 23 15 27 L14 44 Z" fill="currentColor" opacity="0.55"/><circle cx="38" cy="15" r="4" fill="currentColor" opacity="0.55"/><path d="M34 44 L33 27 Q38 23 43 28 L45 44 Z" fill="currentColor" opacity="0.55"/>',
 };
 
 export interface BossView { name: string; hpK: number; poiseK: number; overdrive: boolean; staggered: boolean; dormant: boolean }
@@ -130,8 +130,8 @@ export class ArenaHud {
 
   // ------------------------------------------------------------------ you
 
-  /** Your power (index into SUPERS, -1 none) and health. */
-  meView(power: number, hp: number) {
+  /** Your power (index into SUPERS, -1 none), health, and the most health you can have. */
+  meView(power: number, hp: number, max: number) {
     const has = power >= 0;
     this.me.classList.toggle('hidden', !has);
     this.cross.classList.toggle('hidden', !has);
@@ -146,7 +146,7 @@ export class ArenaHud {
       this.me.querySelector('.me-icon')!.innerHTML = `<svg viewBox="0 0 48 48">${POWER_ICON[key]}</svg>`;
       this.me.querySelector('.me-name')!.textContent = info.name;
     }
-    const k = Math.max(0, Math.min(1, hp / PHP.MAX));
+    const k = Math.max(0, Math.min(1, hp / max));
     this.hpFill.style.width = `${(k * 100).toFixed(1)}%`;
     this.me.classList.toggle('low', k < 0.34);
     const txt = String(Math.ceil(hp));

@@ -308,9 +308,9 @@ export class Room implements EnemyHost, FightHost {
     const moved = Math.hypot(x - p.pos.x, z - p.pos.z);
     const rise = y - p.pos.y;
     const frozen = this.phase === 'countdown';
-    const maxSpeed = this.inArena ? ARENA.MAX_CLIENT_SPEED : p.canFly ? FLY.MAX_CLIENT_SPEED : NET.MAX_CLIENT_SPEED;
-    // a flash strike or a blink moves a runner further than running could, once
+    // a flash strike moves a runner further than running could, once; a speedster simply runs faster
     const f = this.fight?.fighter(p);
+    const maxSpeed = this.inArena ? (f?.kind === 'speed' ? ARENA.MAX_SPEEDSTER_SPEED : ARENA.MAX_CLIENT_SPEED) : p.canFly ? FLY.MAX_CLIENT_SPEED : NET.MAX_CLIENT_SPEED;
     const extra = f && this.matchTime < f.allowUntil ? f.allow : 0;
     const limit = maxSpeed * dt + 2.5;
     if (moved > limit + extra || rise > 20 * dt + 3 + extra || (frozen && moved > 1.5)) {
@@ -420,18 +420,6 @@ export class Room implements EnemyHost, FightHost {
 
   killRunner(p: RoomPlayer, cause: DeathCause, from: Vec3 | null) { this.kill(p, cause, null, from); }
 
-  respawnRunner(p: RoomPlayer, at: [number, number, number]) {
-    this.corpses = this.corpses.filter((c) => c.p !== p);
-    p.pos.x = at[0]; p.pos.y = at[1]; p.pos.z = at[2];
-    p.vel.x = p.vel.y = p.vel.z = 0;
-    p.status = Status.Alive;
-    p.cause = undefined;
-    p.lastSupportY = at[1];
-    p.lastMsgT = this.now;
-    p.anim = Anim.Idle; p.yaw = this.arena.level.spawnYaw; p.ground = -1;
-    this.broadcastRoom();
-  }
-
   /** The Warden is destroyed: everyone still here has won, ranked by the damage they did. */
   won() {
     if (this.phase !== 'playing' || !this.fight) return;
@@ -539,14 +527,15 @@ export class Room implements EnemyHost, FightHost {
 
   private checkEnd() {
     if (this.phase !== 'playing' && this.phase !== 'countdown') return;
-    // past the beacon nobody is out for good (they come back at the arena's beacon):
-    // it ends when the Warden falls, or when there is nobody left at all
-    if (this.stage !== 'course') { if (this.players.some((p) => p.status !== Status.Left)) return; }
+    // on the way through the beacon nobody is out yet (the light takes the fallen too);
+    // in the arena, as on the course, it is over when nobody is left standing
+    if (this.stage === 'gate') { if (this.players.some((p) => p.status !== Status.Left)) return; }
     else if (this.players.some((p) => p.status === Status.Alive)) return;
     this.phase = 'ended';
     this.endedAt = this.now;
     this.flushEvents();
-    this.broadcast({ t: 'end', results: this.results(), duration: round2(this.endedAt - this.goAt) });
+    const fight = this.stage === 'boss' && this.fight ? { boss: false, fight: round2(this.matchTime - this.fight.arrivedAt) } : {};
+    this.broadcast({ t: 'end', results: this.results(), duration: round2(this.endedAt - this.goAt), ...fight });
     this.broadcastRoom();
   }
 

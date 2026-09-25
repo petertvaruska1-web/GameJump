@@ -3,7 +3,7 @@
 import type { EnemyKind, SuperPower } from './constants';
 import type { PowerKind } from './level/types';
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 export type Phase = 'lobby' | 'countdown' | 'playing' | 'ended';
 
@@ -40,15 +40,18 @@ export type BotKind = (typeof BotKind)[keyof typeof BotKind];
 export const BotState = { Flying: 0, Boot: 1, Hunt: 2, Tell: 3, Strike: 4, Rest: 5, Reel: 6, Held: 7 } as const;
 export type BotState = (typeof BotState)[keyof typeof BotState];
 
-export const JunkKind = { Canister: 0, Plate: 1, Shell: 2 } as const;
+/** Rock: a slab of floor a kinetic runner tore up and threw (it shatters on impact). */
+export const JunkKind = { Canister: 0, Plate: 1, Shell: 2, Rock: 3 } as const;
 export type JunkKind = (typeof JunkKind)[keyof typeof JunkKind];
 
 /**
- * A power being used (C2S 'pow' action codes). Kinetic: punch / slam landing.
- * Telekinesis: grab / throw / push. Lightning: bolt. Gravity: well. Speed:
- * flash strike. Teleport: blink.
+ * A power being used (C2S 'pow' action codes). Kinetic: punch / slam landing /
+ * hurl (R: tear up debris and throw it). Telekinesis: grab / throw / push.
+ * Lightning: bolt. Gravity: well. Speed: flash strike. Duplication: split (a
+ * new clone) / rally (all clones at the target). Drop and CloneHit are only
+ * ever sent by the server, in 'fx' events.
  */
-export const PowAct = { Punch: 0, Slam: 1, Grab: 2, Throw: 3, Push: 4, Bolt: 5, Well: 6, Flash: 7, Blink: 8, Drop: 9 } as const;
+export const PowAct = { Punch: 0, Slam: 1, Grab: 2, Throw: 3, Push: 4, Bolt: 5, Well: 6, Flash: 7, Drop: 9, Hurl: 10, Split: 11, Rally: 12, CloneHit: 13 } as const;
 export type PowAct = (typeof PowAct)[keyof typeof PowAct];
 
 /**
@@ -124,6 +127,8 @@ export type BossSnap = [number, number, number, number, number, number, number, 
 export type BotSnap = [number, number, number, number, number, number, number, number, number];
 /** A loose thing: [id, kind, x, y, z, holder (player id, 0 none), spin]. */
 export type JunkSnap = [number, number, number, number, number, number, number];
+/** A runner's clone (duplication): [id, owner, x, y, z, yaw, anim, hp share 0..100]. */
+export type CloneSnap = [number, number, number, number, number, number, number, number];
 
 /** What hurt a runner in the arena (for the hit direction and the sound). */
 export type HurtSrc = 'stomp' | 'beam' | 'mortar' | 'charge' | 'swipe' | 'shock' | 'bite' | 'sting' | 'blast';
@@ -183,8 +188,8 @@ export type GameEvent =
   | { k: 'oend'; id: number; p: [number, number, number] }
   /** Runner `id` was hurt: `n` damage, `hp` left, shoved by `v`, from `from`. */
   | { k: 'hurt'; id: number; n: number; hp: number; src: HurtSrc; v?: [number, number, number]; from?: [number, number, number] }
-  /** Runner `id` is back at the arena's beacon. */
-  | { k: 'respawn'; id: number; p: [number, number, number] }
+  /** A clone of runner `owner` steps out ('in'), is destroyed ('out'), or reappears beside its owner ('back', from `q`). */
+  | { k: 'clone'; id: number; owner: number; s: 'in' | 'out' | 'back'; p: [number, number, number]; q?: [number, number, number] }
   /**
    * Runner `id` used a power (everyone draws it; the user already has). `f`: the
    * PowAct, `d`: numbers that shape it (points, a chain's path, a charge).
@@ -233,11 +238,11 @@ export type S2C =
      */
     stage?: Stage; gateAt?: number; course?: number; picks?: [number, number][]; awake?: boolean; wake?: number;
   }
-  | { t: 'snap'; ts: number; p: PlayerSnap[]; e: EnemySnap[]; b?: BossSnap; m?: BotSnap[]; j?: JunkSnap[] }
+  | { t: 'snap'; ts: number; p: PlayerSnap[]; e: EnemySnap[]; b?: BossSnap; m?: BotSnap[]; j?: JunkSnap[]; c?: CloneSnap[] }
   | { t: 'ev'; e: GameEvent[] }
   | { t: 'pong'; c: number; s: number }
   | { t: 'fix'; p: [number, number, number] }
-  /** `boss`: the run ended with the Warden destroyed. `fight`: how long the fight took. */
+  /** `boss`: the run ended with the Warden destroyed. `fight`: how long the fight took (sent win or lose). */
   | { t: 'end'; results: MatchResult[]; duration: number; boss?: boolean; fight?: number };
 
 export type ErrCode =

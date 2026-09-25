@@ -2,7 +2,8 @@
 // clients create/join a room, the ready gate holds the start, the match runs,
 // a fall is judged by the server, a teleport is corrected, and the match ends;
 // then the beacon opens and both go through to the Warden: powers chosen and
-// seen by each other, a power hurting it over the wire, a death and a respawn.
+// seen by each other, a power hurting it over the wire, a death that is final
+// while a teammate fights on, and the fight lost when both are down.
 //
 // With no WS set it starts server/index.ts itself on a free port and shuts it
 // down again, so it can run as part of `npm test`. Point WS at a running
@@ -181,7 +182,7 @@ try {
   }
   check('a power used over the wire hurts the Warden, and the other runner sees it', !!hit && hit.hp < bsnap.b[5], JSON.stringify(hit));
   check('the other runner sees the bolt drawn', events(b).some((e: any) => e.k === 'fx' && e.id === ja.id && e.f === PowAct.Bolt));
-  // A walks off the Threshold into the storm: down, not out, and back at the beacon
+  // A walks off the Threshold into the storm: down for good, while B fights on
   const sA = arena.spawns[ja.id];
   let [fx2, fy2, fz2] = sA;
   a.send({ t: 'dbg', cmd: 'tp', p: sA });
@@ -192,9 +193,19 @@ try {
   }
   const fell = await waitEv(b, 'death', (e) => e.id === ja.id);
   check('falling off in the arena is a death the other runner sees', fell.cause === 'fall');
-  const back = await waitEv(b, 'respawn', (e) => e.id === ja.id, ARENA.RESPAWN * 1000 + 4000);
-  check('and a few seconds later the runner is back at the arena\'s beacon', Math.hypot(back.p[0] - sA[0], back.p[2] - sA[2]) < 1 && !b.msgs.some((m) => m.t === 'end'),
-    JSON.stringify(back.p));
+  await new Promise((r) => setTimeout(r, 1500));
+  check('going down in the arena is final, but the fight goes on while a teammate stands', !b.msgs.some((m) => m.t === 'end') && !events(b).some((e: any) => e.k === 'respawn'));
+  // and when B goes down too, the fight is lost: the run ends, to start over
+  const sB = arena.spawns[jb.id];
+  let [bx2, by2, bz2] = sB;
+  b.send({ t: 'dbg', cmd: 'tp', p: sB });
+  for (let i = 0; i < 70; i++) {
+    bz2 -= 0.3; if (bz2 < ARENA.z - 57) by2 -= 0.6 + i * 0.06;
+    b.send({ t: 'st', s: 300 + i, p: [bx2, by2, bz2], v: [0, -5, -7], y: 0, a: 4, g: -1, b: 1 });
+    await new Promise((r) => setTimeout(r, 33));
+  }
+  const lost = await b.wait((m) => m.t === 'end', 6000);
+  check('with the whole team down the fight is lost and the run ends', !lost.boss && typeof lost.fight === 'number', JSON.stringify({ boss: lost.boss, fight: lost.fight }));
 
   a.ws.close(); b.ws.close();
 } catch (err) {
