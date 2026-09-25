@@ -409,7 +409,8 @@ export class CollisionWorld {
     const stamp = ++this.stampId;
     const test = (c: Collider) => {
       if (!c.enabled) return;
-      if (sight === 'camera') { if (!c.solid || Math.min(c.hx, c.hz) < 0.15 || Math.max(c.hx, c.hz) < 1.0) return; }
+      // the camera passes through thin things, and through the Warden (it moves: pulling the view in against its hull every time it walks behind you is worse than seeing through it)
+      if (sight === 'camera') { if (!c.solid || c.kind === 'puppet' || Math.min(c.hx, c.hz) < 0.15 || Math.max(c.hx, c.hz) < 1.0) return; }
       else if (sight ? !c.blocksSight : !c.solid) return;
       const t = c.rayHit(ox, oy, oz, dx, dy, dz, out.dist);
       if (t >= 0 && t < out.dist) { out.dist = t; out.c = c; }
