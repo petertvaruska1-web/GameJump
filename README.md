@@ -100,8 +100,9 @@ What a static host can and cannot do:
 | `Esc` | Pause menu / release the mouse (on your own, the pause menu can also restart the run) |
 | `Space` / `E` while dead or finished | Cycle the spectated teammate |
 | `E` near Viktor | Talk to him (see [The portal](#the-portal)) |
-| `1`–`6` (the Warden's arena) | Choose your power: on arrival, and again whenever you are down |
+| `1`–`6` (the Warden's arena) | Choose your power (until the Warden wakes) |
 | Left mouse (the Warden's arena) | Use your power (lightning: hold) |
+| `R` (the arena, Kinetic Force) | Tear a slab of debris out of the floor and hurl it |
 | Mouse wheel + left mouse (the arena, choosing) | Run along the power cards and pick one |
 | Left mouse | Take off / land, once Viktor has given you flight |
 | `Space` / `Ctrl` (or `C`) in flight | Climb / sink. `W` flies wherever the camera looks, `Shift` flies faster |
@@ -288,7 +289,9 @@ through, not for decoration:
   heat, with low cover walls.
 - **Four conductor pillars** (r 17, 13 m tall): cover from the beam, launch pads and
   anchors to their tops, and a charge that runs into one crashes and staggers.
-- **The moat**, a 3 m drop between the floor and the rampart. Falling in is death.
+- **The moat**, a 3 m drop between the floor and the rampart. Falling in is death: there is
+  nothing under it, or under the rampart (`npm run check:arena` proves the floor ends at its
+  drawn edge; an earlier build left an invisible floor out to 42 m).
 - **The rampart** (r 33–44, 5 m up) with three gaps to jump or grapple across and
   four ramps down to the floor.
 - **Four perches** at 14 m, reached by launch pads from the rampart, each with a zip
@@ -306,17 +309,17 @@ climb onto its back and ride it.
 
 Each runner picks one of six, with `1`–`6`, and uses it with the left mouse
 button. Before the Warden wakes you can change your mind as often as you like;
-after that, only while you are down. There are no roles or combos: every power
-can win the fight alone, and any mix works in a team.
+after that it is set. There are no roles or combos: every power can win the
+fight alone, and any mix works in a team.
 
 | Power | The button | Also |
 |---|---|---|
-| **Kinetic Force** | A lunging punch that throws bots, canisters and plates; in the air, a meteor slam whose shockwave grows with the fall | Batting orbs back at the machine |
-| **Telekinesis** | Grab the bot, canister, plate or mortar shell under the crosshair, then throw it; with nothing to grab, a push that turns orbs round | A held bot is crushed while you hold it |
+| **Kinetic Force** | A combo of lunging punches (jab, cross, hook, uppercut: the hook throws things sideways, the uppercut throws them up); in the air, a meteor slam whose shockwave grows with the fall; `R` tears a slab out of the floor and hurls it, and it shatters on what it hits | You are 1.3× bigger with 160 health; batting orbs back at the machine |
+| **Telekinesis** | Grab the bot, canister, plate or mortar shell under the crosshair, then throw it (54 m/s); with nothing to grab, a push that turns orbs round | A held bot is crushed while you hold it |
 | **Lightning** | Hold for rapid bolts that chain to bots and set off canisters | Heat builds (overheat: a pause); every 25 bolts into the Warden the storm answers with a thunderbolt |
 | **Gravity** | Throw a well that drags bots and loose things in, crushes them, grinds the Warden and bursts | Higher jumps; hold `Space` to float down |
-| **Super Speed** | A flash strike through everything on a line; a hit chains into the next strike almost at once | You run faster |
-| **Teleport** | Blink to the crosshair (three charges), ripping space at both ends | Coming out behind it or on its back hurts most |
+| **Super Speed** | A flash strike through everything on a line, ready again in a fraction of a second (lighter hits, many more of them) | You run half again as fast, trailing light and afterimages |
+| **Duplication** | Split off a clone of yourself (up to four). Clones fight on their own, going for bots and whatever of the Warden they can reach, and stay near you; with four out, a click sends them all at your target, hitting harder | Clones can be destroyed; one left behind steps out beside you again |
 
 Aim is the centre of the screen with a gentle lock: whatever is nearest the
 crosshair, in range and in sight is bracketed, and the power goes for it.
@@ -348,15 +351,22 @@ opens (the core takes 2.5× then, the eye and head more too). At half health it 
 into **overdrive**: plates blow off, it moves and attacks faster, and more bots come.
 Its health bar sits across the top of the screen with the poise under it.
 
-### Down, not out
+### One life
 
-Runners have 100 health that comes back after four seconds without a hit. At zero
-you go down: the camera circles your body while you can change your power, and four
-seconds later you are back at the arena's beacon with two seconds of protection.
-The fight ends when the Warden falls; the results show the fight time (against
-this browser's best), everyone's damage, bots destroyed and times down, with
-**Fight again** (`R`) straight back into the arena. Once a browser has been
-through the beacon, the lobby offers **Straight to the Warden** as well.
+Runners have 100 health (Kinetic Force 160) that comes back slowly, 2.25 a second
+after four seconds without a hit. Going down is final, as on the course: you
+watch your team fight on, and when the whole team is down the Warden has won and
+the fight starts over. The results show the fight time (against this browser's
+best when you win, how long you lasted when you lose), everyone's damage, bots
+destroyed and times down, with **Fight again** or **Start over** (`R`) straight
+back into the arena. Once a browser has been through the beacon, the lobby offers
+**Straight to the Warden** as well.
+
+It is meant to be hard. The Warden has 11,000 health (plus 70% for each extra
+runner), takes 135 poise to stagger, hits harder and attacks more often, and puts
+up to five bots out at once solo (six in overdrive). Headless fighters with
+perfect aim who cannot be hurt take 3–5 minutes to bring it down with any power;
+the same fighters, when they can be hurt, mostly go down within two.
 
 ### How it is built
 
@@ -364,7 +374,8 @@ through the beacon, the lobby offers **Straight to the Warden** as well.
 `warden.ts` is the machine's body, hit spheres and utility AI, and its hazards are
 pure functions of the numbers in each ability's event, so every client draws exactly
 what the server tests runners against. `bots.ts` has the bots, the loose things,
-orbs and wells. The arena is its own level and collision world
+orbs and wells, and `clones.ts` the clones of duplication (everything that hurts
+runners hurts them too). The arena is its own level and collision world
 (`shared/level/arena.ts`); the Warden's hull and head are "puppet" colliders the
 fight moves each tick. On the client, `src/game/Arena.ts` follows the stages, draws
 the fight from snapshots and events and turns clicks into powers
@@ -626,7 +637,7 @@ scripts/                headless test and design tools
 ## Tests & tools
 
 ```bash
-npm test               # map validation + route bot + enemy AI scenarios + obstacle authority checks + the Warden + multiplayer
+npm test               # map validation + route bot + enemy AI scenarios + obstacle authority checks + the arena floor + the Warden + multiplayer
 npm run check:map      # validates gaps against measured jump limits, renders dist/map.svg
 npm run test:routes    # a bot drives the real controller along every route start -> finish
 npm run test:ai        # detect / chase / kill / lose-target scenarios for each enemy type
@@ -646,15 +657,18 @@ npm run test:moves     # movement: climb reach/limit/cooldown, hooking from a st
 # clumsy-player check: the bot takes off 1.2 m before every edge
 SLOPPY=1.2 npx tsx scripts/bot-routes.ts
 npm run test:boss      # the Warden against the real Room: the beacon pulling the team through (the dead too),
-#                        choosing and waking, dying and coming back at the beacon, each power against the Warden,
-#                        bots and loose things, every ability and stagger, overdrive, the bot cap, victory; then
-#                        whole fights by headless fighters: every power wins solo, teams of 2 and 3 win, and no
-#                        two fights open the same way (QUICK=1 skips the whole fights)
+#                        choosing and waking, slow healing, going down for good and the fight lost when the team
+#                        is down, each power against the Warden, bots and loose things (combos, the hurl, clones,
+#                        the rally), every ability and stagger, overdrive, the bot cap, victory; then whole fights
+#                        by headless fighters: how long each power takes (3-5 min solo), how long a fighter lasts,
+#                        teams of 2 and 3, and no two fights open the same way (QUICK=1 skips the whole fights)
+npm run check:arena    # the arena's floor ends where it is drawn: nothing to stand on over the moat or under the rampart
 npm run test:server    # two headless clients against a server it starts itself: room codes, the
 #                        ready gate, a synchronised countdown, snapshots, a server-judged fall, a
 #                        rejected teleport, the end of a match and restarting from the results; then
 #                        through the beacon together: powers chosen, a power hurting the Warden over
-#                        the wire, a death in the arena and the respawn at its beacon.
+#                        the wire, a death in the arena that is final while a teammate fights on, and
+#                        the fight lost when both are down.
 #                        WS=ws://host/ws points it at a server that is already running instead.
 npm run typecheck
 npx tsx scripts/portal-spots.ts   # re-find the portal's spots after moving the course (DRY=1: report only)
