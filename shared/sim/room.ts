@@ -566,8 +566,10 @@ export class Room implements EnemyHost, FightHost {
     }
     if (y < L.killY) { this.kill(p, 'fall', null); return; }
     if (!this.inArena) this.checkPickups(p);
-    // flying under your own power over the void is not falling either
-    if (p.flying) { p.lastSupportY = y; return; }
+    // flying under your own power over the void is not falling either, and nor is
+    // letting go of the sky on purpose: flight can catch you again all the way down,
+    // so for a runner who can fly only the bottom of the world ends a fall
+    if (p.canFly) { p.lastSupportY = y; return; }
     // hanging on a zip line or swinging on a grapple rope over the void is not falling
     if (L.ziplines.length && onAnyZipline(L, x, y, z)) { p.lastSupportY = y; return; }
     if (p.anim === Anim.Swing && this.nearAnchor(x, y, z)) { p.lastSupportY = y; return; }

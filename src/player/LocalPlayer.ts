@@ -224,8 +224,10 @@ export class LocalPlayer {
     this.cur.set(b.pos.x, b.pos.y, b.pos.z);
 
     if (b.grounded && !this.dead) this.doomed = false;
-    // doomed fall detection (presentation only; the server decides death)
-    if (!this.doomed && !b.grounded && !m.mantleActive && b.pos.y < m.lastGroundY - DEATH.FALL_DROP * 0.75) {
+    // doomed fall detection (presentation only; the server decides death). A runner who
+    // can fly is never doomed on the way down: flight can still catch it, and only the
+    // bottom of the world ends that fall (the server's death then starts the fall camera)
+    if (!this.doomed && !b.grounded && !m.mantleActive && !m.canFly && b.pos.y < m.lastGroundY - DEATH.FALL_DROP * 0.75) {
       if (!isFinite(world.groundBelow(b.pos.x, b.pos.y, b.pos.z, 500))) {
         this.doomed = true;
         this.doomedAt.set(b.pos.x, m.lastGroundY + 3, b.pos.z);

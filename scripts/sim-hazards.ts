@@ -533,9 +533,15 @@ const spots = level.portals ?? [];
   for (const q of path) sendA(fly.room, fly.p, q[0], q[1], q[2], Anim.Fly, 0, -6, -12);
   check('flying over the void is not a fall', fly.p.status === Status.Alive && fly.fixes.length === 0 && fly.p.pos.y < 21,
     `status=${fly.p.status} cause=${fly.p.cause ?? '-'} fixes=${fly.fixes.length} y=${fly.p.pos.y.toFixed(1)}`);
-  // stopping flying out there drops you like anyone else
-  for (let k = 1; k <= 40; k++) sendA(fly.room, fly.p, 0, 20 - k * 0.5, path[60][2], Anim.Fall, 0, -15, 0);
-  check('stopping flying over the void is a fall', fly.p.status === Status.Dead && fly.p.cause === 'fall', `status=${fly.p.status} cause=${fly.p.cause ?? '-'}`);
+  // letting go of the sky out there on purpose is not a fall yet: flight can still catch
+  // you all the way down (the old rule killed 11 m under where flight ended, far above the ground)
+  let y = 20;
+  while (y > level.killY + 1) { y -= 0.5; sendA(fly.room, fly.p, 0, y, path[60][2], Anim.Fall, 0, -15, 0); }
+  check('a flyer who stops flying falls all the way down alive', fly.p.status === Status.Alive && fly.fixes.length === 0,
+    `status=${fly.p.status} cause=${fly.p.cause ?? '-'} y=${fly.p.pos.y.toFixed(1)} killY=${level.killY}`);
+  // ...and only going below the bottom of the map ends it
+  for (let k = 1; k <= 4; k++) sendA(fly.room, fly.p, 0, y - k * 0.5, path[60][2], Anim.Fall, 0, -15, 0);
+  check('a flyer who falls below the bottom of the map dies', fly.p.status === Status.Dead && fly.p.cause === 'fall', `status=${fly.p.status} cause=${fly.p.cause ?? '-'} y=${fly.p.pos.y.toFixed(1)}`);
   const walk = setupPortal([0.5]);
   for (const q of path) sendA(walk.room, walk.p, q[0], q[1], q[2], Anim.Fly, 0, -6, -12);
   check('claiming to fly without the gift is still a fall', walk.p.status === Status.Dead && walk.p.cause === 'fall', `status=${walk.p.status} cause=${walk.p.cause ?? '-'}`);
