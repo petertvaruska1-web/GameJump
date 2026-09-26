@@ -610,6 +610,55 @@ export const JUNK = {
   HIT_SPEED: 12,
 };
 
+// ======================================================================= stage 3
+// When the Warden falls a rift opens in the arena. Through it: Speedster Battle,
+// a race down a road of light through a gap in spacetime, where alternating left
+// and right clicks are the engine.
+
+/** The rift the Warden leaves behind. */
+export const RIFT = {
+  /** It tears open this long after the killing blow (once the machine has come apart). */
+  OPEN_AFTER: 3.6,
+  /** Nobody steps in: it takes the whole team anyway after this long. */
+  AUTO: 20,
+  /** Its ring is the portal's, this many times the size; its centre this high over the floor. */
+  SCALE: 2.2, HEIGHT: 3.9,
+  /** You are through once your chest is this close to its centre (the server allows a little more). */
+  ENTER: 2.6, SERVER_SLACK: 2.5,
+  /** Where on the arena floor it opens: this far out from the centre, on a diagonal clear of the pillars. */
+  RADIUS: 20,
+};
+
+/** The race: speed from stride cadence, and the rules of the course. */
+export const RACE = {
+  /** Holding forward with no clicks at all: a little over a plain runner's sprint. */
+  BASE: 11,
+  /** The fastest a runner can go, uphill, downhill or flat out. */
+  TOP: 75,
+  /** Strides a second that reach the top (a fast human; anything quicker counts the same). */
+  C_MAX: 13,
+  /** How the cadence maps to speed: (cadence / C_MAX) ^ CURVE, a touch generous to slower hands. */
+  CURVE: 0.9,
+  /** The cadence is read from this many recent intervals between strides. */
+  WINDOW: 4,
+  /** A stride this long ago tells nothing about the pace any more. */
+  STALE: 2,
+  /** How fast the running speed follows the cadence: up, and back down (m/s^2). */
+  ACCEL: 30, DECEL: 13,
+  /** Each counted stride pushes this much at once (never more than this past the target). */
+  KICK: 0.8,
+  /** Slopes: gravity along the slope times this feeds a momentum that fades over SLOPE_TAU seconds. */
+  SLOPE_K: 1.1, SLOPE_TAU: 2.2, SLOPE_MAX: 14,
+  /** Steering grip on the ground and in the air (m/s^2): enough to hold a curve at the top speed. */
+  GRIP: 190, AIR_GRIP: 60,
+  /** Server's horizontal speed limit in the race (the top speed plus slack for jitter). */
+  MAX_CLIENT_SPEED: 82,
+  /** From arriving on the grid to "Go!": the view over the course, then 3, 2, 1. */
+  ARRIVE: 6.5,
+  /** Once the winner is home the rest have this long. */
+  GRACE: 30,
+};
+
 /** Flight, Viktor's gift: left click takes off and lands, the camera steers. */
 export const FLY = {
   /** Cruising speed, and with Shift held. */
