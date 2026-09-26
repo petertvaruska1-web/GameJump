@@ -5,8 +5,9 @@
 // cadences, and the room's side of it: the rift the Warden leaves, the warp, the
 // race, its finish, its results and a rematch.
 // Usage: npx tsx scripts/sim-race.ts
-import { RACE } from '../shared/constants';
-import { getRace, trackIndex } from '../shared/level/race';
+import { PHYS, RACE } from '../shared/constants';
+import { getRace, trackIndex, trackPoint, trackS } from '../shared/level/race';
+import { PlayerMotor } from '../shared/physics/character';
 import { CollisionWorld, type GroundHit, type RayHit } from '../shared/physics/world';
 import { Cadence, raceTarget } from '../shared/sim/cadence';
 
@@ -81,7 +82,7 @@ const world = new CollisionWorld(race.level);
 const S = T.samples;
 
 {
-  check('the course is about five kilometres long', T.length > 4600 && T.length < 5400, `${T.length.toFixed(0)} m`);
+  check('the course is about six kilometres long (ninety seconds striding hard at up to 75 m/s)', T.length > 5800 && T.length < 6800, `${T.length.toFixed(0)} m`);
   const names = T.sections.map((s) => s.name);
   const contiguous = T.sections.every((s, i) => i === 0 ? s.s0 === 0 : Math.abs(s.s0 - T.sections[i - 1].s1) < 1e-6) && Math.abs(T.sections[T.sections.length - 1].s1 - T.length) < 1e-6;
   check('eight named sections run end to end', T.sections.length === 8 && contiguous, names.join(' / '));
@@ -170,6 +171,108 @@ const S = T.samples;
   const g = race.grid;
   const stands = g.every((p) => { const d = world.groundBelow(p[0], p[1] + 1, p[2], 3); return Math.abs(p[1] + 1 - d - p[1]) < 0.15; });
   check('three grid slots, side by side, on the floor', g.length === 3 && stands && Math.hypot(g[0][0] - g[2][0], g[0][2] - g[2][2]) > 7);
+}
+
+// ====================================================================== running it
+
+interface Drive { finished: number; s: number; outside: number; below: number; top: number; kickLand: number[]; maxLat: number }
+
+/**
+ * A runner driven along the course by the real character controller, striding at
+ * `cps` strides a second (0: forward only), steering at a point on the centreline
+ * ahead of it. From distance `from` (with the running speed it would have built), for up to `limit` seconds.
+ */
+function drive(cps: number, limit: number, from = 0, speed = 0): Drive {
+  const m = new PlayerMotor();
+  m.race = true;
+  const i0 = Math.round(from / T.step);
+  if (from > 0) { const q = S[i0]; m.spawn(q.x, q.y + 0.02, q.z, q.h); }
+  else { const g = race.grid[1]; m.spawn(g[0], g[1], g[2], race.yaw); }
+  m.raceSpeed = speed;
+  const cad = new Cadence();
+  const pt = { x: 0, y: 0, z: 0, h: 0, w: 0 };
+  let t = 0, side: 0 | 1 = 0, next = 0, idx = i0;
+  const out: Drive = { finished: 0, s: 0, outside: 0, below: 0, top: 0, kickLand: [], maxLat: 0 };
+  let airFrom = -1;
+  while (t < limit) {
+    if (cps > 0 && t >= next) { if (cad.stride(side, t)) m.raceKick(); side = side ? 0 : 1; next += 1 / cps; }
+    m.raceTarget = cad.target(t);
+    const b = m.body;
+    idx = trackIndex(T, b.pos.x, b.pos.y, b.pos.z, idx);
+    const s = trackS(T, idx, b.pos.x, b.pos.z);
+    const hs = Math.hypot(b.vel.x, b.vel.z);
+    trackPoint(T, s + Math.max(12, hs * 0.5), pt);
+    let dx = pt.x - b.pos.x, dz = pt.z - b.pos.z;
+    const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+    m.step(world, PHYS.STEP, { x: dx, z: dz, sprint: false, jumpHeld: false, jumpPressed: false, aimYaw: Math.atan2(dx, dz) });
+    t += PHYS.STEP;
+    const q = S[idx];
+    const lat = Math.abs((b.pos.x - q.x) * Math.cos(q.h) - (b.pos.z - q.z) * Math.sin(q.h));
+    out.maxLat = Math.max(out.maxLat, lat - q.w / 2);
+    if (lat > q.w / 2 + 0.2) out.outside++;
+    if (b.pos.y < Math.min(q.y, q.drop ?? q.y) - 0.6) out.below++;
+    out.top = Math.max(out.top, hs);
+    // where each kicker's flight comes down
+    if (!b.grounded && airFrom < 0) airFrom = s;
+    if (b.grounded && airFrom >= 0) {
+      const k = T.kickers.find((kk) => airFrom > kk.lip - 6 && airFrom < kk.lip + 6);
+      if (k && !out.kickLand.some((v) => v > k.lip && v < k.lip + 400)) out.kickLand.push(s);
+      airFrom = -1;
+    }
+    out.s = s;
+    if (s >= T.finishS && !out.finished) { out.finished = t; break; }
+  }
+  return out;
+}
+
+{
+  const runs = [3, 7, 11, 13].map((cps) => [cps, drive(cps, 400)] as const);
+  for (const [cps, r] of runs) {
+    console.log(`  ${String(cps).padStart(2)} strides/s: ${r.finished ? `home in ${r.finished.toFixed(1)} s` : `NOT HOME (${r.s.toFixed(0)} m)`}, top ${r.top.toFixed(1)} m/s, average ${r.finished ? (T.finishS / r.finished).toFixed(1) : '-'} m/s, kickers land at ${r.kickLand.map((v) => v.toFixed(0)).join(' / ')}`);
+    check(`a runner striding ${cps} a second gets home`, r.finished > 0, `${r.s.toFixed(0)} m`);
+    check(`a runner striding ${cps} a second never leaves the road or sinks through it`, r.outside === 0 && r.below === 0, `outside ${r.outside} below ${r.below} worst lateral ${r.maxLat.toFixed(2)}`);
+  }
+  const at = (cps: number) => runs.find((x) => x[0] === cps)![1];
+  check('striding hard (11 a second) takes about ninety seconds', at(11).finished > 70 && at(11).finished < 105, `${at(11).finished.toFixed(1)} s`);
+  check('every step up in cadence is a faster race', at(3).finished > at(7).finished && at(7).finished > at(11).finished && at(11).finished > at(13).finished);
+  check('slow striding takes well over twice as long as striding hard', at(3).finished > at(11).finished * 2);
+  check('nobody goes faster than the top speed', runs.every(([, r]) => r.top <= RACE.TOP + 0.01), runs.map(([, r]) => r.top.toFixed(1)).join(' / '));
+  check('at the top a kicker throws you right over its trough', at(13).kickLand.length === 2 && at(13).kickLand.every((v, i) => v > T.kickers[i].s1 - 2), at(13).kickLand.map((v) => v.toFixed(0)).join(' / '));
+  const walk = drive(0, 20);
+  check('forward alone runs at the base speed', walk.s > 180 && walk.s < 260, `${walk.s.toFixed(0)} m in 20 s`);
+  const k = T.kickers[0];
+  const slow = drive(0, 16, k.s0 - 40, RACE.BASE);
+  check('hit slowly, a kicker drops you into its trough and you run out of it', slow.s > k.s1 + 20 && slow.below === 0, `reached ${slow.s.toFixed(0)} (trough ends ${k.s1.toFixed(0)})`);
+}
+
+{
+  // head-on into a barrier at the top speed: it holds, and the speed is gone
+  const m = new PlayerMotor();
+  m.race = true;
+  const q = S[Math.round((T.sections[4].s0 + 300) / T.step)];
+  m.spawn(q.x, q.y + 0.02, q.z, q.h);
+  const rx = Math.cos(q.h), rz = -Math.sin(q.h);
+  m.body.vel.x = rx * RACE.TOP; m.body.vel.z = rz * RACE.TOP;
+  m.raceSpeed = RACE.TOP; m.raceTarget = RACE.TOP;
+  for (let i = 0; i < 120; i++) m.step(world, PHYS.STEP, { x: rx, z: rz, sprint: false, jumpHeld: false, jumpPressed: false, aimYaw: Math.atan2(rx, rz) });
+  const lat = (m.body.pos.x - q.x) * rx + (m.body.pos.z - q.z) * rz;
+  check('running head-on into a barrier at 75 m/s does not go through it', lat < q.w / 2, `${lat.toFixed(2)} m from the middle (edge ${(q.w / 2).toFixed(1)})`);
+  check('and it costs the speed that went into it', m.raceSpeed < 15, `${m.raceSpeed.toFixed(1)} m/s left`);
+}
+
+{
+  // in the race the slide key does nothing, and landings never stumble
+  const m = new PlayerMotor();
+  m.race = true;
+  const q = S[40];
+  m.spawn(q.x, q.y + 0.02, q.z, q.h);
+  m.raceSpeed = 30; m.raceTarget = 30;
+  const fx = Math.sin(q.h), fz = Math.cos(q.h);
+  for (let i = 0; i < 60; i++) m.step(world, PHYS.STEP, { x: fx, z: fz, sprint: false, jumpHeld: false, jumpPressed: false, slidePressed: i === 30, aimYaw: q.h });
+  check('no sliding in the race (C does nothing)', !m.sliding);
+  m.body.vel.y = -30; m.body.grounded = false; m.body.pos.y += 8;
+  for (let i = 0; i < 90; i++) m.step(world, PHYS.STEP, { x: fx, z: fz, sprint: false, jumpHeld: false, jumpPressed: false, aimYaw: q.h });
+  check('a hard landing in the race does not stumble', m.landSlow <= 0);
 }
 
 console.log(fails ? `${fails} check(s) failed` : 'all race checks passed');

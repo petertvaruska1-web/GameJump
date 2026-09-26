@@ -3,9 +3,11 @@
 // ledge climbing, sliding, front flips, sideways dashes, grapple swinging,
 // boosted running and jumping, moving-platform and conveyor carry, launch pads, zip
 // lines and external pushes (wind, sweepers). And, for a runner Viktor has
-// blessed, free flight.
+// blessed, free flight. And, in Speedster Battle, race running: speed that comes
+// from stride cadence, slopes that give and take it, barriers that cost it and
+// kickers that keep the lift of their ramp.
 
-import { CLIMB, CORPSE, DASH, FLIP, FLY, GRAPPLE, LAUNCH, PHYS, PLAYER, POW, POWER, SLIDE, ZIP } from '../constants';
+import { CLIMB, CORPSE, DASH, FLIP, FLY, GRAPPLE, LAUNCH, PHYS, PLAYER, POW, POWER, RACE, SLIDE, ZIP } from '../constants';
 import { zipGrab, zipLength } from '../hazards';
 import type { GrappleDef, LaunchDef, ZiplineDef } from '../level/types';
 import { approachAngle, clamp, damp, lerp, v3, wrapAngle, type Vec3 } from '../math';
@@ -370,6 +372,16 @@ export class PlayerMotor {
   private airDashUsed = false;
   /** Boost power: faster running and longer jumps while true. */
   boost = false;
+  /**
+   * Speedster Battle: the running speed comes from stride cadence. `raceTarget` is
+   * what the cadence asks for (set every frame by whoever reads the clicks),
+   * `raceSpeed` what the legs have built toward it, `raceMomentum` what slopes add
+   * or take. Off everywhere else.
+   */
+  race = false;
+  raceTarget: number = RACE.BASE;
+  raceSpeed = 0;
+  raceMomentum = 0;
   /** Viktor's gift: this runner may fly, and whether it is flying right now. */
   canFly = false;
   flying = false;
@@ -449,6 +461,39 @@ export class PlayerMotor {
     this.wingStamina = POW.angel.WING_MAX;
     this.beatT = 9;
     this.gliding = false;
+    this.raceSpeed = 0;
+    this.raceMomentum = 0;
+  }
+
+  /** A counted stride: an instant push, never more than a kick past what the cadence asks for. */
+  raceKick() {
+    const cap = Math.min(RACE.TOP, Math.max(this.raceSpeed, this.raceTarget + RACE.KICK));
+    this.raceSpeed = Math.min(cap, this.raceSpeed + RACE.KICK);
+  }
+
+  /** The speed race running goes at right now: the drive plus what the slope has given (never quite stalling). */
+  get raceRun() { return clamp(this.raceSpeed + this.raceMomentum, Math.min(this.raceSpeed, 5), RACE.TOP); }
+
+  /** The legs build toward the cadence's speed (only while running), and slopes feed a momentum that fades. */
+  private raceDrive(dt: number, moving: boolean) {
+    const b = this.body, v = b.vel;
+    const hs = Math.hypot(v.x, v.z);
+    if (moving) {
+      const t = this.raceTarget;
+      this.raceSpeed = this.raceSpeed < t ? Math.min(t, this.raceSpeed + RACE.ACCEL * dt) : Math.max(t, this.raceSpeed - RACE.DECEL * dt);
+    } else this.raceSpeed = Math.min(this.raceSpeed, hs);
+    let g = 0;
+    const c = b.grounded ? b.ground : null;
+    if (c && c.rise !== 0 && hs > 0.5) {
+      const slope = (c.rise / (2 * c.hz)) * ((v.x * c.sin + v.z * c.cos) / hs);
+      g = (-PHYS.GRAVITY * RACE.SLOPE_K * slope) / Math.sqrt(1 + slope * slope);
+    }
+    this.raceMomentum = clamp(this.raceMomentum + (g - this.raceMomentum / RACE.SLOPE_TAU) * dt, -RACE.SLOPE_MAX, RACE.SLOPE_MAX);
+  }
+
+  /** How steeply the ground `c` rises along the horizontal direction (dx, dz) (unit). */
+  private riseAlong(c: Collider | null, dx: number, dz: number): number {
+    return c && c.rise !== 0 ? (c.rise / (2 * c.hz)) * (dx * c.sin + dz * c.cos) : 0;
   }
 
   step(world: CollisionWorld, dt: number, inp: MoveInput, windX = 0, windZ = 0) {
@@ -503,7 +548,8 @@ export class PlayerMotor {
     if (this.landSlow > 0) this.landSlow -= dt;
 
     const boostK = this.boost ? POWER.BOOST_SPEED : 1;
-    const baseSpeed = (inp.sprint ? PLAYER.SPRINT_SPEED * this.sprintScale : PLAYER.RUN_SPEED * this.runScale) * boostK;
+    if (this.race) this.raceDrive(dt, mag > 0.1);
+    const baseSpeed = this.race ? this.raceRun : (inp.sprint ? PLAYER.SPRINT_SPEED * this.sprintScale : PLAYER.RUN_SPEED * this.runScale) * boostK;
     const v = b.vel;
 
     // wings: their strength comes back (fast on the ground), and Space held on the way down glides
@@ -535,7 +581,7 @@ export class PlayerMotor {
     }
 
     // Slide: start from a run (or right on landing), stand up when slow or on a second press
-    if (!this.sliding && this.slideBuffer > 0 && b.grounded && !this.grapple && this.slideCooldown <= 0
+    if (!this.race && !this.sliding && this.slideBuffer > 0 && b.grounded && !this.grapple && this.slideCooldown <= 0
       && Math.hypot(v.x, v.z) >= SLIDE.MIN_START) this.startSlide();
     else if (this.sliding && this.slideBuffer > 0 && this.slideT > 0.25 && this.headroom(world)) { this.slideBuffer = 0; this.endSlide(); }
 
@@ -572,6 +618,10 @@ export class PlayerMotor {
     } else if (this.slamming) {
       // diving: along the dive, wings folded (no steering)
       v.x = this.slamX * this.slamSpeed; v.z = this.slamZ * this.slamSpeed;
+    } else if (b.grounded && this.race) {
+      // race running: the speed is the drive's, the grip only steers it
+      if (mag > 1e-3) approach2(v, dirX * baseSpeed * mag, dirZ * baseSpeed * mag, RACE.GRIP * dt);
+      else approach2(v, 0, 0, RACE.DECEL * 2.5 * dt);
     } else if (b.grounded) {
       let speed = baseSpeed * mag;
       if (this.landSlow > 0) speed *= 0.8;
@@ -602,12 +652,18 @@ export class PlayerMotor {
         const cur = Math.hypot(v.x, v.z);
         approach2(v, dirX * cur, dirZ * cur, LAUNCH.AIR_ACCEL * mag * dt);
       }
+    } else if (this.race) {
+      // in the air a racer keeps its speed and steers a little
+      if (mag > 1e-3) {
+        const cur = Math.hypot(v.x, v.z);
+        approach2(v, dirX * Math.max(baseSpeed, cur) * mag, dirZ * Math.max(baseSpeed, cur) * mag, RACE.AIR_GRIP * dt);
+      }
     } else if (mag > 1e-3) {
       // gliding, the air carries you further and turns you quicker
       const cur = Math.hypot(v.x, v.z);
       const speed = Math.max(this.gliding ? A.GLIDE_SPEED : baseSpeed, cur) * mag;
       approach2(v, dirX * speed, dirZ * speed, PLAYER.AIR_ACCEL * this.accelScale * (this.gliding ? A.GLIDE_ACCEL : 1) * dt);
-    } else if (!this.gliding) {
+    } else if (!this.gliding && !this.race) {
       const k = 1 - PLAYER.AIR_DRAG * dt;
       v.x *= k; v.z *= k;
     }
@@ -634,6 +690,8 @@ export class PlayerMotor {
         this.endSlide();
       }
       v.y = PLAYER.JUMP_VELOCITY * (this.boost ? POWER.BOOST_JUMP : 1) * this.jumpScale;
+      // racing up a slope, the jump takes the slope's lift with it
+      if (this.race && b.grounded) { const hs0 = Math.hypot(v.x, v.z); if (hs0 > 0.5) v.y += Math.max(0, this.riseAlong(b.ground, v.x / hs0, v.z / hs0)) * hs0; }
       // Inherit platform motion
       v.x += this.platVel.x; v.z += this.platVel.z;
       if (this.platVel.y > 0) v.y += this.platVel.y;
@@ -682,7 +740,18 @@ export class PlayerMotor {
 
     const wasGrounded = b.grounded;
     const groundBefore = b.ground;
+    const hsBefore = Math.hypot(v.x, v.z);
     const info = stepBody(world, b, dt, jumped, this.info);
+
+    if (this.race) {
+      // a barrier takes the speed that went into it (scraping along one bleeds it away)
+      if (info.wall) this.raceSpeed = Math.max(0, this.raceSpeed - Math.max(0, hsBefore - Math.hypot(v.x, v.z)));
+      // running off the top of a ramp keeps its lift: a kicker throws you as hard as you hit it
+      if (wasGrounded && !b.grounded && !jumped && hsBefore > 0.5) {
+        const lift = this.riseAlong(groundBefore, v.x / hsBefore, v.z / hsBefore) * hsBefore;
+        if (lift > 0) v.y = Math.max(v.y, lift);
+      }
+    }
 
     if (this.grapple) {
       const gp = this.grapple.p;
@@ -731,7 +800,7 @@ export class PlayerMotor {
         this.slamming = false;
         ev.slammed = Math.max(info.impact, this.slamSpeed);
         v.x = v.z = 0;
-      } else if (info.impact > PLAYER.HARD_LANDING_SPEED) this.landSlow = PLAYER.HARD_LANDING_SLOW;
+      } else if (info.impact > PLAYER.HARD_LANDING_SPEED && !this.race) this.landSlow = PLAYER.HARD_LANDING_SLOW;
       this.landAnim = Math.min(1, info.impact / 20);
     }
     if (b.grounded) {

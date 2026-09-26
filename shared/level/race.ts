@@ -1,5 +1,5 @@
 // Speedster Battle's course: a road of light through a gap in spacetime, about
-// five kilometres of long curves, gentle climbs and descents and two kickers,
+// six kilometres of long curves, gentle climbs and descents and two kickers,
 // walled on both sides so nobody can fall (only slow down).
 //
 // It is laid out as a centreline from pieces (straights and arcs, each with a
@@ -74,14 +74,14 @@ interface Section { name: string; w: number; pieces: Piece[] }
 
 /** The course, start to end. Positive angles turn toward +X. */
 const COURSE: Section[] = [
-  { name: 'The Tear', w: 22, pieces: [{ len: 420, dy: 0 }, { len: 60, dy: -4 }] },
-  { name: 'Aurora Bend', w: 18, pieces: [{ r: 230, ang: 1.9, dy: -32 }, { len: 120, dy: -8 }, { r: 210, ang: -0.62, dy: -4 }] },
-  { name: 'Crystal Narrows', w: 16, pieces: [{ r: 150, ang: -0.95, dy: 8 }, { r: 150, ang: 1.25, dy: 12 }, { r: 165, ang: -1.05, dy: 8 }, { len: 90, dy: 4 }, { r: 180, ang: 0.6, dy: 0 }] },
-  { name: 'First Leap', w: 18, pieces: [{ len: 320, dy: -14, kicker: 110 }] },
-  { name: 'The Long Fall', w: 22, pieces: [{ len: 760, dy: -62 }] },
-  { name: 'Nebula Spiral', w: 18, pieces: [{ r: 185, ang: 4.71, dy: -48 }, { len: 140, dy: 0 }] },
-  { name: 'Second Leap', w: 18, pieces: [{ len: 330, dy: -12, kicker: 120 }] },
-  { name: 'Event Horizon', w: 22, pieces: [{ r: 260, ang: -0.55, dy: 0 }, { len: 560, dy: 0 }] },
+  { name: 'The Tear', w: 22, pieces: [{ len: 460, dy: 0 }, { len: 60, dy: -4 }] },
+  { name: 'Aurora Bend', w: 18, pieces: [{ r: 300, ang: 1.9, dy: -40 }, { len: 200, dy: -12 }, { r: 230, ang: -0.62, dy: -4 }] },
+  { name: 'Crystal Narrows', w: 16, pieces: [{ r: 190, ang: -0.95, dy: 10 }, { r: 190, ang: 1.25, dy: 14 }, { r: 200, ang: -1.05, dy: 10 }, { len: 120, dy: 4 }, { r: 220, ang: 0.6, dy: 0 }] },
+  { name: 'First Leap', w: 18, pieces: [{ len: 380, dy: -16, kicker: 130 }] },
+  { name: 'The Long Fall', w: 22, pieces: [{ len: 1000, dy: -80 }] },
+  { name: 'Nebula Spiral', w: 18, pieces: [{ r: 230, ang: 4.71, dy: -60 }, { len: 160, dy: 0 }] },
+  { name: 'Second Leap', w: 18, pieces: [{ len: 380, dy: -14, kicker: 140 }] },
+  { name: 'Event Horizon', w: 22, pieces: [{ r: 300, ang: -0.55, dy: 0 }, { len: 760, dy: 0 }] },
 ];
 
 /** Moving average of `v` over `half` samples either side (ends held). */
