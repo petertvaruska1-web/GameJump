@@ -22,6 +22,7 @@ import type { LocalPlayer } from '../player/LocalPlayer';
 import { PLAYER_COLORS, PLAYER_CSS } from '../render/CharacterModel';
 import type { Particles } from '../render/Effects';
 import type { Materials } from '../render/Materials';
+import { RaceSounds } from '../audio/RaceSounds';
 import { RaceView } from '../render/RaceView';
 import { SpeedTrail, type TrailRunner } from '../render/SpeedTrail';
 import { RaceHud } from '../ui/RaceHud';
@@ -107,6 +108,10 @@ export class Race {
   private lastCount = 99;
   private readonly startS: number;
   private section = -1;
+  /** The speed tier the local runner is in (for its whoosh), whether it was on the ground, and who was ahead of it. */
+  private tier = 0;
+  private wasGrounded = true;
+  private readonly ahead = new Map<number, boolean>();
   readonly hud: RaceHud;
   /** This browser's best before this race (for the results). */
   private bestBefore: RaceBest = { time: null, top: null };
@@ -144,7 +149,8 @@ export class Race {
     this.revealT = -1;
     this.coasting = false;
     this.cadence.reset();
-    this.hint.clear(); this.progress.clear(); this.home.clear(); this.ringAt.clear();
+    this.hint.clear(); this.progress.clear(); this.home.clear(); this.ringAt.clear(); this.ahead.clear();
+    this.tier = 0; this.wasGrounded = true;
     this.place = 1; this.top = 0; this.section = -1; this.lastCount = 99;
     this.trail?.clear();
     const local = this.host.local();
@@ -223,7 +229,7 @@ export class Race {
     if (e.id === h.meId()) {
       this.coasting = true;
       h.ui.big(ordinal(e.place), 'cyan', `${fmtTime(e.time)} · top ${Math.round((e.top ?? this.top) * 3.6)} km/h`, 0);
-      h.audio.finish();
+      if (h.audio.race) h.audio.race.finish(e.place); else h.audio.finish();
       saveRaceBest(e.time, e.top ?? this.top);
     } else h.ui.toast(`${h.name(e.id)} is home · ${ordinal(e.place)} · ${fmtTime(e.time)}`);
   }
@@ -232,6 +238,7 @@ export class Race {
   private stride(b: 0 | 1) {
     this.host.cam.kickFov(0.25);
     this.hud.stride(b);
+    this.host.audio.race?.stride(b, this.speedK);
   }
 
   /** How the race went for the local runner, against this browser's best (for the results). */
@@ -267,7 +274,7 @@ export class Race {
     if (local && !local.dead && can && !this.coasting && mt >= this.go) {
       for (const c of clicks) {
         if (this.cadence.stride(c.b, mt - Math.max(0, nowMs - c.t) / 1000)) { local.motor.raceKick(); this.stride(c.b); }
-        else this.hud.miss(c.b);
+        else { this.hud.miss(c.b); h.audio.race?.miss(); }
       }
     }
     if (local) local.motor.raceTarget = this.coasting ? RACE.BASE : this.cadence.target(mt);
@@ -276,6 +283,7 @@ export class Race {
     this.updatePlaces(local);
     this.view.update(time, dt, h.camera.position, mt, local && !local.dead ? local.renderVel : ZERO);
     this.updateTrails(dt, time, local);
+    this.updateFeel(local, mt);
     this.updateHud(local, mt);
     if (this.revealT >= 0) { this.revealT += dt; if (this.revealT > REVEAL) this.endReveal(); }
   }
@@ -298,6 +306,15 @@ export class Race {
     };
     if (local) at(me, local.renderPos);
     for (const rp of h.remotes()) at(rp.id, rp.pos);
+    // a rival going past close by (or being gone past) is heard
+    const mine = this.progress.get(me) ?? 0;
+    for (const rp of h.remotes()) {
+      const theirs = this.progress.get(rp.id);
+      if (theirs === undefined) continue;
+      const ahead = theirs > mine, was = this.ahead.get(rp.id);
+      if (was !== undefined && was !== ahead && local && rp.pos.distanceTo(local.renderPos) < 15) h.audio.race?.pass(rp.pos);
+      this.ahead.set(rp.id, ahead);
+    }
     const ids = [...this.progress.keys()];
     ids.sort((a, b) => {
       const ha = this.home.get(a), hb = this.home.get(b);
@@ -308,6 +325,20 @@ export class Race {
     });
     this.place = Math.max(1, ids.indexOf(me) + 1);
     if (local) this.top = Math.max(this.top, Math.hypot(local.renderVel.x, local.renderVel.z));
+  }
+
+  /** The race's air, the whoosh of a new speed tier, and the throw of a kicker. */
+  private updateFeel(local: LocalPlayer | null, mt: number) {
+    const h = this.host, k = this.speedK;
+    h.audio.race?.update(k, mt >= this.go - 3);
+    if (!local || local.dead) return;
+    const sp = Math.hypot(local.renderVel.x, local.renderVel.z);
+    const n = RaceSounds.tierOf(sp, this.tier);
+    if (n > this.tier) { h.audio.race?.tier(n); h.cam.addShake(0.06 * n); h.cam.kickFov(2 + n); }
+    this.tier = n;
+    const b = local.motor.body;
+    if (this.wasGrounded && !b.grounded && b.vel.y > 4) h.audio.race?.kick(k);
+    this.wasGrounded = b.grounded;
   }
 
   /** Every runner's trail of light, in its own colour, and motes shed from it flat out. */
@@ -341,6 +372,7 @@ export class Race {
   private passedRing(id: number, i: number, p: THREE.Vector3) {
     const c = PLAYER_COLORS[(id - 1) % 3];
     this.view?.passRing(i, c);
+    this.host.audio.race?.ring(i, id === this.host.meId() ? null : p);
     const col = new THREE.Color(c);
     this.host.particles.burst(p.x, p.y + 1.2, p.z, 26, 7, 0.6, 0.25, [col.r, col.g, col.b], 1, -1, 2);
   }

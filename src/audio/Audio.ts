@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { ArenaSounds } from './ArenaSounds';
 import { HeavenMusic, type HeavenMix } from './HeavenMusic';
+import { RaceSounds } from './RaceSounds';
 
 type Dest = AudioNode;
 
@@ -34,6 +35,7 @@ export class AudioEngine {
   readonly listenerPos = new THREE.Vector3();
   readonly listenerRight = new THREE.Vector3(1, 0, 0);
   private arenaSfx: ArenaSounds | null = null;
+  private raceSfx: RaceSounds | null = null;
   private beatT = 0;
   private chase = 0;
   private volume = 0.8;
@@ -45,6 +47,12 @@ export class AudioEngine {
   get arena(): ArenaSounds | null {
     if (!this.ready) return null;
     return (this.arenaSfx ??= new ArenaSounds(this));
+  }
+
+  /** Speedster Battle's sounds and its air (null until the audio is running). */
+  get race(): RaceSounds | null {
+    if (!this.ready) return null;
+    return (this.raceSfx ??= new RaceSounds(this));
   }
 
   /** Must be called from a user gesture. */
@@ -504,12 +512,13 @@ export class AudioEngine {
    * soundscape (wind, pad, chase, machinery) fades out under it. `fly` (0..1):
    * flying, scaled by speed.
    */
-  update(dt: number, p: { exposure: number; speed: number; falling: number; chase: number; drone: THREE.Vector3 | null; inGame: boolean; zip?: number; belt?: boolean; heaven?: number; flying?: boolean; fly?: number; arena?: boolean }) {
+  update(dt: number, p: { exposure: number; speed: number; falling: number; chase: number; drone: THREE.Vector3 | null; inGame: boolean; zip?: number; belt?: boolean; heaven?: number; flying?: boolean; fly?: number; arena?: boolean; race?: boolean }) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    // in the Warden's arena the battle music takes the pad's and the chase's place
-    const hv = Math.max(0, Math.min(1, p.heaven ?? 0)) || (p.arena ? 0.75 : 0);
+    // in the Warden's arena the battle music takes the pad's and the chase's place; in the race, its own air does
+    const hv = Math.max(0, Math.min(1, p.heaven ?? 0)) || (p.arena ? 0.75 : 0) || (p.race ? 0.92 : 0);
     if (!p.arena && this.arenaSfx) this.arenaSfx.music(dt, 0, false);
+    if (!p.race && this.raceSfx) this.raceSfx.update(0, false);
     const world = 1 - hv;
     const zip = p.inGame ? p.zip ?? 0 : 0;
     this.zipGain.gain.setTargetAtTime(zip > 0 ? (0.05 + zip * 0.012) * world : 0, t, 0.08);

@@ -314,7 +314,7 @@ export class Arena {
     if (fight >= 0) h.riftOpened(fight);
     if (loud) {
       h.ui.big('A rift opens', 'rift mid', 'Where the machine fell, spacetime tears · step through', 3.2);
-      h.audio.arena?.gate();
+      h.audio.race?.rift(this.rift.p);
       h.cam.addShake(0.4);
       this.riftPortal!.pulse();
     }

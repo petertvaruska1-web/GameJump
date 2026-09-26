@@ -1559,7 +1559,7 @@ export class Game {
       if (local.motor.zip && !local.dead) { zip = local.motor.zipSpeed; speed = zip; }
       belt = !local.dead && b.grounded && !!b.ground?.def.belt;
     }
-    this.audio.update(dt, { exposure, speed, falling, chase: this.offCourse ? 0 : this.danger, drone: inGame && !this.offCourse ? this.nearestDrone : null, inGame, zip, belt, heaven: this.heaven.inRoom ? 1 : 0, flying, fly, arena: this.arenaShown && (this.mode === 'playing' || this.mode === 'results') });
+    this.audio.update(dt, { exposure, speed, falling, chase: this.offCourse ? 0 : this.danger, drone: inGame && !this.offCourse ? this.nearestDrone : null, inGame, zip, belt, heaven: this.heaven.inRoom ? 1 : 0, flying, fly, arena: this.arenaShown && (this.mode === 'playing' || this.mode === 'results'), race: this.raceShown && (this.mode === 'playing' || this.mode === 'results') });
   }
 
   private updateDebugText() {
