@@ -3,7 +3,9 @@
 // a fall is judged by the server, a teleport is corrected, and the match ends;
 // then the beacon opens and both go through to the Warden: powers chosen and
 // seen by each other, a power hurting it over the wire, a death that is final
-// while a teammate fights on, and the fight lost when both are down.
+// while a teammate fights on, and the fight lost when both are down; then the
+// Warden brought down, its rift, both runners pulled through into Speedster
+// Battle, running it, a runner going too fast refused, and the finish in order.
 //
 // With no WS set it starts server/index.ts itself on a free port and shuts it
 // down again, so it can run as part of `npm test`. Point WS at a running
@@ -11,8 +13,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import WebSocket from 'ws';
-import { ARENA, NET } from '../shared/constants';
+import { ARENA, NET, RACE, RIFT } from '../shared/constants';
 import { getLevel } from '../shared/level/map/index';
+import { getRace, trackIndex, trackPoint, trackS } from '../shared/level/race';
 import { BPart, PowAct, PROTOCOL_VERSION, Status } from '../shared/protocol';
 
 let fails = 0;
@@ -206,6 +209,56 @@ try {
   }
   const lost = await b.wait((m) => m.t === 'end', 6000);
   check('with the whole team down the fight is lost and the run ends', !lost.boss && typeof lost.fight === 'number', JSON.stringify({ boss: lost.boss, fight: lost.fight }));
+
+  // ------------------------------------------------------------------ past the Warden's rift, over the wire
+  a.msgs.length = 0; b.msgs.length = 0;
+  a.send({ t: 'start', stage: 'boss' });
+  await a.wait((m) => m.t === 'room' && m.phase === 'playing', 8000);
+  a.send({ t: 'pick', k: 0 });
+  b.send({ t: 'pick', k: 1 });
+  await waitEv(a, 'wake', () => true, 8000);
+  a.send({ t: 'dbg', cmd: 'rift' });
+  const rift = await waitEv(b, 'rift', () => true, (RIFT.OPEN_AFTER + 3) * 1000);
+  check('the Warden brought down opens a rift both runners see, with the fight time', !!rift && rift.fight > 0 && !b.msgs.some((m) => m.t === 'end'), JSON.stringify(rift));
+  // A walks up to it and in
+  const [rx, ry, rz] = rift.p;
+  const fy = ry - RIFT.HEIGHT + 0.05;
+  a.send({ t: 'dbg', cmd: 'tp', p: [rx, fy, rz - 3] });
+  for (let i = 0; i <= 6; i++) { a.send({ t: 'st', s: 400 + i, p: [rx, fy, rz - 3 + i * 0.5], v: [0, 0, 4], y: 0, a: 1, g: -1, b: 1 }); await new Promise((r) => setTimeout(r, 40)); }
+  a.send({ t: 'rift' });
+  const warp = await waitEv(b, 'warp', () => true, 4000);
+  const raced = await Promise.all([waitEv(a, 'race', () => true, 6000), waitEv(b, 'race', () => true, 6000)]);
+  check('stepping into the rift pulls both runners onto the race grid', warp.id === ja.id && !!raced[0].spawns[ja.id] && !!raced[1].spawns[jb.id], JSON.stringify(raced[0].spawns));
+  // run from "Go!": the course at 60 m/s is fine, a 25 m jump in one report is not
+  const RT = getRace().track;
+  const pt = { x: 0, y: 0, z: 0, h: 0, w: 0 };
+  const sOf = (p: number[]) => trackS(RT, trackIndex(RT, p[0], p[1], p[2], -1), p[0], p[2]);
+  const snapNow = await a.wait((m) => m.t === 'snap' && m.ts > 0, 4000);
+  await new Promise((r) => setTimeout(r, Math.max(0, (raced[0].go - snapNow.ts) * 1000 + 300)));
+  let sa = sOf(raced[0].spawns[ja.id]), sb = sOf(raced[0].spawns[jb.id]);
+  const fixes0 = a.msgs.filter((m) => m.t === 'fix').length;
+  let seq = 500;
+  const step = (c: typeof a, s: number, off: number, speed: number) => {
+    trackPoint(RT, s, pt);
+    const x = pt.x + Math.cos(pt.h) * off, z = pt.z - Math.sin(pt.h) * off;
+    c.send({ t: 'st', s: seq++, p: [x, pt.y + 0.05, z], v: [Math.sin(pt.h) * speed, 0, Math.cos(pt.h) * speed], y: pt.h, a: 1, g: -1, b: 2 });
+  };
+  for (let i = 0; i < 30; i++) { sa += 2; sb += 1.8; step(a, sa, -2, 60); step(b, sb, 2, 54); await new Promise((r) => setTimeout(r, 33)); }
+  check('racing down the course at 60 m/s is accepted', a.msgs.filter((m) => m.t === 'fix').length === fixes0);
+  step(a, sa + 25, -2, 60);
+  const fixed = await a.wait((m) => m.t === 'fix' && a.msgs.indexOf(m) >= 0, 3000).catch(() => null);
+  check('a runner covering 25 m in one report is put back', !!fixed && a.msgs.filter((m) => m.t === 'fix').length > fixes0);
+  // both close on the line: A first, B after
+  sa = RT.finishS - 40; sb = RT.finishS - 70;
+  trackPoint(RT, sa, pt); a.send({ t: 'dbg', cmd: 'tp', p: [pt.x, pt.y + 0.05, pt.z] });
+  trackPoint(RT, sb, pt); b.send({ t: 'dbg', cmd: 'tp', p: [pt.x, pt.y + 0.05, pt.z] });
+  await new Promise((r) => setTimeout(r, 150));
+  for (let i = 0; i < 60; i++) { sa += 2; sb += 2; step(a, sa, 0, 60); step(b, sb, 0, 60); await new Promise((r) => setTimeout(r, 33)); }
+  const ends = await Promise.all([a.wait((m) => m.t === 'end', 6000), b.wait((m) => m.t === 'end', 6000)]);
+  const row = (id: number) => ends[1].results.find((r: any) => r.id === id)?.race;
+  check('crossing the line finishes the race for both, in the order they crossed', !!ends[1].race && row(ja.id)?.place === 1 && row(jb.id)?.place === 2 && row(ja.id).time > 0,
+    JSON.stringify(ends[1].results.map((r: any) => r.race)));
+  check('the race\'s results carry each runner\'s top speed (never over the top speed)', row(ja.id)?.top > 50 && row(ja.id)?.top <= RACE.TOP);
 
   a.ws.close(); b.ws.close();
 } catch (err) {

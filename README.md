@@ -8,6 +8,9 @@ pads, timing laser gates, fighting conveyor belts, picking a route and staying o
 of sight, with the odd power crate to help. The beacon itself is a door: it pulls
 the whole team into a storm, where each runner picks one superpower and the team
 fights [the Warden](#the-warden), a four-legged war machine that guards the way on.
+When it falls, a rift tears open where it stood, and through it lies
+[Speedster Battle](#speedster-battle): a race down six kilometres of road through a
+gap in spacetime, where your mouse buttons are your legs.
 
 > Keep moving. Don't fall. Don't get seen. And if you do get seen, **run**.
 
@@ -106,6 +109,7 @@ What a static host can and cannot do:
 | `Space` in the air (the arena, Angel) | Beat the wings (up, again and again, while they have the strength); hold it on the way down to glide |
 | `R` (the arena, Sonic Force) | A sonic boom all round you |
 | Mouse wheel + left mouse (the arena, choosing) | Run along the power cards and pick one |
+| Left and right mouse, one after the other (Speedster Battle) | Strides: the faster they alternate, the faster you run (the same button twice is one stride) |
 | Left mouse | Take off / land, once Viktor has given you flight |
 | `Space` / `Ctrl` (or `C`) in flight | Climb / sink. `W` flies wherever the camera looks, `Shift` flies faster |
 
@@ -360,11 +364,12 @@ Its health bar sits across the top of the screen with the poise under it.
 Runners have 100 health (the angel 125) that comes back slowly, 2.25 a second
 after four seconds without a hit. Going down is final, as on the course: you
 watch your team fight on, and when the whole team is down the Warden has won and
-the fight starts over. The results show the fight time (against this browser's
-best when you win, how long you lasted when you lose), everyone's damage, bots
-destroyed and times down, with **Fight again** or **Start over** (`R`) straight
-back into the arena. Once a browser has been through the beacon, the lobby offers
-**Straight to the Warden** as well.
+the fight starts over. The results then show how long you lasted, everyone's
+damage, bots destroyed and times down, with **Start over** (`R`) straight back into
+the arena. Bring it down and the fight's time is kept against this browser's best,
+and the Warden's rift opens onto [Speedster Battle](#speedster-battle): the run's
+results come at the end of the race. Once a browser has been through the beacon,
+the lobby offers **Straight to the Warden** as well.
 
 It is meant to be hard. The Warden has 11,000 health (plus 70% for each extra
 runner), takes 135 poise to stagger, hits harder and attacks more often, and puts
@@ -390,6 +395,110 @@ the fight from snapshots and events and turns clicks into powers
 from primitives and shaders like the rest of the game (`src/render/WardenModel.ts`,
 `BotViews.ts`, `ArenaView.ts`, `ArenaFx.ts`), and all of its sound and its battle
 music are made on the spot (`src/audio/ArenaSounds.ts`, `BattleMusic.ts`).
+
+## Speedster Battle
+
+When the Warden has come apart, a rift tears open in the arena floor on the side
+away from its wreck: a violet ring of deep space with a column of light over it,
+and a deep swell of sound. Step into it and it pulls the whole team through
+(anyone who fell in the fight comes too); if nobody steps in, it takes everyone
+after 20 seconds anyway. The fight's time is recorded the moment the rift opens.
+
+The team arrives on a start grid, in slots in their own colours, at the head of a
+road of light through a gap in spacetime. The camera takes in the course, a
+countdown runs, and then it is a race to the Event Horizon six kilometres away.
+
+### How you run
+
+Everyone runs as a speedster. Holding `W` runs at 11 m/s, a little over a normal
+sprint. The speed comes from your mouse buttons: **left, right, left, right**.
+Every click on the other button from the last is a stride; clicking the same
+button again is still one stride (it flashes red on the HUD and does not count).
+Your pace is read from your last few strides, and it sets the speed you are
+driving toward:
+
+| Strides a second | Speed |
+|---|---|
+| none (forward only) | 11 m/s (40 km/h) |
+| 3 | about 28 m/s (100 km/h) |
+| 7 | about 47 m/s (170 km/h) |
+| 11 | about 66 m/s (238 km/h) |
+| 13 or more | 75 m/s (270 km/h), the top |
+
+Every stride pushes you on at once, so a click is felt before the pace is even
+known; the speed climbs toward the pace's at 30 m/s² and sinks at 13 m/s² when you
+slow down, so a short pause is forgiven. Stop clicking and the pace falls away
+smoothly back to the base speed. Climbs cost speed and descents give it, and a
+kicker throws you as far as you hit it fast. The mouse steers (the camera), `A`/`D`
+move you across the road, `Space` jumps and `Q`/`E` dash; there is no slide in the
+race. Headless runners take about 88 s to finish striding 11 times a second, 81 s
+flat out, two minutes at 7 and three and a half at 3.
+
+### The course
+
+About 6.3 km in eight sections, walled on both sides by force fields you cannot
+fall past or climb over (scrape one and it costs you the speed that went into it):
+
+| Section | What it is |
+|---|---|
+| The Tear | The start straight, three abreast |
+| Aurora Bend | A long sweeping descent under curtains of aurora |
+| Crystal Narrows | S-curves and climbs through a forest of crystal spires |
+| First Leap | A kicker over a glowing crack: fly it fast, or roll through its trough slowly |
+| The Long Fall | A kilometre of straight descent: the top speed, and the place to overtake |
+| Nebula Spiral | A 270° descending spiral round a towering crystal core girdled by orbital rings |
+| Second Leap | Another kicker |
+| Event Horizon | The final straight into a vast swirling ring: the finish |
+
+Checkpoint rings every 400 m flash the colour of whoever runs through them.
+
+### The trail
+
+Every runner pours a ribbon of light from its hips in its own colour (orange,
+teal or violet), as long and as bright as it is fast: a metre-long wisp at the
+base speed, eighty metres of blazing light flat out. It is a hot core that
+whitens with speed inside a soft halo, with thin filaments winding round it that
+spread apart toward the tail like a wake, and a glow painted on the road beneath.
+It follows every curve you ran (it is resampled along its length each frame, so
+it is one smooth strip), and it shortens smoothly as you slow. Flat out, runners
+shed motes of their light too; the view widens, pulls back a little and hums, and
+space dust streaks past.
+
+### Racing each other
+
+The server decides the race: where each runner is along the course, the finish
+line, the places and the times. A finish is timed on the runner's own clock
+between its last two reports, so a close finish is decided by the running, not
+by whose messages arrived first. Everyone else is drawn where they really are
+(their interpolated position led forward by their velocity: without it a rival at
+75 m/s would be drawn 8 m behind where it is, and overtakes would lie), so side by
+side on a straight is side by side. Runners pass through each other. Once the
+winner is home the rest have 30 s; anyone still running then is placed by how far
+they got. The HUD shows your speed on a dial in your colour (with a mark where your
+pace is taking you), your strides and the button to click next, your place, and
+the course as a strip with everyone's dot on it.
+
+The results show your race time, top and average speed and place against this
+browser's best, with the fight and the course before it. **Race again** (`R`)
+puts the team straight back on the grid; once a browser has been through the
+rift, the lobby offers **Straight to Speedster Battle**.
+
+### How it is built
+
+`shared/sim/cadence.ts` turns strides into a speed; `shared/physics/character.ts`
+has the race running (the motor's `race` mode: the drive, slopes, barriers and a
+kicker's lift), used by the client and by the headless tests alike.
+`shared/level/race.ts` lays the course out as a centreline sampled every 2 m and
+builds its invisible floor and barriers from it; `shared/sim/race.ts` is the
+server's side of the race, and `shared/sim/room.ts` the stages (`rift`, `warp`,
+`race`). On the client `src/game/Race.ts` runs it, `src/render/RaceView.ts` draws
+the road, barriers, rings and portals from the same samples, `RaceSky.ts` the sky
+(stars, the galaxy band, the nebula, the tear and a black hole in one shader, and a
+ringed gas giant), `RaceScenery.ts` the crystals, rocks, auroras and the spiral's
+core, `SpeedTrail.ts` the trails, `src/ui/RaceHud.ts` the HUD and
+`src/audio/RaceSounds.ts` the sound (a rush of air, an energy hum and a cosmic pad
+that follow your speed, a tick for every stride, whooshes as you cross into faster
+tiers, kickers, rings and rivals going past).
 
 ## The level
 
@@ -636,6 +745,7 @@ src/                    client
   audio/Audio.ts        procedural WebAudio (no asset files)
   audio/HeavenMusic.ts  the portal's music: choir, strings, harp and bells in a long reverb, stingers, Viktor's voice
   game/Heaven.ts        the portal easter egg: the portal on the course, the white room, Viktor's speech, flight's return
+  game/Arena.ts, Race.ts  the Warden's fight and Speedster Battle past it
   render/PortalView.ts, HeavenView.ts, ViktorModel.ts
   debug/Debug.ts        developer overlay
 scripts/                headless test and design tools
@@ -644,7 +754,7 @@ scripts/                headless test and design tools
 ## Tests & tools
 
 ```bash
-npm test               # map validation + route bot + enemy AI scenarios + obstacle authority checks + the arena floor + the Warden + multiplayer
+npm test               # map validation + route bot + enemy AI scenarios + obstacle authority checks + the arena floor + the Warden + Speedster Battle + multiplayer
 npm run check:map      # validates gaps against measured jump limits, renders dist/map.svg
 npm run test:routes    # a bot drives the real controller along every route start -> finish
 npm run test:ai        # detect / chase / kill / lose-target scenarios for each enemy type
@@ -675,6 +785,13 @@ npm run test:boss      # the Warden against the real Room: the beacon pulling th
 #                        by headless fighters: how long each power takes (3-5 min solo), how long a fighter lasts,
 #                        teams of 2 and 3, and no two fights open the same way (QUICK=1 skips the whole fights)
 npm run check:arena    # the arena's floor ends where it is drawn: nothing to stand on over the moat or under the rampart
+npm run test:race      # Speedster Battle: the stride cadence (only alternating clicks count, slow vs fast, fading
+#                        when you stop), the course (floor under every lane, barriers both sides, no curve too
+#                        tight, no stretch overlapping another), headless runners on the real controller at 0-13
+#                        strides a second (times, never off the road, kickers flown or rolled through, a head-on
+#                        barrier at 75 m/s), and the room: the rift, the warp with the fallen, the grid and "Go!",
+#                        speed limits, the finish on the runner's own clock, places, the grace after the winner,
+#                        results, rematch, restart, reconnect
 npm run test:server    # two headless clients against a server it starts itself: room codes, the
 #                        ready gate, a synchronised countdown, snapshots, a server-judged fall, a
 #                        rejected teleport, the end of a match and restarting from the results; then
@@ -711,6 +828,7 @@ debug commands, which is the default in dev.
 | `F6` | Enemy vision cones (range, FOV, close-range sense radius) |
 | `F7` | God mode (enemies and lasers can't kill you; falling still does) |
 | `F8` | Restart the match (host) |
+| `F9` | On the course: open the portal in front of you. In the arena: bring the Warden down now (its rift opens) |
 | `F10` | On the course: open the beacon now. In the arena: the Warden to 51% (`Shift`: 3%) |
 | `1`–`0` | With the overlay open: teleport to section waypoints (`Shift` adds 10) |
 
@@ -744,6 +862,12 @@ The settings menu has an FPS counter for normal play.
   effects. The fight's client update takes about 0.2 ms a frame; its effects are pooled
   (rings, fireballs, rifts, afterimages, markers) and every bolt, beam, tether and streak
   is one camera-facing ribbon mesh.
+- Speedster Battle is its own scene: 73-89 draw calls and 120-126k triangles in active
+  play. The road and the barriers are one mesh each for the whole course, the ~1,300
+  crystals and ~120 rocks three instanced meshes, the sky one shader, every runner's
+  trail one dynamic mesh rebuilt each frame (a few thousand vertices), the checkpoint
+  rings one instanced mesh, and the space dust one line mesh wrapped round the camera
+  in its vertex shader.
 - The portal is 11 draw calls, all animated in shaders (the swirl, the sparks, the
   orbiting shards and the light column cost nothing on the CPU). The white room is
   its own small scene: about 194 draw calls and 131k triangles with Viktor in view,
