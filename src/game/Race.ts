@@ -59,6 +59,7 @@ const ORDINAL = ['', '1st', '2nd', '3rd'];
 export const ordinal = (n: number) => ORDINAL[n] ?? `${n}th`;
 
 const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
+const ZERO = new THREE.Vector3();
 const pt = { x: 0, y: 0, z: 0, h: 0, w: 0 };
 
 export interface RaceBest { time: number | null; top: number | null }
@@ -79,6 +80,8 @@ export class Race {
   /** Every runner's sample hint and distance along the course. */
   private readonly hint = new Map<number, number>();
   readonly progress = new Map<number, number>();
+  /** The last checkpoint ring each runner went through (index into the course's rings). */
+  private readonly ringAt = new Map<number, number>();
   /** Who is home: time, place, top and average speed (from the server). */
   readonly home = new Map<number, { time: number; place: number; top?: number; avg?: number }>();
   /** Past the line: the strides no longer count, the runner coasts down the run-out. */
@@ -115,7 +118,7 @@ export class Race {
     this.revealT = -1;
     this.coasting = false;
     this.cadence.reset();
-    this.hint.clear(); this.progress.clear(); this.home.clear();
+    this.hint.clear(); this.progress.clear(); this.home.clear(); this.ringAt.clear();
     this.place = 1; this.top = 0; this.section = -1; this.lastCount = 99;
     const local = this.host.local();
     if (local) { local.motor.race = false; local.model.setPowerColor(null); }
@@ -221,7 +224,7 @@ export class Race {
     // everyone else is drawn where they really are (ahead of the interpolation), and keeps its speed
     for (const rp of h.remotes()) { rp.lead = NET.INTERP_DELAY; rp.maxSpeed = RACE.MAX_CLIENT_SPEED + 15; }
     this.updatePlaces(local);
-    this.view.update(time, dt, h.camera.position, mt);
+    this.view.update(time, dt, h.camera.position, mt, local && !local.dead ? local.renderVel : ZERO);
     this.updateHud(local, mt);
     if (this.revealT >= 0) { this.revealT += dt; if (this.revealT > REVEAL) this.endReveal(); }
   }
@@ -232,7 +235,15 @@ export class Race {
     const at = (id: number, p: THREE.Vector3) => {
       const i = trackIndex(T, p.x, p.y, p.z, this.hint.get(id) ?? -1);
       this.hint.set(id, i);
-      this.progress.set(id, trackS(T, i, p.x, p.z));
+      const s = trackS(T, i, p.x, p.z);
+      this.progress.set(id, s);
+      // through a checkpoint ring: it flashes the runner's colour
+      let r = this.ringAt.get(id) ?? -1;
+      while (r + 1 < T.rings.length && s >= T.rings[r + 1]) {
+        r++;
+        if (s - T.rings[r] < 40) this.passedRing(id, r, p);
+      }
+      this.ringAt.set(id, r);
     };
     if (local) at(me, local.renderPos);
     for (const rp of h.remotes()) at(rp.id, rp.pos);
@@ -246,6 +257,14 @@ export class Race {
     });
     this.place = Math.max(1, ids.indexOf(me) + 1);
     if (local) this.top = Math.max(this.top, Math.hypot(local.renderVel.x, local.renderVel.z));
+  }
+
+  /** Runner `id` went through ring `i` at `p`. */
+  private passedRing(id: number, i: number, p: THREE.Vector3) {
+    const c = PLAYER_COLORS[(id - 1) % 3];
+    this.view?.passRing(i, c);
+    const col = new THREE.Color(c);
+    this.host.particles.burst(p.x, p.y + 1.2, p.z, 26, 7, 0.6, 0.25, [col.r, col.g, col.b], 1, -1, 2);
   }
 
   private updateHud(local: LocalPlayer | null, mt: number) {
