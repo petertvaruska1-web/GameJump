@@ -256,10 +256,12 @@ kbd {
 
 /* ------------------------------------------------------------ the Warden's arena */
 #heaven-fade.storm { background: radial-gradient(ellipse at center, #ffffff 0%, #e4f6ff 30%, #7fb4ff 70%, #3a2a8a 100%); }
+#heaven-fade.rift { background: radial-gradient(ellipse at center, #ffffff 0%, #e6dcff 22%, #8a6cff 55%, #1c0b4a 100%); }
 .big-msg.warden { color: #ff6a3d; text-shadow: 0 0 34px rgba(255, 90, 40, 0.55), 0 8px 40px rgba(0, 0, 0, 0.6); letter-spacing: 0.14em; }
 /* mid-fight banners: big enough to land, never big enough to hide the fight */
 .big-msg.mid { font-size: clamp(34px, 4.6vw, 62px); white-space: nowrap; }
 .big-msg.storm { color: #bfe9ff; text-shadow: 0 0 30px rgba(110, 190, 255, 0.7), 0 8px 40px rgba(0, 0, 0, 0.55); }
+.big-msg.rift { color: #d9ccff; text-shadow: 0 0 30px rgba(150, 110, 255, 0.75), 0 0 60px rgba(60, 230, 220, 0.25), 0 8px 40px rgba(0, 0, 0, 0.55); }
 #hud.arena .hud-objective { top: 84px; font-size: 13px; }
 #hud.arena .hud-tip { top: 112px; }
 #hud.arena .hud-powers { bottom: 104px; }

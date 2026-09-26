@@ -19,6 +19,17 @@ export class RemotePlayer {
   status: Status = Status.Alive;
   anim: number = Anim.Idle;
   connected = true;
+  /** Faster than this between frames is a jump in the snapshots, not running (a racer runs far faster). */
+  maxSpeed = 30;
+  /**
+   * Seconds to draw the runner ahead of where interpolation puts it, along its
+   * velocity. Interpolation shows everyone INTERP_DELAY in the past, which at a
+   * racer's 75 m/s is 8 m behind where it really is: an overtake would lie.
+   */
+  lead = 0;
+  /** Where interpolation puts it, and the velocity the lead is taken along (smoothed). */
+  private readonly base = new THREE.Vector3();
+  private readonly leadVel = new THREE.Vector3();
   private tmp: number[] = [];
   private lastPos = new THREE.Vector3();
   private lastYaw = 0;
@@ -39,6 +50,8 @@ export class RemotePlayer {
   place(x: number, y: number, z: number, yaw: number) {
     this.buf.clear();
     this.pos.set(x, y, z);
+    this.base.set(x, y, z);
+    this.leadVel.set(0, 0, 0);
     this.yaw = yaw;
     this.lastPos.copy(this.pos);
     this.hasPos = true;
@@ -47,15 +60,20 @@ export class RemotePlayer {
 
   update(renderT: number, dt: number, t: number) {
     if (this.buf.sample(renderT, this.tmp, [3])) {
-      this.pos.set(this.tmp[0], this.tmp[1], this.tmp[2]);
+      this.base.set(this.tmp[0], this.tmp[1], this.tmp[2]);
       this.yaw = this.tmp[3];
     }
-    if (!this.hasPos) { this.lastPos.copy(this.pos); this.hasPos = true; }
+    if (!this.hasPos) { this.lastPos.copy(this.base); this.hasPos = true; }
     if (dt > 0) {
-      this.vel.subVectors(this.pos, this.lastPos).divideScalar(dt);
-      if (this.vel.lengthSq() > 900) this.vel.set(0, 0, 0);
+      this.vel.subVectors(this.base, this.lastPos).divideScalar(dt);
+      if (this.vel.lengthSq() > this.maxSpeed * this.maxSpeed) this.vel.set(0, 0, 0);
     }
-    this.lastPos.copy(this.pos);
+    this.lastPos.copy(this.base);
+    this.pos.copy(this.base);
+    if (this.lead > 0) {
+      this.leadVel.lerp(this.vel, 1 - Math.exp(-10 * dt));
+      this.pos.addScaledVector(this.leadVel, this.lead);
+    } else this.leadVel.copy(this.vel);
     let turn = 0;
     if (dt > 0) {
       let d = this.yaw - this.lastYaw;

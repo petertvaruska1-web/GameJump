@@ -16,6 +16,8 @@ export interface UIHandlers {
   start(): void;
   /** Straight into the Warden's arena (a rematch, or from the lobby once the beacon has been reached). */
   startBoss(): void;
+  /** Straight onto the race grid (Speedster Battle), once this browser has been there. */
+  startRace(): void;
   /** Throw away the run in progress and count down a new one (host alone in the room). */
   restart(): void;
   leave(): void;
@@ -345,6 +347,7 @@ export class UI {
         <div class="row">
           ${!isHost ? `<button class="btn small ${me?.ready ? '' : 'primary'}" data-a="ready">${me?.ready ? 'Not ready' : 'Ready'}</button>` : ''}
           ${isHost && reachedWarden() ? `<button class="btn small" data-a="boss" ${allReady ? '' : 'disabled'} title="Skip the course: the fight with the Warden">Straight to the Warden</button>` : ''}
+          ${isHost && reachedRace() ? `<button class="btn small" data-a="race" ${allReady ? '' : 'disabled'} title="Skip to the race past the Warden's rift">Straight to Speedster Battle</button>` : ''}
           ${isHost ? `<button class="btn primary center" data-a="start" ${allReady ? '' : 'disabled'}>Start run</button>` : ''}
         </div>
       </div>
@@ -354,6 +357,7 @@ export class UI {
     s.querySelector('[data-a=ready]')?.addEventListener('click', () => this.h.ready(!me?.ready));
     s.querySelector('[data-a=start]')?.addEventListener('click', () => this.h.start());
     s.querySelector('[data-a=boss]')?.addEventListener('click', () => this.h.startBoss());
+    s.querySelector('[data-a=race]')?.addEventListener('click', () => this.h.startRace());
     // Enter or Space starts the run straight away
     const startBtn = s.querySelector<HTMLButtonElement>('[data-a=start]:not([disabled])');
     if (startBtn && (document.activeElement === document.body || !document.activeElement)) startBtn.focus();
@@ -485,10 +489,11 @@ export class UI {
    * Fades the screen to (or from) white light. `to` is the target opacity, over
    * `seconds`; the colour warms toward gold for the blessing.
    */
-  whiteout(to: number, seconds: number, warm = false, tone: '' | 'storm' = '') {
+  whiteout(to: number, seconds: number, warm = false, tone: '' | 'storm' | 'rift' = '') {
     const f = this.fade;
     f.classList.toggle('warm', warm);
     f.classList.toggle('storm', tone === 'storm');
+    f.classList.toggle('rift', tone === 'rift');
     f.style.transition = `opacity ${seconds}s ${to > 0 ? 'ease-in' : 'ease-out'}`;
     void f.offsetWidth;
     f.style.opacity = String(to);
@@ -555,14 +560,14 @@ export class UI {
 
   // ------------------------------------------------------------------ overlays
 
-  pause(isHost: boolean, offline: boolean, solo = false, arena = false) {
+  pause(isHost: boolean, offline: boolean, solo = false, arena = false, race = false) {
     this.closeOverlay();
     const o = el(`<div class="screen center interactive"><div class="panel" style="width:min(380px,92vw)">
       <h2>Paused</h2>
       ${offline ? '' : '<p class="hint">The world keeps moving while you are in this menu.</p>'}
       <div class="menu" style="width:100%">
         <button class="btn primary" data-a="resume">Resume</button>
-        ${isHost && solo ? `<button class="btn" data-a="restart">${arena ? 'Restart the fight' : 'Restart run'}</button>` : ''}
+        ${isHost && solo ? `<button class="btn" data-a="restart">${race ? 'Restart the race' : arena ? 'Restart the fight' : 'Restart run'}</button>` : ''}
         <button class="btn" data-a="settings">Settings</button>
         <button class="btn" data-a="how">How to play</button>
         ${isHost ? `<button class="btn" data-a="lobby">${solo ? 'Back to lobby' : 'Return everyone to lobby'}</button>` : ''}
@@ -571,7 +576,7 @@ export class UI {
     this.root.appendChild(o);
     this.overlay = o;
     const panel = o.querySelector('.panel')!;
-    const back = () => this.pause(isHost, offline, solo, arena);
+    const back = () => this.pause(isHost, offline, solo, arena, race);
     o.querySelector('[data-a=restart]')?.addEventListener('click', () => this.h.restart());
     o.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button')) this.h.click(); });
     o.querySelector('[data-a=resume]')!.addEventListener('click', () => this.h.resume());
@@ -750,6 +755,11 @@ export function fmtTime(sec: number) {
 /** Has this browser ever been through the beacon? (The lobby then offers the fight on its own.) */
 function reachedWarden() {
   try { return localStorage.getItem('skyfall.warden.v1') === '1'; } catch { return false; }
+}
+
+/** Has this browser ever been through the Warden's rift? (The lobby then offers the race on its own.) */
+function reachedRace() {
+  try { return localStorage.getItem('skyfall.race.v1') === '1'; } catch { return false; }
 }
 
 /** A phone or tablet with no mouse or trackpad: the game cannot be controlled there. */

@@ -22,6 +22,12 @@ export class Input {
   mouseRightDown = false;
   /** Mouse wheel notches this frame (+ down, - up), while the mouse is captured. */
   wheel = 0;
+  /**
+   * Every left (0) and right (1) button press this frame while the mouse is captured,
+   * in order, with the moment it happened (performance.now() time, ms): Speedster
+   * Battle reads its strides from these, so fast clicks between frames all count.
+   */
+  readonly clicks: { b: 0 | 1; t: number }[] = [];
   locked = false;
   /**
    * A lock request is in flight. Starting a run asks for the mouse from the
@@ -58,6 +64,7 @@ export class Input {
     canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0) { this.mouseClicked = true; if (this.locked) { this.mouseLeftPressed = true; this.mouseLeftDown = true; } }
       if (e.button === 2) { this.mouseRightPressed = true; this.mouseRightDown = true; }
+      if (this.locked && (e.button === 0 || e.button === 2)) this.clicks.push({ b: e.button === 0 ? 0 : 1, t: e.timeStamp || performance.now() });
     });
     // on the window, so letting go over a menu or outside the page still counts
     window.addEventListener('mouseup', (e) => { if (e.button === 2) this.mouseRightDown = false; if (e.button === 0) this.mouseLeftDown = false; });
@@ -109,6 +116,7 @@ export class Input {
     this.mouseLeftPressed = false;
     this.mouseRightPressed = false;
     this.wheel = 0;
+    this.clicks.length = 0;
   }
 }
 

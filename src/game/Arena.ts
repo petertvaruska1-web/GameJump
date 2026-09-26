@@ -4,6 +4,7 @@
 // the local runner take part. It follows the room through three stages:
 //
 //   course --someone reaches the beacon ('gate')--> gate --2.6 s ('arena')--> boss
+//   boss --the Warden down ('rift')--> a runner steps in ('warp') --2.6 s--> the race (Race.ts)
 //
 // On the course nothing here is visible. When the beacon opens, a storm portal
 // tears open above it, the sky turns and lightning walks toward it; a moment
@@ -23,7 +24,7 @@
 // can stand on its back and ride it.
 
 import * as THREE from 'three';
-import { ARENA, BOSS, NET, PHP, POW, powerHp, SUPERS } from '../../shared/constants';
+import { ARENA, BOSS, NET, PHP, POW, powerHp, RIFT, SUPERS } from '../../shared/constants';
 import { getArena, type ArenaData } from '../../shared/level/arena';
 import type { LevelData } from '../../shared/level/types';
 import { clamp, damp, lerp, smoothstep } from '../../shared/math';
@@ -73,6 +74,8 @@ export interface ArenaHost {
   storm(k: number): void;
   /** The arena runs its own sky flash (lightning over the Anvil). */
   flashSky(k: number): void;
+  /** The Warden is down and its rift open: the fight took `fight` seconds (a record to keep). */
+  riftOpened(fight: number): void;
 }
 
 /** Last power picked in this browser, offered first next time. */
@@ -116,6 +119,12 @@ export class Arena {
   fx: ArenaFx | null = null;
   /** The storm portal that tears open over the course's beacon. */
   private gatePortal: PortalView | null = null;
+  /** The rift the Warden leaves (drawn from the portal, in deep-space colours), and when it takes everyone. */
+  private riftPortal: PortalView | null = null;
+  private rift: { p: THREE.Vector3; at: number; auto: number } | null = null;
+  private riftClaim = -9;
+  private warpAt = 0;
+  private riftTold = -1;
 
   stage: Stage = 'course';
   private gateAt = 0;
@@ -220,9 +229,14 @@ export class Arena {
     this.gatePortal.group.visible = false;
     this.gatePortal.group.scale.setScalar(2.4);
     h.scene.add(this.gatePortal.group);
+    this.riftPortal = new PortalView(h.glowTex, { beam: true, palette: 'rift' });
+    this.riftPortal.group.visible = false;
+    this.riftPortal.group.scale.setScalar(RIFT.SCALE);
+    h.scene.add(this.riftPortal.group);
   }
 
-  get inArena() { return this.stage === 'boss'; }
+  /** In the arena: fighting, or (after the Warden) on the way through its rift. */
+  get inArena() { return this.stage === 'boss' || this.stage === 'warp'; }
   get level(): LevelData { return this.data.level; }
   get world() { return this.view?.world ?? null; }
   /** The arrival shot (going down is watched like on the course: your body, then your team). */
@@ -263,15 +277,20 @@ export class Arena {
     if (this.view) this.view.group.visible = false;
     if (this.warden) this.warden.root.visible = false;
     if (this.gatePortal) { this.gatePortal.close(true); this.gatePortal.group.visible = false; }
+    if (this.riftPortal) { this.riftPortal.close(true); this.riftPortal.group.visible = false; }
+    this.rift = null;
+    this.riftClaim = -9;
+    this.warpAt = 0;
+    this.riftTold = -1;
     this.host.storm(0);
   }
 
   // ------------------------------------------------------------------ the stages
 
   /** A run starts (or is resumed): where it is. */
-  onStart(m: { stage?: Stage; gateAt?: number; picks?: [number, number][]; awake?: boolean; wake?: number; spawns: Record<number, [number, number, number]>; resume?: boolean }, mt: number) {
+  onStart(m: { stage?: Stage; gateAt?: number; picks?: [number, number][]; awake?: boolean; wake?: number; spawns: Record<number, [number, number, number]>; resume?: boolean; rift?: number[]; warpAt?: number }, mt: number) {
     this.reset();
-    if (!m.stage || m.stage === 'course') return;
+    if (!m.stage || m.stage === 'course' || m.stage === 'race') return;
     this.ensureViews();
     if (m.stage === 'gate') {
       this.openGate(m.gateAt ?? mt + ARENA.GATE_TIME, 0, mt);
@@ -281,6 +300,35 @@ export class Arena {
     this.arrive(m.spawns, m.wake ?? mt + ARENA.WAKE_AFTER, mt, !m.resume);
     for (const [id, k] of m.picks ?? []) this.picked(id, k);
     if (m.awake) this.woke(false);
+    // back after the Warden fell: its rift is open (or already pulling everyone through)
+    if (m.rift) this.openRift(m.rift, -1, false);
+    if (m.stage === 'warp' && m.warpAt) this.startWarp(m.warpAt);
+  }
+
+  /** The Warden is down: its rift tears open (`fight`: the fight's time, -1 when resuming). */
+  private openRift(r: readonly number[], fight: number, loud: boolean) {
+    this.ensureViews();
+    const h = this.host;
+    this.rift = { p: new THREE.Vector3(r[0], r[1], r[2]), at: r[4], auto: r[5] };
+    this.riftPortal!.place([r[0], r[1] - RIFT.HEIGHT, r[2]], r[3], r[4]);
+    if (fight >= 0) h.riftOpened(fight);
+    if (loud) {
+      h.ui.big('A rift opens', 'rift mid', 'Where the machine fell, spacetime tears · step through', 3.2);
+      h.audio.arena?.gate();
+      h.cam.addShake(0.4);
+      this.riftPortal!.pulse();
+    }
+    h.ui.objective('Step into the rift', 8);
+  }
+
+  /** Someone stepped into the rift (or it took everyone): the light swallows the team at `at`. */
+  private startWarp(at: number) {
+    this.stage = 'warp';
+    this.warpAt = at;
+    this.whited = false;
+    this.riftPortal?.pulse();
+    this.host.cam.addShake(0.3);
+    this.host.ui.objective('Through the rift', 3);
   }
 
   /** The beacon opens (runner `by` reached it): the storm portal, and in `gateAt` the jump. */
@@ -468,6 +516,13 @@ export class Arena {
         return true;
       case 'arena':
         this.arrive(e.spawns, e.wake, mt, true);
+        return true;
+      case 'rift':
+        this.openRift([e.p[0], e.p[1], e.p[2], e.yaw, e.at, e.auto], e.fight, true);
+        return true;
+      case 'warp':
+        if (e.id && e.id !== h.meId()) h.ui.toast(`${h.name(e.id)} stepped into the rift`);
+        this.startWarp(e.at);
         return true;
       case 'pick':
         if (e.id !== me || this.myPick !== e.power) this.picked(e.id, e.power);
@@ -959,8 +1014,26 @@ export class Arena {
 
     this.updateHud(dt, mt, local);
     this.updateAudio(dt, local);
+    this.updateRift(dt, time, mt, local);
     if (this.revealT >= 0) this.revealT += dt;
     if (this.revealT > REVEAL) this.endReveal();
+  }
+
+  /** The rift: it breathes, a runner who walks into it takes the team through, and the warp swallows them. */
+  private updateRift(dt: number, time: number, mt: number, local: LocalPlayer | null) {
+    const r = this.rift;
+    if (!r || !this.riftPortal) return;
+    const h = this.host;
+    this.riftPortal.update(time, dt, mt, h.camera.position);
+    if (this.stage === 'boss' && local && !local.dead && mt >= r.at) {
+      // through the ring: the chest within its opening (the server checks it again)
+      const p = local.renderPos;
+      const d = Math.hypot(p.x - r.p.x, p.y + 1.2 - r.p.y, p.z - r.p.z);
+      if (d < RIFT.ENTER && time - this.riftClaim > 0.5) { this.riftClaim = time; h.send({ t: 'rift' }); }
+      const left = Math.ceil(r.auto - mt);
+      if (left !== this.riftTold && left <= 10 && left > 0) { this.riftTold = left; h.ui.objective(`Step into the rift · it takes everyone in ${left} s`, 1.2); }
+    }
+    if (this.stage === 'warp' && !this.whited && this.warpAt - mt < 0.7) { this.whited = true; h.ui.whiteout(1, 0.6, false, 'rift'); h.audio.arena?.swallow(); }
   }
 
   /** The beacon is open: the storm gathers over it, then the light takes everyone. */

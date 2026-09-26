@@ -25,6 +25,8 @@ const SHARDS = 14;
 const PALETTES = {
   gold: { a: [0.93, 0.58, 0.2], b: [1.0, 0.93, 0.76], c: [0.62, 0.8, 1.0], frame: 0xe8b64c, frameGlow: 0x7a4c08, rim: [1.5, 1.08, 0.42], glow: 0xffc766, flare: 0xfff2d8 },
   storm: { a: [0.12, 0.42, 1.0], b: [0.7, 0.95, 1.0], c: [0.75, 0.55, 1.0], frame: 0x8fa8c8, frameGlow: 0x0d3a70, rim: [0.45, 1.3, 2.2], glow: 0x5fd0ff, flare: 0xe2f8ff },
+  /** The rift the Warden leaves: a tear into deep space, violet and cyan. */
+  rift: { a: [0.38, 0.08, 0.95], b: [0.82, 0.96, 1.0], c: [0.2, 0.95, 0.9], frame: 0x7d68c8, frameGlow: 0x2a0c6e, rim: [1.1, 0.5, 2.4], glow: 0xa98cff, flare: 0xf0e8ff },
 };
 export type PortalPalette = keyof typeof PALETTES;
 
@@ -281,7 +283,7 @@ export class PortalView {
     this.flareSprite.scale.set(2.2, 2.6, 1);
     this.group.add(this.glow, this.flareSprite);
     // light on the ground
-    const gm = new THREE.MeshBasicMaterial({ map: groundGlowTexture(), color: opts.palette === 'storm' ? new THREE.Color(0.45, 0.85, 1.4) : 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    const gm = new THREE.MeshBasicMaterial({ map: groundGlowTexture(), color: opts.palette === 'storm' ? new THREE.Color(0.45, 0.85, 1.4) : opts.palette === 'rift' ? new THREE.Color(0.9, 0.55, 1.5) : 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(6.5, 6.5), gm);
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.position.y = 0.03;
