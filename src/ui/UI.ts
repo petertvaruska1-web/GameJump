@@ -61,6 +61,14 @@ export interface DialogueView {
 }
 
 /** How the local runner's run went, for the results screen. */
+/** Speedster Battle, as the results tell it: your race against this browser's best. */
+export interface RaceSummary {
+  /** Your race time (undefined: still running when it ended), place, top and average speed (m/s). */
+  time?: number; place: number; top: number; avg: number;
+  /** The best time and top speed before this race, and whether this race beat them. */
+  prevBest: number | null; best: boolean; prevTop: number | null; topBest: boolean;
+}
+
 export interface RunSummary {
   /** 0..1 of the way from the start line to the Spire. */
   progress: number;
@@ -505,6 +513,9 @@ export class UI {
   /** In the Warden's arena: the fight's HUD takes over parts of the run's. */
   arenaHud(on: boolean) { this.hud.classList.toggle('arena', on); this.hud.querySelector('.crosshair')?.classList.toggle('arena', on); }
 
+  /** In Speedster Battle: the race's HUD takes over parts of the run's. */
+  raceHud(on: boolean) { this.hud.classList.toggle('race', on); }
+
   /** In the white room the HUD's light-on-dark text turns dark-on-light. */
   heavenHud(on: boolean) { this.hud.classList.toggle('heaven', on); }
 
@@ -595,7 +606,8 @@ export class UI {
 
   closePause() { this.closeOverlay(); }
 
-  results(results: MatchResult[], meId: number, isHost: boolean, duration: number, run?: RunSummary, fight?: FightSummary) {
+  results(results: MatchResult[], meId: number, isHost: boolean, duration: number, run?: RunSummary, fight?: FightSummary, race?: RaceSummary) {
+    if (race) { this.raceResults(results, meId, isHost, race, fight, run); return; }
     if (fight) { this.fightResults(results, meId, isHost, fight, run); return; }
     this.closeOverlay();
     const me = results.find((r) => r.id === meId);
@@ -623,6 +635,57 @@ export class UI {
     o.querySelector('[data-a=lobby]')?.addEventListener('click', () => this.h.toLobby());
     o.querySelector('[data-a=again]')?.addEventListener('click', () => this.h.start());
     o.querySelector<HTMLButtonElement>('[data-a=again]')?.focus();
+  }
+
+  /** Speedster Battle is over: your race, everyone's places, the fight and the course before it, and another race. */
+  private raceResults(results: MatchResult[], meId: number, isHost: boolean, r: RaceSummary, f?: FightSummary, run?: RunSummary) {
+    this.closeOverlay();
+    const me = results.find((x) => x.id === meId);
+    const solo = results.length === 1;
+    const kmh = (v: number) => `${Math.round(v * 3.6)}`;
+    const ord = (n: number) => `${n}${['th', 'st', 'nd', 'rd'][n] ?? 'th'}`;
+    const title = r.time === undefined ? 'Out of time' : solo ? 'Home' : r.place === 1 ? 'You won the race' : `${ord(r.place)} place`;
+    const stat = (v: string, l: string) => `<div><b>${v}</b><span>${l}</span></div>`;
+    const best = r.time === undefined ? (r.prevBest !== null ? `Your best: <b>${fmtTime(r.prevBest)}</b>` : '')
+      : r.best ? (r.prevBest === null ? '<span class="tag ok">First race home</span>' : `<span class="tag ok">New best · was ${fmtTime(r.prevBest)}</span>`)
+      : r.prevBest !== null ? `Your best: <b>${fmtTime(r.prevBest)}</b>` : '';
+    const topNote = r.topBest && r.prevTop !== null ? ` <span class="tag ok">Fastest yet</span>` : '';
+    const rows = [...results].filter((x) => x.race).sort((a, b) => a.race!.place - b.race!.place).map((x) => {
+      const q = x.race!;
+      return `<tr><td class="place">${ord(q.place)}</td><td><span class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${PLAYER_CSS[(x.id - 1) % 3]};margin-right:10px"></span>${esc(x.name)}</td>`
+        + `<td class="r">${q.time !== undefined ? fmtTime(q.time) : `<span class="hint">${(q.dist / 1000).toFixed(1)} km</span>`}</td><td class="r">${kmh(q.top)} <span class="hint">km/h</span></td></tr>`;
+    }).join('');
+    const before: string[] = [];
+    if (f) before.push(`The Warden fell in <b>${fmtTime(f.time)}</b>${f.best ? ' · a new best' : ''}`);
+    if (me?.course) before.push(`the course in <b>${fmtTime(me.course)}</b>`);
+    const o = el(`<div class="screen center interactive"><div class="panel results-panel">
+      <h2>${title}</h2>
+      <div class="fight-card race-card">
+        <div class="fight-title">Speedster Battle</div>
+        <div class="fight-stats">
+          ${stat(r.time !== undefined ? fmtTime(r.time) : '—', 'Race')}
+          ${stat(`${kmh(r.top)}`, 'Top km/h')}
+          ${stat(`${kmh(r.avg)}`, 'Average km/h')}
+          ${solo ? '' : stat(ord(r.place), 'Place')}
+        </div>
+        ${best || topNote ? `<div class="fight-best">${best}${topNote}</div>` : ''}
+      </div>
+      ${before.length ? `<p class="hint">${before.join(' · ')}</p>` : ''}
+      ${run && run.escaped && !run.assisted && run.faster ? `<p class="hint">${run.prevBest?.time !== undefined ? `New course record · was ${fmtTime(run.prevBest.time)}` : 'Your first time through the beacon'}</p>` : ''}
+      ${solo ? '' : `<table class="results">${rows}</table>`}
+      ${isHost ? '' : '<p class="hint">Waiting for the host…</p>'}
+      <div class="row between"><button class="btn small danger" data-a="leave">Leave</button>${isHost
+        ? `<span class="row"><button class="btn small" data-a="lobby">Lobby</button><button class="btn small" data-a="again">The course</button><button class="btn primary" data-a="race">Race again <kbd>R</kbd></button></span>`
+        : ''}</div>
+    </div></div>`);
+    this.root.appendChild(o);
+    this.overlay = o;
+    o.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button')) this.h.click(); });
+    o.querySelector('[data-a=leave]')!.addEventListener('click', () => this.h.leave());
+    o.querySelector('[data-a=lobby]')?.addEventListener('click', () => this.h.toLobby());
+    o.querySelector('[data-a=again]')?.addEventListener('click', () => this.h.start());
+    o.querySelector('[data-a=race]')?.addEventListener('click', () => this.h.startRace());
+    o.querySelector<HTMLButtonElement>('[data-a=race]')?.focus();
   }
 
   /** The Warden is down: the fight's numbers, everyone's share, and a rematch. */

@@ -19,12 +19,13 @@ import { Cadence } from '../../shared/sim/cadence';
 import type { AudioEngine } from '../audio/Audio';
 import type { CameraController } from '../player/CameraController';
 import type { LocalPlayer } from '../player/LocalPlayer';
-import { PLAYER_COLORS } from '../render/CharacterModel';
+import { PLAYER_COLORS, PLAYER_CSS } from '../render/CharacterModel';
 import type { Particles } from '../render/Effects';
 import type { Materials } from '../render/Materials';
 import { RaceView } from '../render/RaceView';
 import { SpeedTrail, type TrailRunner } from '../render/SpeedTrail';
-import { fmtTime, type UI } from '../ui/UI';
+import { RaceHud } from '../ui/RaceHud';
+import { fmtTime, type RaceSummary, type UI } from '../ui/UI';
 import type { RemotePlayer } from './Actors';
 
 export interface RaceHost {
@@ -66,6 +67,13 @@ const pt = { x: 0, y: 0, z: 0, h: 0, w: 0 };
 
 export interface RaceBest { time: number | null; top: number | null }
 
+/** Keeps the better of this browser's best race time and top speed. */
+function saveRaceBest(time: number, top: number) {
+  const b = loadRaceBest();
+  const next = { time: b.time === null || time < b.time ? time : b.time, top: Math.max(b.top ?? 0, top) };
+  try { localStorage.setItem(RACE_BEST_KEY, JSON.stringify(next)); } catch { /* private window */ }
+}
+
 export function loadRaceBest(): RaceBest {
   try { const v = JSON.parse(localStorage.getItem(RACE_BEST_KEY) ?? 'null'); if (v && typeof v === 'object') return { time: v.time ?? null, top: v.top ?? null }; } catch { /* private window */ }
   return { time: null, top: null };
@@ -97,10 +105,18 @@ export class Race {
   private revealT = -1;
   private readonly revealLook = new THREE.Vector3();
   private lastCount = 99;
-  private startS = 0;
+  private readonly startS: number;
   private section = -1;
+  readonly hud: RaceHud;
+  /** This browser's best before this race (for the results). */
+  private bestBefore: RaceBest = { time: null, top: null };
+  private tipShown = false;
 
-  constructor(private readonly host: RaceHost) {}
+  constructor(private readonly host: RaceHost) {
+    const g = this.data.grid[1], T = this.data.track;
+    this.startS = trackS(T, trackIndex(T, g[0], g[1], g[2], -1), g[0], g[2]);
+    this.hud = new RaceHud(host.ui.hudRoot, T.sections, this.startS, T.finishS);
+  }
 
   /** Builds the course (once; kept for every race after). */
   ensureViews() {
@@ -135,6 +151,8 @@ export class Race {
     if (local) { local.motor.race = false; local.model.setPowerColor(null); }
     for (const rp of this.host.remotes()) { rp.lead = 0; rp.maxSpeed = 30; rp.model.setPowerColor(null); }
     if (this.view) this.view.group.visible = false;
+    this.hud.show(false);
+    this.host.ui.raceHud(false);
   }
 
   /** A run starts (or is resumed): in the race, or not. */
@@ -181,13 +199,19 @@ export class Race {
       if (s) rp.place(s[0], s[1], s[2], this.data.yaw);
       rp.model.setPowerColor(PLAYER_COLORS[(rp.id - 1) % 3]);
     }
-    const g = this.data.grid[1];
-    this.startS = trackS(this.data.track, trackIndex(this.data.track, g[0], g[1], g[2], -1), g[0], g[2]);
     this.cadence.reset();
     this.coasting = false;
     this.lastCount = 99;
     h.ui.whiteout(0, 1.2);
-    h.ui.objective('Speedster Battle · alternate left and right clicks to run faster', 7);
+    h.ui.objective('Speedster Battle', 5);
+    h.ui.bottom('');
+    h.ui.raceHud(true);
+    this.hud.show(true, PLAYER_CSS[(h.meId() - 1) % 3]);
+    this.bestBefore = loadRaceBest();
+    if (!this.tipShown) {
+      this.tipShown = true;
+      h.ui.tip('Your mouse buttons are your legs: left, right, left, right. Every click on the other button is a stride, and the faster the strides come, the faster you run. The same button twice is only one stride.', 11);
+    }
     this.revealT = reveal ? 0 : -1;
     try { localStorage.setItem(RACE_REACHED_KEY, '1'); } catch { /* private window */ }
   }
@@ -200,15 +224,27 @@ export class Race {
       this.coasting = true;
       h.ui.big(ordinal(e.place), 'cyan', `${fmtTime(e.time)} · top ${Math.round((e.top ?? this.top) * 3.6)} km/h`, 0);
       h.audio.finish();
-      const best = loadRaceBest();
-      const next = { time: best.time === null || e.time < best.time ? e.time : best.time, top: Math.max(best.top ?? 0, e.top ?? this.top) };
-      try { localStorage.setItem(RACE_BEST_KEY, JSON.stringify(next)); } catch { /* private window */ }
+      saveRaceBest(e.time, e.top ?? this.top);
     } else h.ui.toast(`${h.name(e.id)} is home · ${ordinal(e.place)} · ${fmtTime(e.time)}`);
   }
 
   /** A counted stride (0 left, 1 right). */
-  private stride(_b: 0 | 1) {
+  private stride(b: 0 | 1) {
     this.host.cam.kickFov(0.25);
+    this.hud.stride(b);
+  }
+
+  /** How the race went for the local runner, against this browser's best (for the results). */
+  summary(row: { place: number; time?: number; top: number; avg: number } | undefined): RaceSummary | undefined {
+    if (!row) return undefined;
+    // (a runner who was home already had its best saved as it crossed the line; this makes sure)
+    if (row.time !== undefined) saveRaceBest(row.time, row.top);
+    const b = this.bestBefore;
+    return {
+      time: row.time, place: row.place, top: row.top, avg: row.avg,
+      prevBest: b.time, best: row.time !== undefined && (b.time === null || row.time < b.time),
+      prevTop: b.top, topBest: row.top > (b.top ?? 0),
+    };
   }
 
   /**
@@ -229,7 +265,10 @@ export class Race {
     }
     // strides: every click on the other button from the last, at the moment it was made
     if (local && !local.dead && can && !this.coasting && mt >= this.go) {
-      for (const c of clicks) if (this.cadence.stride(c.b, mt - Math.max(0, nowMs - c.t) / 1000)) { local.motor.raceKick(); this.stride(c.b); }
+      for (const c of clicks) {
+        if (this.cadence.stride(c.b, mt - Math.max(0, nowMs - c.t) / 1000)) { local.motor.raceKick(); this.stride(c.b); }
+        else this.hud.miss(c.b);
+      }
     }
     if (local) local.motor.raceTarget = this.coasting ? RACE.BASE : this.cadence.target(mt);
     // everyone else is drawn where they really are (ahead of the interpolation), and keeps its speed
@@ -307,17 +346,27 @@ export class Race {
   }
 
   private updateHud(local: LocalPlayer | null, mt: number) {
-    const h = this.host, T = this.data.track;
-    const s = this.progress.get(h.meId()) ?? 0;
+    const h = this.host, T = this.data.track, me = h.meId();
+    const s = this.progress.get(me) ?? 0;
     const sec = T.samples[Math.min(T.samples.length - 1, Math.max(0, Math.round(s / T.step)))].sec;
-    const frac = clamp((s - this.startS) / (T.finishS - this.startS), 0, 1);
-    h.ui.area(T.sections[sec].name, frac);
+    const frac = (x: number) => clamp((x - this.startS) / (T.finishS - this.startS), 0, 1);
+    h.ui.area(T.sections[sec].name, frac(s));
     if (sec !== this.section) this.section = sec;
-    if (!local) return;
-    const kmh = Math.round(Math.hypot(local.renderVel.x, local.renderVel.z) * 3.6);
-    const n = this.progress.size;
-    h.ui.bottom(mt >= this.go ? `${kmh} km/h · ${this.cadence.rate(mt).toFixed(1)} strides/s · ${ordinal(this.place)}${n > 1 ? ` of ${n}` : ''}` : '');
+    const dots = this.dotList;
+    dots.length = 0;
+    for (const [id, x] of this.progress) dots.push({ id, k: this.home.has(id) ? 1 : frac(x), me: id === me, home: this.home.has(id) });
+    this.hud.update({
+      speed: local ? Math.hypot(local.renderVel.x, local.renderVel.z) : 0,
+      target: local ? local.motor.raceTarget : RACE.BASE,
+      cadence: this.cadence.rate(mt),
+      next: this.coasting ? -2 : this.cadence.last === -1 ? -1 : 1 - this.cadence.last,
+      place: this.home.get(me)?.place ?? this.place,
+      runners: this.progress.size,
+      dots,
+      waiting: mt < this.go,
+    });
   }
+  private readonly dotList: { id: number; k: number; me: boolean; home: boolean }[] = [];
 
   private endReveal() {
     this.revealT = -1;

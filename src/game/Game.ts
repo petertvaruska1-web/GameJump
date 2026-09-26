@@ -553,9 +553,10 @@ export class Game {
           // a fight won is measured against the best; a fight lost is shown for what it was
           // (a fight won on the way to the race was recorded when its rift opened)
           const fight = m.race ? this.riftFight ?? undefined : m.fight === undefined ? undefined : m.boss ? this.recordFight(m.fight) : { won: false, time: m.fight, prevBest: this.fightBest(), best: false };
+          const race = m.race ? this.race.summary(m.results.find((r) => r.id === this.meId)?.race) : undefined;
           window.setTimeout(() => {
-            if (this.mode === 'results') this.ui.results(m.results, this.meId, this.hostId === this.meId, m.duration, this.runSummary ?? undefined, fight);
-          }, m.boss ? 900 : 1800);
+            if (this.mode === 'results') this.ui.results(m.results, this.meId, this.hostId === this.meId, m.duration, this.runSummary ?? undefined, fight, race);
+          }, m.race ? 1400 : m.boss ? 900 : 1800);
         }
         break;
       case 'err':
@@ -1530,7 +1531,8 @@ export class Game {
 
   private updateHud(mt: number) {
     if (this.mode !== 'playing' && this.mode !== 'results') return;
-    if (this.mode === 'playing') this.ui.timer(mt > 0 ? mt : null);
+    // in the race the clock is the race's own, from its "Go!"
+    if (this.mode === 'playing') this.ui.timer(this.raceShown ? (mt >= this.race.go ? mt - this.race.go : null) : mt > 0 ? mt : null);
     const list = this.lobbyPlayers.map((p) => {
       const rp = this.remotes.get(p.id);
       let status = p.status;

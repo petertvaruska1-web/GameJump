@@ -101,6 +101,6 @@ export class RaceState {
     if (!r) return undefined;
     const dist = Math.max(0, Math.min(r.s, this.track.finishS) - r.s0);
     const t = r.time || Math.max(0.01, (this.endedAt || this.go) - this.go);
-    return { place: r.place, time: r.time || undefined, top: r2(r.top), avg: r2(dist / t), dist: Math.round(dist) };
+    return { place: r.place, time: r.time || undefined, top: r2(r.top), avg: r2(Math.min(RACE.TOP, dist / t)), dist: Math.round(dist) };
   }
 }
