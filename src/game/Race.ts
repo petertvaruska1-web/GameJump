@@ -23,6 +23,7 @@ import { PLAYER_COLORS } from '../render/CharacterModel';
 import type { Particles } from '../render/Effects';
 import type { Materials } from '../render/Materials';
 import { RaceView } from '../render/RaceView';
+import { SpeedTrail, type TrailRunner } from '../render/SpeedTrail';
 import { fmtTime, type UI } from '../ui/UI';
 import type { RemotePlayer } from './Actors';
 
@@ -60,6 +61,7 @@ export const ordinal = (n: number) => ORDINAL[n] ?? `${n}th`;
 
 const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
 const ZERO = new THREE.Vector3();
+const tmpCol = new THREE.Color();
 const pt = { x: 0, y: 0, z: 0, h: 0, w: 0 };
 
 export interface RaceBest { time: number | null; top: number | null }
@@ -72,6 +74,9 @@ export function loadRaceBest(): RaceBest {
 export class Race {
   readonly data: RaceData = getRace();
   view: RaceView | null = null;
+  /** Everyone's trail of light (one mesh for all of them). */
+  trail: SpeedTrail | null = null;
+  private readonly runners: TrailRunner[] = [];
   /** The race is what is shown right now. */
   active = false;
   /** Match time of "Go!". */
@@ -103,7 +108,12 @@ export class Race {
     const h = this.host;
     this.view = new RaceView(this.data, h.mats, h.glowTex, h.shadows);
     h.scene.add(this.view.group);
+    this.trail = new SpeedTrail();
+    this.view.group.add(this.trail.mesh);
   }
+
+  /** How fast the local runner is going, as its trail shows it (0..1): the camera widens and hums with it. */
+  get speedK() { return this.trail?.kOf(this.host.meId()) ?? 0; }
 
   get level() { return this.data.level; }
   get world() { return this.view?.world ?? null; }
@@ -120,6 +130,7 @@ export class Race {
     this.cadence.reset();
     this.hint.clear(); this.progress.clear(); this.home.clear(); this.ringAt.clear();
     this.place = 1; this.top = 0; this.section = -1; this.lastCount = 99;
+    this.trail?.clear();
     const local = this.host.local();
     if (local) { local.motor.race = false; local.model.setPowerColor(null); }
     for (const rp of this.host.remotes()) { rp.lead = 0; rp.maxSpeed = 30; rp.model.setPowerColor(null); }
@@ -225,6 +236,7 @@ export class Race {
     for (const rp of h.remotes()) { rp.lead = NET.INTERP_DELAY; rp.maxSpeed = RACE.MAX_CLIENT_SPEED + 15; }
     this.updatePlaces(local);
     this.view.update(time, dt, h.camera.position, mt, local && !local.dead ? local.renderVel : ZERO);
+    this.updateTrails(dt, time, local);
     this.updateHud(local, mt);
     if (this.revealT >= 0) { this.revealT += dt; if (this.revealT > REVEAL) this.endReveal(); }
   }
@@ -257,6 +269,33 @@ export class Race {
     });
     this.place = Math.max(1, ids.indexOf(me) + 1);
     if (local) this.top = Math.max(this.top, Math.hypot(local.renderVel.x, local.renderVel.z));
+  }
+
+  /** Every runner's trail of light, in its own colour, and motes shed from it flat out. */
+  private updateTrails(dt: number, time: number, local: LocalPlayer | null) {
+    const h = this.host, T = this.data.track, list = this.runners;
+    let n = 0;
+    const put = (id: number, pos: THREE.Vector3, vel: THREE.Vector3, alive: boolean) => {
+      const q = T.samples[Math.min(T.samples.length - 1, Math.max(0, this.hint.get(id) ?? 0))];
+      const r = list[n] ?? (list[n] = { id, pos, vel, color: 0, ground: 0, alive });
+      r.id = id; r.pos = pos; r.vel = vel; r.alive = alive;
+      r.color = PLAYER_COLORS[(id - 1) % 3];
+      r.ground = q.drop !== undefined && pos.y < q.drop + 1 ? q.drop : q.y;
+      n++;
+    };
+    if (local) put(h.meId(), local.renderPos, local.renderVel, !local.dead);
+    for (const rp of h.remotes()) if (rp.connected) put(rp.id, rp.pos, rp.vel, rp.status !== 1);
+    list.length = n;
+    this.trail?.update(dt, time, h.camera.position, list);
+    // flat out, a runner sheds motes of its light
+    for (const r of list) {
+      const k = this.trail?.kOf(r.id) ?? 0;
+      if (k < 0.45 || Math.random() > (k - 0.4) * dt * 60) continue;
+      const c = tmpCol.set(r.color);
+      h.particles.emit(r.pos.x + (Math.random() - 0.5) * 0.6, r.pos.y + 0.3 + Math.random() * 1.4, r.pos.z + (Math.random() - 0.5) * 0.6,
+        -r.vel.x * 0.04 + (Math.random() - 0.5) * 1.2, (Math.random() - 0.2) * 1.2, -r.vel.z * 0.04 + (Math.random() - 0.5) * 1.2,
+        0.35 + Math.random() * 0.35, 0.06 + Math.random() * 0.06, c.r, c.g, c.b, 1, -0.2, -0.05);
+    }
   }
 
   /** Runner `id` went through ring `i` at `p`. */

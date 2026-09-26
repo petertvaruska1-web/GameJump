@@ -1476,7 +1476,7 @@ export class Game {
     const b = local.motor.body;
     // in the arena the view sits a little further back and over the shoulder, so the crosshair clears the runner
     const fight = this.arenaShown ? 1 : 0;
-    this.cam.update(dt, { pos: local.renderPos, vel: local.renderVel, grounded: b.grounded, sprinting: local.motor.anim === Anim.Sprint, riding: !!local.motor.zip || !!local.motor.grapple, low: local.motor.sliding, dashing: this.dashKick > 0.05, boosted: local.motor.boost || local.motor.flashing, flying: local.motor.flying, shoulder: this.heaven.inRoom ? this.heaven.shoulder : fight * 0.55, far: fight * 1.3 }, camWorld, mt);
+    this.cam.update(dt, { pos: local.renderPos, vel: local.renderVel, grounded: b.grounded, sprinting: local.motor.anim === Anim.Sprint, riding: !!local.motor.zip || !!local.motor.grapple, low: local.motor.sliding, dashing: this.dashKick > 0.05, boosted: local.motor.boost || local.motor.flashing, flying: local.motor.flying, shoulder: this.heaven.inRoom ? this.heaven.shoulder : fight * 0.55, far: fight * 1.3, speedK: this.raceShown ? this.race.speedK : undefined }, camWorld, mt);
     this.dashKick = Math.max(0, this.dashKick - dt * 3);
   }
 

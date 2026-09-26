@@ -31,6 +31,12 @@ export interface CamTarget {
   shoulder?: number;
   /** Metres further back than usual (the Warden's arena wants more of the fight in view). */
   far?: number;
+  /**
+   * Speedster Battle: how fast the runner is going (0..1). The view widens a long way,
+   * pulls back a little, keeps the runner framed (the usual look-ahead over-leads a
+   * runner at 75 m/s and would put the camera on its heels) and hums near the top.
+   */
+  speedK?: number;
 }
 
 const BASE_DIST = 5.0;
@@ -183,8 +189,10 @@ export class CameraController {
     const stY = lerp(lerp(0.13, 0.05, fallK), 0.045, upK);
 
     // horizontal: short spring + smoothed look-ahead (velocity jumps never reach the camera directly)
-    this.lookAhead.x += (t.vel.x * 0.1 - this.lookAhead.x) * damp(3, dt);
-    this.lookAhead.z += (t.vel.z * 0.1 - this.lookAhead.z) * damp(3, dt);
+    // (racing, it only cancels the follow spring's lag: the runner stays where the camera frames it)
+    const ahead = t.speedK !== undefined ? 0.068 : 0.1;
+    this.lookAhead.x += (t.vel.x * ahead - this.lookAhead.x) * damp(3, dt);
+    this.lookAhead.z += (t.vel.z * ahead - this.lookAhead.z) * damp(3, dt);
     this.lookAhead.y += ((t.flying ? t.vel.y * 0.06 : 0) - this.lookAhead.y) * damp(3, dt);
     this.pivot.x = this.sx.step(this.pivot.x, t.pos.x + this.lookAhead.x, 0.07, dt);
     this.pivot.z = this.sz.step(this.pivot.z, t.pos.z + this.lookAhead.z, 0.07, dt);
@@ -204,7 +212,7 @@ export class CameraController {
     const sp3 = Math.hypot(hs, t.vel.y);
     const want = t.flying
       ? BASE_DIST + 0.8 + clamp(sp3 / 20, 0, 1) * 1.2 + clamp(pitch * -0.8, 0, 0.8)
-      : BASE_DIST + (t.far ?? 0) + (t.sprinting ? 0.5 : 0) + clamp((-t.vel.y - 6) / 25, 0, 1.0) + clamp(pitch * -1.2, 0, 1.2);
+      : BASE_DIST + (t.far ?? 0) + (t.sprinting ? 0.5 : 0) + (t.speedK ?? 0) * 0.9 + clamp((-t.vel.y - 6) / 25, 0, 1.0) + clamp(pitch * -1.2, 0, 1.2);
     this.wantDist += (want - this.wantDist) * damp(2.2, dt);
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const dirX = -Math.sin(this.yaw) * cp, dirY = -sp, dirZ = -Math.cos(this.yaw) * cp;
@@ -231,7 +239,10 @@ export class CameraController {
     }
     // FOV kick
     const kick = t.flying ? clamp((sp3 - 8) * 0.8, 0, 10)
+      : t.speedK !== undefined ? 2 + Math.pow(t.speedK, 1.15) * 22 + (t.dashing ? 4 : 0)
       : (t.sprinting && hs > 7 ? 6 : 0) + (t.boosted && hs > 7 ? 5 : 0) + (t.low ? 5 : 0) + (t.dashing ? 7 : 0) + clamp((-t.vel.y - 14) * 0.5, 0, 12);
+    // near the top speed the view hums
+    if (t.speedK !== undefined && t.speedK > 0.8 && this.shakeEnabled) this.shake = Math.max(this.shake, (t.speedK - 0.8) * 0.9);
     this.fovKick += (kick - this.fovKick) * damp(3, dt);
     const fov = this.baseFov + this.fovKick;
     if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }

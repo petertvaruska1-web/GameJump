@@ -134,7 +134,7 @@ export class RaceView {
     this.group.add(this.scenery.group);
 
     // --- the road
-    this.roadMat = new THREE.MeshStandardMaterial({ color: 0x0b0d1b, roughness: 0.62, metalness: 0.3, envMapIntensity: 0.1 });
+    this.roadMat = new THREE.MeshStandardMaterial({ color: 0x090b17, roughness: 0.8, metalness: 0.12, envMapIntensity: 0.08 });
     const T = data.track;
     const kick = T.kickers.map((k) => new THREE.Vector3(k.s0, k.lip, k.s1));
     this.roadMat.onBeforeCompile = (shader) => {
