@@ -17,7 +17,7 @@ import {
 } from '../protocol';
 import { Enemy, type EnemyHost, type Target } from './enemy';
 import { Fight, type FightHost } from './fight';
-import { RaceState, type Racer } from './race';
+import { inRift, RaceState, type Racer } from './race';
 
 export interface Conn {
   send(msg: S2C): void;
@@ -233,7 +233,8 @@ export class Room implements EnemyHost, FightHost {
         this.onState(p, msg);
         return;
       case 'die':
-        if (this.phase === 'playing' && p.status === Status.Alive && msg.cause === 'laser') this.kill(p, 'laser', null);
+        // (the race has no lasers and no way to die: a report from there is stale, or made up)
+        if (this.phase === 'playing' && p.status === Status.Alive && msg.cause === 'laser' && !this.inRace) this.kill(p, 'laser', null);
         return;
       case 'portal':
         this.enterPortal(p);
@@ -488,8 +489,7 @@ export class Room implements EnemyHost, FightHost {
   private enterRift(p: RoomPlayer) {
     const r = this.rift;
     if (!r || this.stage !== 'boss' || this.phase !== 'playing' || p.status !== Status.Alive) return;
-    const d = Math.hypot(p.pos.x - r.p[0], p.pos.y + 1.2 - r.p[1], p.pos.z - r.p[2]);
-    if (d > RIFT.ENTER + RIFT.SERVER_SLACK) return;
+    if (!inRift(p.pos.x, p.pos.y, p.pos.z, r.p[0], r.p[1], r.p[2], RIFT.SERVER_SLACK)) return;
     this.openWarp(p.id);
   }
 

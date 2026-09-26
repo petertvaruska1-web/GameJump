@@ -50,6 +50,7 @@ import type { UI } from '../ui/UI';
 import type { RemotePlayer } from './Actors';
 import { localDir } from '../player/LocalPlayer';
 import { POWER_INFO, Powers, SLASHES, type AimTarget } from './Powers';
+import { inRift } from '../../shared/sim/race';
 
 export interface ArenaHost {
   readonly scene: THREE.Scene;
@@ -1026,10 +1027,9 @@ export class Arena {
     const h = this.host;
     this.riftPortal.update(time, dt, mt, h.camera.position);
     if (this.stage === 'boss' && local && !local.dead && mt >= r.at) {
-      // through the ring: the chest within its opening (the server checks it again)
+      // through the ring (the server checks it again)
       const p = local.renderPos;
-      const d = Math.hypot(p.x - r.p.x, p.y + 1.2 - r.p.y, p.z - r.p.z);
-      if (d < RIFT.ENTER && time - this.riftClaim > 0.5) { this.riftClaim = time; h.send({ t: 'rift' }); }
+      if (inRift(p.x, p.y, p.z, r.p.x, r.p.y, r.p.z) && time - this.riftClaim > 0.5) { this.riftClaim = time; h.send({ t: 'rift' }); }
       const left = Math.ceil(r.auto - mt);
       if (left !== this.riftTold && left <= 10 && left > 0) { this.riftTold = left; h.ui.objective(`Step into the rift · it takes everyone in ${left} s`, 1.2); }
     }

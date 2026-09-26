@@ -623,8 +623,8 @@ export const RIFT = {
   AUTO: 20,
   /** Its ring is the portal's, this many times the size; its centre this high over the floor. */
   SCALE: 2.2, HEIGHT: 3.9,
-  /** You are through once your chest is this close to its centre (the server allows a little more). */
-  ENTER: 2.6, SERVER_SLACK: 2.5,
+  /** You are through once you are this close to its axis (the server allows a little more): see inRift. */
+  REACH: 1.9, SERVER_SLACK: 2.5,
   /** Where on the arena floor it opens: this far out from the centre, on a diagonal clear of the pillars. */
   RADIUS: 20,
 };

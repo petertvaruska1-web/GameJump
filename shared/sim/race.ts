@@ -6,12 +6,24 @@
 // the winner is home the rest have RACE.GRACE seconds; whoever is still running
 // then is ranked by how far they got.
 
-import { RACE } from '../constants';
+import { RACE, RIFT } from '../constants';
 import { trackIndex, trackPoint, trackS, type RaceTrack } from '../level/race';
 import { Status, type MatchResult } from '../protocol';
 import type { RoomPlayer } from './room';
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
+
+/**
+ * Is a runner (feet at x, y, z) in the rift whose ring is centred at (cx, cy, cz)?
+ * The ring stands high over the floor, so it is not a distance to its centre: the
+ * runner has to be close to its axis, with its chest anywhere in the ring's lower
+ * half (walking through it on the floor, or jumping through). `slack` widens both
+ * (the server's copy of a runner is a message old).
+ */
+export function inRift(x: number, y: number, z: number, cx: number, cy: number, cz: number, slack = 0): boolean {
+  const chest = y + 1.2;
+  return Math.hypot(x - cx, z - cz) < RIFT.REACH + slack && chest > cy - RIFT.HEIGHT - slack && chest < cy + 1.5 + slack;
+}
 
 export class Racer {
   /** Nearest sample and distance along the course. */

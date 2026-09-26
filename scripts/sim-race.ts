@@ -14,6 +14,7 @@ import { PlayerMotor } from '../shared/physics/character';
 import { CollisionWorld, type GroundHit, type RayHit } from '../shared/physics/world';
 import { Status, type GameEvent, type S2C } from '../shared/protocol';
 import { Cadence, raceTarget } from '../shared/sim/cadence';
+import { inRift } from '../shared/sim/race';
 import { Room, type RoomPlayer } from '../shared/sim/room';
 
 let fails = 0;
@@ -450,6 +451,22 @@ function runTo(room: Room, c: Client, to: number, speed: number, others: () => v
   const f = ev(a, 'finish');
   check('the finish time is the moment the runner crossed on its own clock, not when the message came', !!f && Math.abs(f.time - crossed) < 0.02,
     f ? `time ${f.time} expected ${crossed.toFixed(2)}` : 'no finish');
+}
+
+{
+  // walking into the rift from the floor counts (its centre stands high over the floor, the runner's chest does not)
+  const c = { x: 10, y: ARENA.y + RIFT.HEIGHT, z: 20 }, floor = ARENA.y + 0.05;
+  check('a runner walking through the rift\'s ring on the floor is in it', inRift(c.x, floor, c.z, c.x, c.y, c.z) && inRift(c.x + 1.2, floor, c.z + 0.6, c.x, c.y, c.z));
+  check('a runner a few metres from the rift, or up on top of it, is not', !inRift(c.x + 4, floor, c.z, c.x, c.y, c.z) && !inRift(c.x, c.y + 3.2, c.z, c.x, c.y, c.z));
+}
+
+{
+  // in the race nobody dies: a death reported by a client (a stale laser, a tampered client) changes nothing
+  const { room, clients } = makeRoom(1, 'race', 19);
+  const a = clients[0];
+  room.handle(a.p, { t: 'die', cause: 'laser' });
+  tick(room, 0.2);
+  check('a reported death in the race is ignored (the race can still be finished)', a.p.status === Status.Alive && !has(a, 'death'));
 }
 
 {
