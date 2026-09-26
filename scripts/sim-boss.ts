@@ -7,7 +7,7 @@
 // power, solo and in teams: how long each takes to bring it down, how long a
 // fighter lasts against it, and that no two fights play out alike.
 // Usage: npx tsx scripts/sim-boss.ts   (QUICK=1 skips the full fights)
-import { ARENA, BOSS, PHP, PHYS, POW, powerHp, SUPERS, type SuperPower } from '../shared/constants';
+import { ARENA, BOSS, PHP, PHYS, POW, powerHp, RIFT, SUPERS, type SuperPower } from '../shared/constants';
 import { getArena } from '../shared/level/arena';
 import { getLevel } from '../shared/level/map/index';
 import { rng } from '../shared/math';
@@ -595,15 +595,15 @@ function wardenPart(room: Room, part: number): PartSphere {
 }
 
 {
-  // the end: its health runs out, it dies, and a moment later the run is won
+  // the end: its health runs out, it dies, and once it has come apart its rift opens (the race is past it)
   const { room, a, w, f } = duel('angel', 0, -9.5);
   f.hitWarden(fighter(room, a.p), 99999, 0, a.p.pos, 0);
   tick(room, 0.05);
   check('health out: the Warden falls', w.state === BState.Dying && has(a, 'fall'));
-  tick(room, BOSS.DYING + BOSS.VICTORY + 0.5);
-  const end = a.ends[0] as Extract<S2C, { t: 'end' }> | undefined;
-  check('and the run ends in victory', room.phase === 'ended' && !!end?.boss && end.results[0].status === Status.Finished && (end.results[0].damage ?? 0) > 0,
-    JSON.stringify(end?.results[0] ?? null));
+  tick(room, RIFT.OPEN_AFTER + 0.3);
+  const rift = a.events.find((e) => e.k === 'rift') as Extract<GameEvent, { k: 'rift' }> | undefined;
+  check('and a rift opens instead of the run ending (the fight time comes with it)', room.phase === 'playing' && !!rift && rift.fight > BOSS.DYING + BOSS.VICTORY && a.ends.length === 0,
+    JSON.stringify(rift ?? null));
 }
 
 // ====================================================================== whole fights
@@ -847,7 +847,7 @@ function fightOut(powers: SuperPower[], seed: number, limit = 900, god = false) 
   const sequence: string[] = [];
   let t = 0, staggers = 0, maxBots = 0;
   const w = () => room.fight!.warden;
-  while (room.phase === 'playing' && t < limit) {
+  while (room.phase === 'playing' && w().alive && t < limit) {
     now += 1 / 30; t += 1 / 30;
     for (const b of brains) b.tick(1 / 30);
     room.tick(1 / 30);
@@ -859,7 +859,7 @@ function fightOut(powers: SuperPower[], seed: number, limit = 900, god = false) 
   }
   const fs = room.fight!.fighters;
   return {
-    won: room.phase === 'ended' && !w().alive, lost: room.phase === 'ended' && w().alive, t, hp: w().hp, max: w().maxHp,
+    won: !w().alive, lost: room.phase === 'ended' && w().alive, t, hp: w().hp, max: w().maxHp,
     deaths: fs.reduce((s, q) => s + q.deaths, 0), bots: fs.reduce((s, q) => s + q.bots, 0), causes: fs.map((q) => q.p.cause ?? '-').join('/'),
     damage: fs.map((q) => Math.round(q.damage)), acts, sequence: sequence.join(''), staggers, maxBots,
     cap: room.fight!.botCap(),

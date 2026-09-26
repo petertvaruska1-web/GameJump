@@ -1,10 +1,12 @@
 // Authoritative room: lobby, match flow, player validation, deaths/finish,
-// enemies, projectiles, crumbling floors. Transport-agnostic (runs in Node or
-// in the browser for offline play).
+// enemies, projectiles, crumbling floors, and past the beacon the Warden's fight
+// and past its rift Speedster Battle. Transport-agnostic (runs in Node or in the
+// browser for offline play).
 
-import { ARENA, CORPSE, CRUMBLE, DEATH, FLY, GRAPPLE, LASER, MAX_PLAYERS, NET, PHP, PLAYER, PORTAL, POWER, RANGED, SLIDE } from '../constants';
+import { ARENA, BOSS, CORPSE, CRUMBLE, DEATH, FLY, GRAPPLE, LASER, MAX_PLAYERS, NET, PHP, PLAYER, PORTAL, POWER, RACE, RANGED, RIFT, SLIDE } from '../constants';
 import { laserHit, onAnyZipline, windAt } from '../hazards';
 import { getArena, type ArenaData } from '../level/arena';
+import { getRace, type RaceData } from '../level/race';
 import { Anim, makeBody, stepCorpse, type CharBody, type StepInfo } from '../physics/character';
 import type { LevelData, PortalSpot } from '../level/types';
 import { round2, round3, v3, type Vec3 } from '../math';
@@ -15,6 +17,7 @@ import {
 } from '../protocol';
 import { Enemy, type EnemyHost, type Target } from './enemy';
 import { Fight, type FightHost } from './fight';
+import { RaceState, type Racer } from './race';
 
 export interface Conn {
   send(msg: S2C): void;
@@ -96,6 +99,14 @@ export class Room implements EnemyHost, FightHost {
   readonly arena: ArenaData;
   readonly arenaWorld: CollisionWorld;
   fight: Fight | null = null;
+  /** The rift the Warden left (while it is open), when its warp lands, and how long the fight took. */
+  rift: { p: [number, number, number]; yaw: number; at: number; auto: number } | null = null;
+  warpAt = 0;
+  fightTime = 0;
+  /** Speedster Battle: its course (built once), its world, and the race on it while there is one. */
+  readonly raceData: RaceData;
+  readonly raceWorld: CollisionWorld;
+  race: RaceState | null = null;
   readonly players: RoomPlayer[] = [];
   hostId = 0;
   readonly world: CollisionWorld;
@@ -128,15 +139,21 @@ export class Room implements EnemyHost, FightHost {
     this.world = new CollisionWorld(level);
     this.arena = getArena();
     this.arenaWorld = new CollisionWorld(this.arena.level);
+    this.raceData = getRace();
+    this.raceWorld = new CollisionWorld(this.raceData.level);
     this.lastActivity = clock();
   }
 
   get now() { return this.clock(); }
   get matchTime() { return this.now - this.goAt; }
-  /** In the arena everything is measured against the arena. */
-  get inArena() { return this.stage === 'boss'; }
-  get activeLevel() { return this.inArena ? this.arena.level : this.level; }
-  get activeWorld() { return this.inArena ? this.arenaWorld : this.world; }
+  /** In the arena (and while the rift pulls the team through) everything is measured against the arena. */
+  get inArena() { return this.stage === 'boss' || this.stage === 'warp'; }
+  /** In Speedster Battle everything is measured against the race course. */
+  get inRace() { return this.stage === 'race'; }
+  get activeLevel() { return this.inRace ? this.raceData.level : this.inArena ? this.arena.level : this.level; }
+  get activeWorld() { return this.inRace ? this.raceWorld : this.inArena ? this.arenaWorld : this.world; }
+  /** Which side of the doors a client's reports come from: 0 the course, 1 the arena, 2 the race. */
+  get side() { return this.inRace ? 2 : this.inArena ? 1 : 0; }
   get isEmpty() { return this.players.every((p) => !p.connected); }
 
   // ------------------------------------------------------------------ membership
@@ -225,10 +242,13 @@ export class Room implements EnemyHost, FightHost {
         this.bless(p, false);
         return;
       case 'pick':
-        if (this.fight && (this.phase === 'playing' || this.phase === 'countdown') && typeof msg.k === 'number') this.fight.pick(p, msg.k | 0);
+        if (this.fight && this.stage === 'boss' && (this.phase === 'playing' || this.phase === 'countdown') && typeof msg.k === 'number') this.fight.pick(p, msg.k | 0);
         return;
       case 'pow':
-        if (this.fight && this.phase === 'playing') this.fight.pow(p, msg);
+        if (this.fight && this.stage === 'boss' && this.phase === 'playing') this.fight.pow(p, msg);
+        return;
+      case 'rift':
+        this.enterRift(p);
         return;
       case 'ready':
         if (this.phase !== 'lobby') return;
@@ -244,8 +264,8 @@ export class Room implements EnemyHost, FightHost {
         if (this.phase !== 'lobby' && this.phase !== 'ended') return;
         if (this.players.some((q) => q.id !== this.hostId && q.connected && !q.ready)) return;
         if (this.phase === 'ended') this.dropDisconnected();
-        // a rematch goes straight back into the Warden's arena
-        this.startMatch(msg.stage === 'boss');
+        // a rematch goes straight back into the Warden's arena, or onto the race grid
+        this.startMatch(msg.stage === 'boss' ? 'boss' : msg.stage === 'race' ? 'race' : 'course');
         return;
       case 'restart':
         // A run with no checkpoints: on your own, the pause menu can throw it away
@@ -253,8 +273,8 @@ export class Room implements EnemyHost, FightHost {
         // too, so it is only for a host who is alone.
         if (p.id !== this.hostId || this.players.length !== 1) return;
         if (this.phase !== 'countdown' && this.phase !== 'playing') return;
-        // in the arena, starting over means starting the fight over
-        this.startMatch(this.inArena);
+        // in the arena, starting over means starting the fight over; in the race, the race
+        this.startMatch(this.restartStage);
         return;
       case 'lobby':
         if (p.id !== this.hostId) return;
@@ -271,9 +291,12 @@ export class Room implements EnemyHost, FightHost {
           p.lastSupportY = msg.p[1];
           p.lastMsgT = this.now;
         } else if (msg.cmd === 'restart' && p.id === this.hostId) {
-          this.startMatch(this.inArena);
+          this.startMatch(this.restartStage);
         } else if (msg.cmd === 'gate' && this.stage === 'course' && this.phase === 'playing' && p.status === Status.Alive) {
           this.openGate(p);
+        } else if (msg.cmd === 'rift' && this.fight && this.stage === 'boss' && this.phase === 'playing' && this.fight.warden.alive) {
+          // the Warden goes down now, and its rift opens the way it would
+          this.fight.hitWarden(null, this.fight.warden.hp + 1, 0, p.pos, 0);
         } else if (msg.cmd === 'bosshp' && this.fight && typeof msg.v === 'number' && isFinite(msg.v)) {
           const w = this.fight.warden;
           w.hp = Math.max(1, Math.min(w.maxHp, Math.round(w.maxHp * msg.v)));
@@ -296,10 +319,11 @@ export class Room implements EnemyHost, FightHost {
   }
 
   private onState(p: RoomPlayer, m: Extract<C2S, { t: 'st' }>) {
-    if (p.status !== Status.Alive || p.away) return;
+    // a racer who is home keeps reporting as it coasts on down the run-out
+    if ((p.status !== Status.Alive && !(this.inRace && p.status === Status.Finished)) || p.away) return;
     if (this.phase !== 'playing' && this.phase !== 'countdown') return;
-    // a report from the other side of the beacon (sent before the client knew) is stale
-    if (!!m.b !== this.inArena) return;
+    // a report from the other side of a door (sent before the client knew) is stale
+    if ((m.b ?? 0) !== this.side) return;
     const [x, y, z] = m.p;
     if (!isFinite(x) || !isFinite(y) || !isFinite(z)) return;
     const now = this.now;
@@ -307,10 +331,11 @@ export class Room implements EnemyHost, FightHost {
     p.lastMsgT = now;
     const moved = Math.hypot(x - p.pos.x, z - p.pos.z);
     const rise = y - p.pos.y;
-    const frozen = this.phase === 'countdown';
+    // nobody leaves the grid before the race's "Go!"
+    const frozen = this.phase === 'countdown' || (this.inRace && !!this.race && this.matchTime < this.race.go);
     // a flash strike moves a runner further than running could, once; a speedster simply runs faster
-    const f = this.fight?.fighter(p);
-    const maxSpeed = this.inArena ? (f?.kind === 'speed' ? ARENA.MAX_SPEEDSTER_SPEED : ARENA.MAX_CLIENT_SPEED) : p.canFly ? FLY.MAX_CLIENT_SPEED : NET.MAX_CLIENT_SPEED;
+    const f = this.inArena ? this.fight?.fighter(p) : null;
+    const maxSpeed = this.inRace ? RACE.MAX_CLIENT_SPEED : this.inArena ? (f?.kind === 'speed' ? ARENA.MAX_SPEEDSTER_SPEED : ARENA.MAX_CLIENT_SPEED) : p.canFly ? FLY.MAX_CLIENT_SPEED : NET.MAX_CLIENT_SPEED;
     const extra = f && this.matchTime < f.allowUntil ? f.allow : 0;
     const limit = maxSpeed * dt + 2.5;
     if (moved > limit + extra || rise > 20 * dt + 3 + extra || (frozen && moved > 1.5)) {
@@ -324,6 +349,12 @@ export class Room implements EnemyHost, FightHost {
     p.yaw = m.y; p.anim = m.a | 0; p.ground = m.g | 0;
     // only the portal itself takes a runner off the course
     if (p.anim === Anim.Away) p.anim = Anim.Idle;
+    if (this.inRace) {
+      this.checkPlayer(p);
+      const r = this.race?.report(p, m.v[0], m.v[2], m.tm, this.matchTime);
+      if (r) this.raceHome(r);
+      return;
+    }
     if (p.ground >= 0 && !this.inArena) this.touchCrumble(p.ground);
     this.checkPlayer(p);
     // lasers: judged at the client's own clock (clamped), so latency never kills unfairly
@@ -337,8 +368,12 @@ export class Room implements EnemyHost, FightHost {
 
   // ------------------------------------------------------------------ match flow
 
-  /** A new run: from the landing pad, or (`boss`, a rematch) straight into the Warden's arena. */
-  private startMatch(boss = false) {
+  /** Where a restart goes: the stage the run is in (the course, the fight, or the race). */
+  private get restartStage(): 'course' | 'boss' | 'race' { return this.inRace ? 'race' : this.inArena ? 'boss' : 'course'; }
+
+  /** A new run: from the landing pad, or (a rematch) straight into the Warden's arena or onto the race grid. */
+  private startMatch(stage: 'course' | 'boss' | 'race' = 'course') {
+    const boss = stage === 'boss', race = stage === 'race';
     this.phase = 'countdown';
     this.goAt = this.now + NET.COUNTDOWN;
     this.projectiles = [];
@@ -347,13 +382,17 @@ export class Room implements EnemyHost, FightHost {
     this.taken.clear();
     for (const c of this.world.crumbles) { c.enabled = true; c.shakeStart = -1; }
     this.enemies = this.level.enemies.map((d) => new Enemy(d));
-    this.stage = boss ? 'boss' : 'course';
+    this.stage = stage;
     this.gateAt = 0;
     this.courseTime = 0;
     this.fight = null;
+    this.rift = null;
+    this.warpAt = 0;
+    this.fightTime = 0;
+    this.race = null;
     this.arenaWorld.puppeteer = null;
-    this.portal = boss ? null : this.rollPortal();
-    const L = boss ? this.arena.level : this.level;
+    this.portal = stage === 'course' ? this.rollPortal() : null;
+    const L = race ? this.raceData.level : boss ? this.arena.level : this.level;
     const spawns = L.spawns;
     this.players.forEach((p, i) => {
       if (p.status === Status.Left && !p.connected) return;
@@ -373,6 +412,8 @@ export class Room implements EnemyHost, FightHost {
     this.world.update(this.matchTime);
     this.world.syncPrevious();
     if (boss) this.fight = new Fight(this, this.arena, this.arenaWorld, this.players, this.matchTime);
+    // straight onto the grid: the race starts with the countdown's "Go!"
+    if (race) this.race = new RaceState(this.raceData.track, this.players, 0);
     this.events = [];
     for (const p of this.players) this.sendStart(p, false);
     this.broadcastRoom();
@@ -420,21 +461,95 @@ export class Room implements EnemyHost, FightHost {
 
   killRunner(p: RoomPlayer, cause: DeathCause, from: Vec3 | null) { this.kill(p, cause, null, from); }
 
-  /** The Warden is destroyed: everyone still here has won, ranked by the damage they did. */
+  /**
+   * The Warden is down and has come apart (FightHost): a rift tears open on the floor,
+   * on the diagonal furthest from the wreck (clear of the pillars, the pads, the ramps
+   * and the cover walls), and the way on is through it.
+   */
   won() {
-    if (this.phase !== 'playing' || !this.fight) return;
-    const t = this.matchTime;
-    const ranked = [...this.fight.fighters].sort((a, b) => b.damage - a.damage);
-    for (const p of this.players) {
-      if (p.status === Status.Left) continue;
-      p.status = Status.Finished;
-      p.finishTime = t;
-      p.place = ranked.findIndex((q) => q.p === p) + 1;
+    if (this.phase !== 'playing' || !this.fight || this.rift || this.stage !== 'boss') return;
+    const t = this.matchTime, w = this.fight.warden;
+    // measured as it always was, to the end of the victory, so the records stay comparable
+    this.fightTime = t - this.fight.arrivedAt + BOSS.DYING + BOSS.VICTORY - RIFT.OPEN_AFTER;
+    const off = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    const centre = Math.hypot(w.x - ARENA.x, w.z - ARENA.z) < 4, wa = Math.atan2(w.x - ARENA.x, w.z - ARENA.z);
+    let phi = (3 * Math.PI) / 4, best = -Infinity;
+    for (const d of [Math.PI / 4, (3 * Math.PI) / 4, (-3 * Math.PI) / 4, -Math.PI / 4]) {
+      // (with the wreck in the middle: the side toward the Threshold, where the team came in)
+      const score = centre ? -off(d, Math.PI) : off(d, wa);
+      if (score > best + 1e-9) { best = score; phi = d; }
     }
+    const p: [number, number, number] = [round2(ARENA.x + Math.sin(phi) * RIFT.RADIUS), round2(ARENA.y + RIFT.HEIGHT), round2(ARENA.z + Math.cos(phi) * RIFT.RADIUS)];
+    this.rift = { p, yaw: round2(phi + Math.PI), at: t, auto: t + RIFT.AUTO };
+    this.pushEvent({ k: 'rift', p, yaw: this.rift.yaw, at: round2(t), auto: round2(this.rift.auto), fight: round2(this.fightTime) });
+  }
+
+  /** The runner says it stepped into the rift: believe it if the server's copy of it is at the ring. */
+  private enterRift(p: RoomPlayer) {
+    const r = this.rift;
+    if (!r || this.stage !== 'boss' || this.phase !== 'playing' || p.status !== Status.Alive) return;
+    const d = Math.hypot(p.pos.x - r.p[0], p.pos.y + 1.2 - r.p[1], p.pos.z - r.p[2]);
+    if (d > RIFT.ENTER + RIFT.SERVER_SLACK) return;
+    this.openWarp(p.id);
+  }
+
+  /** The rift pulls the whole team through (runner `id` stepped in; 0: it took them). */
+  private openWarp(id: number) {
+    if (this.stage !== 'boss') return;
+    this.stage = 'warp';
+    this.warpAt = this.matchTime + ARENA.GATE_TIME;
+    this.pushEvent({ k: 'warp', id, at: round2(this.warpAt) });
+  }
+
+  /** Everyone is through: on the start grid, the fallen too, and a countdown to "Go!". */
+  private enterRace() {
+    this.stage = 'race';
+    this.rift = null;
+    this.projectiles = [];
+    this.corpses = [];
+    const L = this.raceData.level;
+    const team = this.players.filter((p) => p.status !== Status.Left);
+    const spawns: Record<number, [number, number, number]> = {};
+    team.forEach((p, i) => {
+      const s = L.spawns[i % L.spawns.length];
+      p.pos.x = s[0]; p.pos.y = s[1]; p.pos.z = s[2];
+      p.vel.x = p.vel.y = p.vel.z = 0;
+      p.status = Status.Alive;
+      p.cause = undefined;
+      p.finishTime = 0; p.place = 0;
+      p.lastSupportY = s[1];
+      p.lastMsgT = this.now;
+      p.anim = Anim.Idle; p.yaw = L.spawnYaw; p.ground = -1;
+      p.resetPowers();
+      spawns[p.id] = [s[0], s[1], s[2]];
+    });
+    const go = this.matchTime + RACE.ARRIVE;
+    this.race = new RaceState(this.raceData.track, team, go);
+    this.pushEvent({ k: 'race', spawns, go: round2(go) });
+    this.broadcastRoom();
+  }
+
+  /** A racer crossed the line. */
+  private raceHome(r: Racer) {
+    const p = r.p;
+    p.status = Status.Finished;
+    p.finishTime = r.time;
+    p.place = r.place;
+    const row = this.race!.row(p)!;
+    this.pushEvent({ k: 'finish', id: p.id, time: r.time, place: r.place, top: row.top, avg: row.avg });
+    this.broadcastRoom();
+    this.checkEnd();
+  }
+
+  /** The race is over: one results screen for the whole run (the course, the fight, the race). */
+  private endRace() {
+    if (this.phase === 'ended' || !this.race) return;
+    this.race.close(this.matchTime);
     this.phase = 'ended';
     this.endedAt = this.now;
     this.flushEvents();
-    this.broadcast({ t: 'end', results: this.results(), duration: round2(t), boss: true, fight: round2(t - this.fight.arrivedAt) });
+    const fight = this.fight && this.fightTime > 0 ? { boss: true, fight: round2(this.fightTime) } : {};
+    this.broadcast({ t: 'end', results: this.results(), duration: round2(this.endedAt - this.goAt), race: true, ...fight });
     this.broadcastRoom();
   }
 
@@ -455,6 +570,9 @@ export class Room implements EnemyHost, FightHost {
       stage: this.stage, gateAt: this.stage === 'gate' ? round2(this.gateAt) : undefined, course: this.courseTime ? round2(this.courseTime) : undefined,
       picks: f ? f.fighters.filter((q) => q.power).map((q) => [q.id, q.power - 1] as [number, number]) : undefined,
       awake: f ? f.awake : undefined, wake: f ? round2(f.wakeBy) : undefined,
+      rift: this.rift ? [this.rift.p[0], this.rift.p[1], this.rift.p[2], this.rift.yaw, round2(this.rift.at), round2(this.rift.auto)] : undefined,
+      warpAt: this.stage === 'warp' ? round2(this.warpAt) : undefined,
+      rgo: this.race ? round2(this.race.go) : undefined, done: this.race ? this.race.done() : undefined,
     });
   }
 
@@ -522,15 +640,21 @@ export class Room implements EnemyHost, FightHost {
     this.portal = null;
     this.stage = 'course';
     this.fight = null;
+    this.rift = null;
+    this.race = null;
     this.broadcastRoom();
   }
 
   private checkEnd() {
     if (this.phase !== 'playing' && this.phase !== 'countdown') return;
-    // on the way through the beacon nobody is out yet (the light takes the fallen too);
+    // the race ends by its own rules (everyone home, or the time after the winner out)
+    if (this.inRace) { if (this.race?.over(this.matchTime)) this.endRace(); return; }
+    // on the way through the beacon or the rift nobody is out yet (the light takes the fallen too);
     // in the arena, as on the course, it is over when nobody is left standing
-    if (this.stage === 'gate') { if (this.players.some((p) => p.status !== Status.Left)) return; }
+    if (this.stage === 'gate' || this.stage === 'warp') { if (this.players.some((p) => p.status !== Status.Left)) return; }
     else if (this.players.some((p) => p.status === Status.Alive)) return;
+    // ...unless the Warden is already down: its rift takes the fallen with it
+    if (this.stage === 'boss' && this.rift && this.players.some((p) => p.status !== Status.Left && p.connected)) { this.openWarp(0); return; }
     this.phase = 'ended';
     this.endedAt = this.now;
     this.flushEvents();
@@ -548,6 +672,7 @@ export class Room implements EnemyHost, FightHost {
         cause: p.cause, place: p.place || undefined,
         course: this.courseTime ? round2(this.courseTime) : undefined,
         damage: q ? Math.round(q.damage) : undefined, deaths: q?.deaths, bots: q?.bots, power: q && q.power ? q.power - 1 : undefined,
+        race: this.race?.row(p),
       };
     });
   }
@@ -558,6 +683,8 @@ export class Room implements EnemyHost, FightHost {
     if (p.status !== Status.Alive || this.phase !== 'playing' || p.away) return;
     const { x, y, z } = p.pos;
     const L = this.activeLevel;
+    // the race has no way to fall: a runner found under the course is put back on it
+    if (this.inRace) { if (y < L.killY && this.race) this.recover(p, this.race.recoverPoint(p)); return; }
     // the beacon on the Spire: it opens into the way through to the Warden
     const f = this.level.finish;
     if (this.stage === 'course' && x >= f.min[0] && x <= f.max[0] && y >= f.min[1] && y <= f.max[1] && z >= f.min[2] && z <= f.max[2]) {
@@ -580,6 +707,14 @@ export class Room implements EnemyHost, FightHost {
     const below = this.activeWorld.groundBelow(x, y + 0.3, z, 600);
     if (below < 2.6) p.lastSupportY = y + 0.3 - below;
     else if (!isFinite(below) && y < p.lastSupportY - DEATH.FALL_DROP) this.kill(p, 'fall', null);
+  }
+
+  /** Puts a runner back at `at` (and tells its client). */
+  private recover(p: RoomPlayer, at: [number, number, number]) {
+    p.pos.x = at[0]; p.pos.y = at[1]; p.pos.z = at[2];
+    p.vel.x = p.vel.y = p.vel.z = 0;
+    p.lastSupportY = at[1];
+    p.conn?.send({ t: 'fix', p: at });
   }
 
   private nearAnchor(x: number, y: number, z: number): boolean {
@@ -791,7 +926,15 @@ export class Room implements EnemyHost, FightHost {
     this.time = t;
     for (const p of this.players) p.cloaked = t < p.cloakUntil;
     if (this.phase === 'playing' && this.stage === 'gate' && t >= this.gateAt) this.enterArena();
-    if (this.inArena) {
+    if (this.phase === 'playing' && this.stage === 'boss' && this.rift && t >= this.rift.auto) this.openWarp(0);
+    if (this.phase === 'playing' && this.stage === 'warp' && t >= this.warpAt) this.enterRace();
+    if (this.inRace) {
+      this.raceWorld.update(t);
+      if (this.phase === 'playing') {
+        for (const p of this.players) if (p.connected) this.checkPlayer(p);
+        this.checkEnd();
+      }
+    } else if (this.inArena) {
       this.arenaWorld.update(t);
       if (this.phase === 'playing') {
         this.fight?.tick(dt);

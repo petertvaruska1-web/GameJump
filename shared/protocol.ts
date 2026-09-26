@@ -3,15 +3,16 @@
 import type { EnemyKind, SuperPower } from './constants';
 import type { PowerKind } from './level/types';
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 export type Phase = 'lobby' | 'countdown' | 'playing' | 'ended';
 
 /**
- * Which half of the run the room is in: the course, the moment the beacon has
- * opened and is about to pull everyone through, or the Warden's arena.
+ * Where the run is: the course, the moment the beacon has opened and is about to
+ * pull everyone through, the Warden's arena, the moment the rift the Warden left
+ * is pulling everyone through, or Speedster Battle.
  */
-export type Stage = 'course' | 'gate' | 'boss';
+export type Stage = 'course' | 'gate' | 'boss' | 'warp' | 'race';
 
 export const Status = { Alive: 0, Dead: 1, Finished: 2, Left: 3 } as const;
 export type Status = (typeof Status)[keyof typeof Status];
@@ -73,8 +74,8 @@ export type C2S =
   | { t: 'join'; code: string; name: string; v: number }
   | { t: 'resume'; code: string; token: string; v: number }
   | { t: 'ready'; r: boolean }
-  /** `stage: 'boss'`: a rematch, straight into the Warden's arena. */
-  | { t: 'start'; stage?: 'boss' }
+  /** `stage: 'boss'`: a rematch, straight into the Warden's arena; `'race'`: straight onto the race grid. */
+  | { t: 'start'; stage?: 'boss' | 'race' }
   /** Abandon the run in progress and count down a fresh one. Only for a host alone in the room. */
   | { t: 'restart' }
   | { t: 'lobby' }
@@ -82,7 +83,7 @@ export type C2S =
   | { t: 'ping'; c: number }
   /**
    * Player state: seq, position, velocity, yaw, anim, standing-on collider id (-1 none), client match time,
-   * and `b`: 1 when the client is in the Warden's arena (a report from the wrong side of the beacon is dropped).
+   * and `b`: 1 when the client is in the Warden's arena, 2 in the race (a report from the wrong side of a door is dropped).
    */
   | { t: 'st'; s: number; p: [number, number, number]; v: [number, number, number]; y: number; a: number; g: number; tm?: number; b?: number }
   /** The client saw its own runner touch a laser (a client can only report its own death). */
@@ -91,6 +92,8 @@ export type C2S =
   | { t: 'portal' }
   /** Viktor has finished speaking: send the runner back to the start, able to fly. */
   | { t: 'bless' }
+  /** The client's runner stepped into the rift the Warden left. */
+  | { t: 'rift' }
   /** In the arena: this is the power I want (index into SUPERS). */
   | { t: 'pick'; k: number }
   /**
@@ -105,6 +108,8 @@ export type C2S =
   | { t: 'dbg'; cmd: 'gate' }
   /** Debug: set the Warden's health to this share of its maximum. */
   | { t: 'dbg'; cmd: 'bosshp'; v: number }
+  /** Debug: bring the Warden down now (the rift opens as it would). */
+  | { t: 'dbg'; cmd: 'rift' }
   /** Debug: open the portal a few metres in front of the runner, right now. */
   | { t: 'dbg'; cmd: 'portal' }
   | { t: 'dbg'; cmd: 'restart' }
@@ -132,7 +137,8 @@ export type HurtSrc = 'stomp' | 'beam' | 'mortar' | 'charge' | 'swipe' | 'shock'
 export type GameEvent =
   /** `v`: the impulse the body was thrown with, so every client sees the same tumble. */
   | { k: 'death'; id: number; cause: DeathCause; by: number; p: [number, number, number]; v?: [number, number, number] }
-  | { k: 'finish'; id: number; time: number; place: number }
+  /** Runner `id` finished (the course, or the race: `time` is then the race time, with its top and average speed). */
+  | { k: 'finish'; id: number; time: number; place: number; top?: number; avg?: number }
   | { k: 'alert'; e: number; target: number }
   | { k: 'lost'; e: number }
   | { k: 'charge'; e: number }
@@ -196,7 +202,17 @@ export type GameEvent =
   /** A mortar shell (loose thing `id`) leaves a cannon at `p` with velocity `v` at time `t`, aimed at `q`. */
   | { k: 'shell'; id: number; p: [number, number, number]; v: [number, number, number]; q: [number, number, number]; t: number }
   /** Gravity well `id` opens at `p` (or closes there with an implosion). */
-  | { k: 'well'; id: number; s: 'open' | 'close'; p: [number, number, number] };
+  | { k: 'well'; id: number; s: 'open' | 'close'; p: [number, number, number] }
+  // ------------------------------------------------------------------ stage 3
+  /**
+   * The Warden is down: a rift opens with its centre at `p`, facing `yaw`, from match
+   * time `at`; it takes everyone by `auto`. `fight`: how long the fight took.
+   */
+  | { k: 'rift'; p: [number, number, number]; yaw: number; at: number; auto: number; fight: number }
+  /** Runner `id` stepped into the rift (0: it took everyone): they all arrive at match time `at`. */
+  | { k: 'warp'; id: number; at: number }
+  /** Everyone is on the race grid, at these spots. The race starts at match time `go`. */
+  | { k: 'race'; spawns: Record<number, [number, number, number]>; go: number };
 
 export interface MatchResult {
   id: number;
@@ -211,6 +227,8 @@ export interface MatchResult {
   deaths?: number;
   bots?: number;
   power?: number;
+  /** Speedster Battle: place, race time (none: still running at the end), top and average speed, distance covered. */
+  race?: { place: number; time?: number; top: number; avg: number; dist: number };
 }
 
 export type S2C =
@@ -231,13 +249,20 @@ export type S2C =
      * whether the Warden is awake and when it will wake at the latest.
      */
     stage?: Stage; gateAt?: number; course?: number; picks?: [number, number][]; awake?: boolean; wake?: number;
+    /** The rift, if the Warden is down: [x, y, z, yaw, opened at, takes everyone at]; the warp's arrival time. */
+    rift?: [number, number, number, number, number, number]; warpAt?: number;
+    /** In the race: when it started (match time), and who is home already [id, time, place]. */
+    rgo?: number; done?: [number, number, number][];
   }
   | { t: 'snap'; ts: number; p: PlayerSnap[]; e: EnemySnap[]; b?: BossSnap; m?: BotSnap[]; j?: JunkSnap[] }
   | { t: 'ev'; e: GameEvent[] }
   | { t: 'pong'; c: number; s: number }
   | { t: 'fix'; p: [number, number, number] }
-  /** `boss`: the run ended with the Warden destroyed. `fight`: how long the fight took (sent win or lose). */
-  | { t: 'end'; results: MatchResult[]; duration: number; boss?: boolean; fight?: number };
+  /**
+   * `boss`: the run ended with the Warden destroyed. `fight`: how long the fight took (sent win or lose).
+   * `race`: the run ended with Speedster Battle.
+   */
+  | { t: 'end'; results: MatchResult[]; duration: number; boss?: boolean; fight?: number; race?: boolean };
 
 export type ErrCode =
   | 'ROOM_NOT_FOUND'

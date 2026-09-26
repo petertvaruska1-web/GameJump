@@ -17,7 +17,7 @@
 // front strikes things as it reaches them, and a speedster's trail of light burns
 // whatever touches it for as long as it lasts.
 
-import { ARENA, BOSS, BOT, JUNK, NET, PHP, PLAYER, POW, powerHp, SLIDE, SUPERS, type SuperPower } from '../constants';
+import { ARENA, BOSS, BOT, JUNK, NET, PHP, PLAYER, POW, powerHp, RIFT, SLIDE, SUPERS, type SuperPower } from '../constants';
 import type { ArenaData } from '../level/arena';
 import { clamp, v3, type Vec3 } from '../math';
 import { Anim } from '../physics/character';
@@ -36,7 +36,7 @@ export interface FightHost {
   emit(ev: GameEvent): void;
   /** A runner's health ran out (or it fell): the room kills it the usual way. */
   killRunner(p: RoomPlayer, cause: DeathCause, from: Vec3 | null): void;
-  /** The Warden is destroyed and the dust has settled: the run is won. */
+  /** The Warden is destroyed and has come apart: its rift opens. */
   won(): void;
   rand(): number;
 }
@@ -290,9 +290,9 @@ export class Fight {
     this.orbs = this.orbs.filter((x) => !x.dead);
     this.wells = this.wells.filter((x) => !x.dead);
     for (const [stand, at] of this.restock) if (t >= at) { this.restock.delete(stand); this.stock(stand); }
-    // the machine is down: once its last explosions are over, the run is won
+    // the machine is down: once it has come apart, its rift opens (the room's won())
     const dying = w.dyingFor(t);
-    if (dying >= 0 && !this.wonAt && dying > BOSS.DYING + BOSS.VICTORY) { this.wonAt = t; this.host.won(); }
+    if (dying >= 0 && !this.wonAt && dying > RIFT.OPEN_AFTER) { this.wonAt = t; this.host.won(); }
   }
 
   private tickFighter(q: Fighter, dt: number) {

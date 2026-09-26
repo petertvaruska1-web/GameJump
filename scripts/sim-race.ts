@@ -5,13 +5,24 @@
 // cadences, and the room's side of it: the rift the Warden leaves, the warp, the
 // race, its finish, its results and a rematch.
 // Usage: npx tsx scripts/sim-race.ts
-import { PHYS, RACE } from '../shared/constants';
+import { ARENA, PHYS, RACE, RIFT } from '../shared/constants';
+import { getLevel } from '../shared/level/map/index';
 import { getRace, trackIndex, trackPoint, trackS } from '../shared/level/race';
+import type { V3 } from '../shared/level/types';
+import { rng } from '../shared/math';
 import { PlayerMotor } from '../shared/physics/character';
 import { CollisionWorld, type GroundHit, type RayHit } from '../shared/physics/world';
+import { Status, type GameEvent, type S2C } from '../shared/protocol';
 import { Cadence, raceTarget } from '../shared/sim/cadence';
+import { Room, type RoomPlayer } from '../shared/sim/room';
 
 let fails = 0;
+
+/** A point on the course at distance `s`, on the floor. */
+function trackAt(s: number): V3 {
+  const q = trackPoint(getRace().track, s, { x: 0, y: 0, z: 0, h: 0, w: 0 });
+  return [q.x, q.y + 0.05, q.z];
+}
 
 function check(name: string, ok: boolean, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? '  ' + detail : ''}`);
@@ -273,6 +284,205 @@ function drive(cps: number, limit: number, from = 0, speed = 0): Drive {
   m.body.vel.y = -30; m.body.grounded = false; m.body.pos.y += 8;
   for (let i = 0; i < 90; i++) m.step(world, PHYS.STEP, { x: fx, z: fz, sprint: false, jumpHeld: false, jumpPressed: false, aimYaw: q.h });
   check('a hard landing in the race does not stumble', m.landSlow <= 0);
+}
+
+// ====================================================================== the room: rift, warp, race
+
+let now = 0;
+interface Client { p: RoomPlayer; events: GameEvent[]; fixes: [number, number, number][]; msgs: S2C[] }
+
+/** A room with `n` runners, counted in: straight into the Warden's arena (`boss`) or onto the race grid (`race`). */
+function makeRoom(n: number, stage: 'boss' | 'race', seed = 7) {
+  now = 0;
+  const room = new Room('RACE', getLevel(), () => now, true, rng(seed));
+  const clients: Client[] = [];
+  for (let i = 0; i < n; i++) {
+    const c: Client = { p: null as unknown as RoomPlayer, events: [], fixes: [], msgs: [] };
+    const conn = {
+      send(m: S2C) {
+        c.msgs.push(m);
+        if (m.t === 'ev') c.events.push(...m.e);
+        else if (m.t === 'fix') c.fixes.push(m.p);
+      },
+      close() {},
+    };
+    c.p = room.join(conn, `racer${i + 1}`) as RoomPlayer;
+    clients.push(c);
+  }
+  for (const c of clients.slice(1)) room.handle(c.p, { t: 'ready', r: true });
+  room.handle(clients[0].p, { t: 'start', stage });
+  for (let i = 0; i < 110; i++) { now += 1 / 30; room.tick(1 / 30); }
+  return { room, clients };
+}
+
+function tick(room: Room, seconds: number, each?: () => void) {
+  const n = Math.round(seconds * 30);
+  for (let i = 0; i < n; i++) { now += 1 / 30; each?.(); room.tick(1 / 30); }
+}
+
+let seq = 0;
+function report(room: Room, p: RoomPlayer, x: number, y: number, z: number, v: [number, number, number] = [0, 0, 0], tm = room.matchTime) {
+  room.handle(p, { t: 'st', s: seq++, p: [x, y, z], v, y: p.yaw, a: 1, g: -1, tm, b: room.stage === 'race' ? 2 : room.inArena ? 1 : undefined });
+}
+
+const has = (c: Client, k: GameEvent['k']) => c.events.some((e) => e.k === k);
+const ev = <K extends GameEvent['k']>(c: Client, k: K) => c.events.find((e) => e.k === k) as Extract<GameEvent, { k: K }> | undefined;
+
+/** Brings the Warden down (as if the team just landed the last blow) and waits for the rift. */
+function killWarden(room: Room, clients: Client[]) {
+  clients.forEach((c, i) => room.handle(c.p, { t: 'pick', k: i }));
+  tick(room, 3);
+  const f = room.fight!;
+  f.hitWarden(f.fighter(clients[0].p), 999999, 0, clients[0].p.pos, 0);
+  tick(room, RIFT.OPEN_AFTER + 0.2);
+}
+
+/** Runner `c` runs along the course from where it is to distance `to` at `speed`, reporting 30 times a second. */
+function runTo(room: Room, c: Client, to: number, speed: number, others: () => void = () => {}) {
+  const pt = { x: 0, y: 0, z: 0, h: 0, w: 0 };
+  let s = trackS(T, trackIndex(T, c.p.pos.x, c.p.pos.y, c.p.pos.z, -1), c.p.pos.x, c.p.pos.z);
+  while (s < to) {
+    s = Math.min(to, s + speed / 30);
+    trackPoint(T, s, pt);
+    now += 1 / 30;
+    report(room, c.p, pt.x, pt.y, pt.z, [Math.sin(pt.h) * speed, 0, Math.cos(pt.h) * speed]);
+    others();
+    room.tick(1 / 30);
+  }
+}
+
+{
+  // the Warden falls: a rift opens on the arena floor, and the fight time comes with it
+  const { room, clients } = makeRoom(3, 'boss');
+  const [a, b, c] = clients;
+  killWarden(room, clients);
+  const rift = ev(a, 'rift');
+  const floorOk = !!rift && Math.abs(rift.p[1] - (ARENA.y + RIFT.HEIGHT)) < 0.01 && Math.hypot(rift.p[0] - ARENA.x, rift.p[2] - ARENA.z) > RIFT.RADIUS - 0.1;
+  check('the Warden falling opens a rift in the arena, not the end of the run', !!rift && room.phase === 'playing' && room.stage === 'boss' && floorOk,
+    rift ? `p ${rift.p.map((v) => v.toFixed(1)).join(',')} fight ${rift.fight}` : 'no rift');
+  check('the rift carries the fight time', !!rift && rift.fight > 0 && rift.auto > rift.at);
+  // one runner has fallen in the moat since
+  room.handle(b.p, { t: 'dbg', cmd: 'tp', p: [ARENA.x, ARENA.y - 60, ARENA.z] });
+  report(room, b.p, ARENA.x, ARENA.y - 60, ARENA.z);
+  tick(room, 0.2);
+  const bDown = b.p.status === Status.Dead;
+  // stepping in from across the arena is not stepping in
+  room.handle(a.p, { t: 'rift' });
+  tick(room, 0.1);
+  check('a runner far from the rift cannot claim to have stepped in', room.stage === 'boss' && !has(a, 'warp'));
+  // walking up to it and in
+  const rp = rift!.p;
+  room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [rp[0], rp[1] - RIFT.HEIGHT + 0.05, rp[2] - 3] });
+  for (let i = 0; i <= 6; i++) { now += 1 / 30; report(room, a.p, rp[0], rp[1] - RIFT.HEIGHT + 0.05, rp[2] - 3 + i * 0.5); room.tick(1 / 30); }
+  room.handle(a.p, { t: 'rift' });
+  tick(room, 0.1);
+  const warp = ev(c, 'warp');
+  check('the first runner into the rift pulls the team after it', room.stage === 'warp' && !!warp && warp.id === a.p.id);
+  tick(room, ARENA.GATE_TIME + 0.2);
+  const rev = ev(c, 'race');
+  const onGrid = clients.every((x) => x.p.status === Status.Alive && race.grid.some((g) => Math.hypot(g[0] - x.p.pos.x, g[2] - x.p.pos.z) < 0.5));
+  check('the warp puts the whole team on the start grid', room.stage === 'race' && !!rev && Object.keys(rev.spawns).length === 3 && onGrid, `stage ${room.stage}`);
+  check('a runner who fell in the arena races too', bDown && b.p.status === Status.Alive, `was down ${bDown}`);
+  check('the race starts after a look at the course and a countdown', !!rev && Math.abs(rev.go - (room.matchTime - 0.2 + RACE.ARRIVE)) < 0.2, rev ? `go ${rev.go} now ${room.matchTime.toFixed(2)}` : '');
+  // nobody moves before "Go!"
+  const g0 = a.p.pos.x;
+  const fixes0 = a.fixes.length;
+  report(room, a.p, a.p.pos.x + Math.sin(race.yaw) * 5, a.p.pos.y, a.p.pos.z + Math.cos(race.yaw) * 5);
+  check('before "Go!" a runner stays on the grid', a.fixes.length === fixes0 + 1 && a.p.pos.x === g0);
+  // powers are for the arena
+  room.handle(a.p, { t: 'pow', a: 0, o: [a.p.pos.x, a.p.pos.y, a.p.pos.z], d: [0, 0, 1], tm: room.matchTime });
+  tick(room, RACE.ARRIVE);
+  check('the race is on', room.matchTime > rev!.go);
+  // too fast is too fast, even here
+  const f0 = a.p.pos;
+  report(room, a.p, f0.x, f0.y, f0.z);
+  now += 1 / 30; room.tick(1 / 30);
+  const fixes1 = a.fixes.length;
+  report(room, a.p, f0.x + Math.sin(race.yaw) * 12, f0.y, f0.z + Math.cos(race.yaw) * 12);
+  check('a jump of 12 m in one report is refused, even for a speedster', a.fixes.length === fixes1 + 1);
+  // a runner who somehow ends up under the course is put back on it, not killed
+  room.handle(c.p, { t: 'dbg', cmd: 'tp', p: [c.p.pos.x, race.level.killY - 5, c.p.pos.z] });
+  report(room, c.p, c.p.pos.x, race.level.killY - 5, c.p.pos.z);
+  tick(room, 0.1);
+  const back = c.fixes[c.fixes.length - 1];
+  check('a runner under the course is put back on it, not killed', c.p.status === Status.Alive && !!back && back[1] > race.level.killY + 30, back ? back.map((v) => v.toFixed(1)).join(',') : 'no fix');
+  // a and b race for the line: a from just short of it, b a little further back
+  room.handle(a.p, { t: 'dbg', cmd: 'tp', p: trackAt(T.finishS - 150) });
+  room.handle(b.p, { t: 'dbg', cmd: 'tp', p: trackAt(T.finishS - 250) });
+  runTo(room, a, T.finishS + 20, 70);
+  const fa = c.events.find((e) => e.k === 'finish' && e.id === a.p.id) as Extract<GameEvent, { k: 'finish' }> | undefined;
+  check('crossing the line finishes the race, first', !!fa && fa.place === 1 && a.p.status === Status.Finished, fa ? `time ${fa.time}` : 'no finish');
+  check('the finish is timed on the runner\'s own clock', !!fa && Math.abs(fa.time - (a.p.finishTime)) < 1e-6 && fa.time > 0);
+  runTo(room, b, T.finishS + 20, 60);
+  const fb = c.events.find((e) => e.k === 'finish' && e.id === b.p.id) as Extract<GameEvent, { k: 'finish' }> | undefined;
+  check('the next one home is second', !!fb && fb.place === 2);
+  check('a finished runner can still coast on (its reports count)', (() => { const x = b.p.pos.z; runTo(room, b, T.finishS + 60, 30); return b.p.pos.z !== x; })());
+  check('the race waits for the last runner a while', room.phase === 'playing');
+  tick(room, RACE.GRACE + 0.5);
+  const end = c.msgs.find((m) => m.t === 'end') as Extract<S2C, { t: 'end' }> | undefined;
+  check('thirty seconds after the winner, the race is over', room.phase === 'ended' && !!end && !!end.race);
+  const row = (id: number) => end?.results.find((r) => r.id === id);
+  check('the results rank everyone: the two home, then the one still running', row(a.p.id)?.race?.place === 1 && row(b.p.id)?.race?.place === 2 && row(c.p.id)?.race?.place === 3 && row(c.p.id)?.race?.time === undefined,
+    JSON.stringify(end?.results.map((r) => r.race)));
+  check('the results carry top and average speed', (row(a.p.id)?.race?.top ?? 0) > 50 && (row(a.p.id)?.race?.avg ?? 0) > 0);
+  check('the results still carry the fight', !!end?.boss && typeof end.fight === 'number' && (row(a.p.id)?.damage ?? 0) > 0);
+  // a rematch goes straight back onto the grid
+  room.handle(a.p, { t: 'start', stage: 'race' });
+  check('a rematch starts on the race grid', room.stage === 'race' && room.phase === 'countdown' && clients.every((x) => race.grid.some((g) => Math.hypot(g[0] - x.p.pos.x, g[2] - x.p.pos.z) < 0.5)));
+}
+
+{
+  // a close finish is timed on the runner's own clock: a client whose messages arrive late is not slower
+  const { room, clients } = makeRoom(1, 'race', 17);
+  const a = clients[0];
+  room.handle(a.p, { t: 'dbg', cmd: 'tp', p: trackAt(T.finishS - 30) });
+  const pt = { x: 0, y: 0, z: 0, h: 0, w: 0 };
+  let s = T.finishS - 30, crossed = 0;
+  const lag = 0.2;
+  while (!crossed && s < T.finishS + 30) {
+    s += 60 / 30;
+    trackPoint(T, s, pt);
+    now += 1 / 30;
+    report(room, a.p, pt.x, pt.y, pt.z, [0, 0, 60], room.matchTime - lag);
+    if (s >= T.finishS) crossed = room.matchTime - lag - (60 / 30 - (s - T.finishS)) / 60 * 0 - (s - T.finishS) / 60;
+    room.tick(1 / 30);
+  }
+  const f = ev(a, 'finish');
+  check('the finish time is the moment the runner crossed on its own clock, not when the message came', !!f && Math.abs(f.time - crossed) < 0.02,
+    f ? `time ${f.time} expected ${crossed.toFixed(2)}` : 'no finish');
+}
+
+{
+  // nobody steps in: the rift takes the team anyway
+  const { room, clients } = makeRoom(1, 'boss', 9);
+  killWarden(room, clients);
+  tick(room, RIFT.AUTO + ARENA.GATE_TIME + 0.3);
+  check('left alone, the rift takes everyone after a while', room.stage === 'race' && has(clients[0], 'race'));
+}
+
+{
+  // everyone down while the rift is open is not a lost fight: the rift takes them
+  const { room, clients } = makeRoom(1, 'boss', 11);
+  killWarden(room, clients);
+  const a = clients[0];
+  room.handle(a.p, { t: 'dbg', cmd: 'tp', p: [ARENA.x, ARENA.y - 60, ARENA.z] });
+  report(room, a.p, ARENA.x, ARENA.y - 60, ARENA.z);
+  tick(room, ARENA.GATE_TIME + 0.5);
+  check('falling after the Warden is down does not lose the fight', room.phase === 'playing' && room.stage === 'race' && a.p.status === Status.Alive, `phase ${room.phase} stage ${room.stage}`);
+}
+
+{
+  // alone, restarting from the pause menu restarts the race; a reconnect comes back to it
+  const { room, clients } = makeRoom(1, 'race', 13);
+  const a = clients[0];
+  check('straight onto the grid (a rematch) races at once after the countdown', room.stage === 'race' && room.phase === 'playing');
+  room.handle(a.p, { t: 'restart' });
+  check('restarting alone restarts the race', room.stage === 'race' && room.phase === 'countdown');
+  tick(room, 4);
+  a.msgs.length = 0;
+  room.resume({ send: (m: S2C) => a.msgs.push(m), close() {} }, a.p.token);
+  const st = a.msgs.find((m) => m.t === 'start') as Extract<S2C, { t: 'start' }> | undefined;
+  check('a runner who reconnects mid-race is told it is a race, and when it started', st?.stage === 'race' && typeof st.rgo === 'number');
 }
 
 console.log(fails ? `${fails} check(s) failed` : 'all race checks passed');
